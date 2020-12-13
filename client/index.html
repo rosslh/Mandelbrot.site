@@ -1,0 +1,40 @@
+<!doctype html>
+
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+
+    <title>Mandelbrot</title>
+    <meta name="description" content="Mandelbrot">
+    <meta name="author" content="Ross Hill">
+
+    <!-- <link rel="stylesheet" href="css/styles.css?v=1.0"> -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"
+        integrity="sha512-xodZBNTC5n17Xt2atTPuE1HxjVMSvLVW9ocqUKLsCC5CXdbqCmblAshOMAS6/keqq/sMZMZ19scR4PsZChSR7A=="
+        crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"
+        integrity="sha512-XQoYMqMTK8LvdxXYG3nZ448hOEQiglfqkJs1NOQV44cWnUrBc8PkAOcXy20w0vlaXaVUearIOBhiXZ5V3ynxwA=="
+        crossorigin=""></script>
+</head>
+
+<body>
+    <div id="mapid" style="height: 95vh;"></div>
+
+    <!-- <script src="js/scripts.js"></script> -->
+</body>
+<script>
+    const options = { zoom: 2, noWrap: true };
+    const mymap = L.map('mapid', options).setView([0, 0], 1);
+    window.onload = () => {
+        L.tileLayer('http://localhost:3030/{z}/{x}/{y}', options).addTo(mymap).bringToFront().redraw();;
+        /*var circle = L.circle([0, 0], {
+            color: 'red',
+            fillColor: '#f03',
+            fillOpacity: 0.5,
+            radius: 500
+        }).addTo(mymap);*/
+    };
+</script>
+
+</html>
