@@ -3,6 +3,7 @@ use actix_web::{web, App, HttpServer, Result};
 use image::{Rgba, RgbaImage};
 use itertools_num::linspace;
 use num::complex::Complex64;
+use std::fs::remove_file;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -11,20 +12,19 @@ fn get_escape_time(x: f64, y: f64, max_iterations: u32) -> (u32, f64) {
     let c: Complex64 = Complex64::new(x, y);
     let mut z: Complex64 = c.clone();
     let mut iter: u32 = 0;
-    while z.norm() < 4.0 && iter < max_iterations {
+    while iter < max_iterations && z.norm() < 2.5 {
         iter += 1;
         z = z * z + c;
     }
-    let two: f64 = 2.0;
-    let smoothed = (iter as f64) + 1.0 - z.norm().ln().ln() / two.ln(); // https://stackoverflow.com/questions/369438/smooth-spectrum-for-mandelbrot-set-rendering
+    let smoothed = (iter as f64) + 1.0 - z.norm().ln().ln() / (2.0 as f64).ln(); // https://stackoverflow.com/questions/369438/smooth-spectrum-for-mandelbrot-set-rendering
     (iter, smoothed)
 }
 
 // map leaflet coordinates to complex plane
 fn map_coordinates(x: f64, y: f64, z: f64) -> (f64, f64) {
     let n: f64 = 2.0_f64.powf(z);
-    let re = x / n * 2.0 - 0.5;
-    let im = y / n * 2.0 - 1.0;
+    let re = x / n * 2.0 - 4.5;
+    let im = y / n * 2.0 - 4.0;
     (re, im)
 }
 
@@ -49,38 +49,46 @@ fn generate_image(
         for (x, re) in re_range.clone() {
             let (escape_time, smoothed) = get_escape_time(re, im, max_iterations);
 
-            img.put_pixel(
-                x as u32,
-                y as u32,
-                if escape_time == max_iterations {
-                    Rgba::from([0, 0, 0, 255])
-                } else {
-                    let color = palette.eval_rational(
-                        (smoothed * 100.0) as usize,
-                        (max_iterations * 100) as usize,
-                    );
-                    Rgba::from([color.r, color.g, color.b, 255])
-                },
-            );
+            let pixel = if escape_time == max_iterations {
+                Rgba::from([0, 0, 0, 255])
+            } else {
+                let color = palette.eval_rational(
+                    (smoothed * 30.0) as usize, // scaled x 50 for more color steps
+                    (max_iterations * 30) as usize,
+                );
+                Rgba::from([color.r, color.g, color.b, 255])
+            };
+
+            img.put_pixel(x as u32, y as u32, pixel);
         }
     }
     let _ = image::DynamicImage::ImageRgba8(img).save(&Path::new(image_path));
 }
 
-async fn index(web::Path((z, x, y)): web::Path<(i32, i32, i32)>) -> Result<NamedFile> {
+async fn index(web::Path((z, x, y)): web::Path<(i64, i64, i64)>) -> Result<NamedFile> {
     let image_path: &str = &format!(
-        r"C:\Users\ross\Projects\rust-fractals\mandelbrot\static\{}-{}-{}.png",
+        r"C:\Users\ross\Projects\rust-fractals\mandelbrot\static\{}_{}_{}.png",
         z, x, y
     ); // TODO: figure out how to keep in memory
 
-    let max_iterations = 90;
+    let max_iterations = 80;
 
     if !Path::new(image_path).exists() {
-        generate_image(x as f64, y as f64, z as f64, max_iterations, image_path);
+        generate_image(
+            x as f64,
+            y as f64,
+            (z as f64) - 2.0,
+            max_iterations,
+            image_path,
+        );
     }
 
     let path: PathBuf = PathBuf::from(image_path);
-    Ok(NamedFile::open(path)?)
+    let output = NamedFile::open(path)?;
+    if z > 10 {
+        remove_file(image_path);
+    }
+    Ok(output)
 }
 
 #[actix_web::main]

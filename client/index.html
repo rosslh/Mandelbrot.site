@@ -19,21 +19,15 @@
 </head>
 
 <body>
-    <div id="mapid" style="height: 95vh;"></div>
+    <div id="mapid" style="height: 97vh;"></div>
 
     <!-- <script src="js/scripts.js"></script> -->
 </body>
 <script>
-    const options = { zoom: 2, noWrap: true };
-    const mymap = L.map('mapid', options).setView([0, 0], 1);
+    const options = { noWrap: true, maxZoom: 50, zoomAnimationThreshold: 1000 };
+    const mymap = L.map('mapid', options).setView([0, 0], 3);
     window.onload = () => {
         L.tileLayer('http://localhost:3030/{z}/{x}/{y}', options).addTo(mymap).bringToFront().redraw();;
-        /*var circle = L.circle([0, 0], {
-            color: 'red',
-            fillColor: '#f03',
-            fillOpacity: 0.5,
-            radius: 500
-        }).addTo(mymap);*/
     };
 </script>
 
