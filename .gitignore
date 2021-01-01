@@ -13,3 +13,11 @@ Cargo.lock
 practice/
 
 static/
+
+.vscode/
+
+target
+crate-wasm/pkg
+wasm-pack.log
+node_modules
+dist
