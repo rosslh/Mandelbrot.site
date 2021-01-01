@@ -1,3 +1,6 @@
+import "../css/styles.css";
+import "../css/normalize.css";
+
 const numWorkers = 6; // TODO: use multiple workers
 const workers = [...Array(numWorkers)].map((_, id) => ({
   id,
@@ -17,22 +20,23 @@ function main() {
     const selectedWorker = workers.sort((a, b) => (a.activeJobs.length > b.activeJobs.length) ? 1 : -1)[0];
     selectedWorker.activeJobs.push(coordsString);
 
-    selectedWorker.worker.addEventListener("message", e => {
+    const handler = e => {
       if (e.data.coords === coordsString) {
-        selectedWorker.worker.removeEventListener("message", arguments.callee); // collect garbage
+        selectedWorker.worker.removeEventListener("message", handler); // collect garbage
         selectedWorker.activeJobs = selectedWorker.activeJobs.filter(j => j !== coordsString);
         const imageData = new ImageData(Uint8ClampedArray.from(e.data.pixels), 256, 256);
         ctx.putImageData(imageData, 0, 0);
         done(undefined, tile);
       }
-    });
+    };
+    selectedWorker.worker.addEventListener("message", handler);
 
     selectedWorker.worker.postMessage(coords);
 
     return tile;
   }
   const options = { noWrap: true, maxZoom: 1000, zoomAnimationThreshold: 1000, scrollWheelZoom: true };
-  const myMap = L.map('mapid', options).setView([0, 0], 2);
+  const myMap = L.map('leaflet-map', options).setView([0, 0], 2);
   tiles.addTo(myMap);
 }
 
