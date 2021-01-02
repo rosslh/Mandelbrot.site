@@ -14,6 +14,8 @@ div#inputsWrapper {
     right: 10px;
     z-index: 2000;
     text-shadow: 0 0 1px #222;
+    width: 150px;
+    font-size: 14px;
 }
 
 div#iterationsWrapper > * {
@@ -25,6 +27,7 @@ input#iterations {
     border-color: transparent;
     border-radius: 2px;
     padding: 4px;
+    width: 100%;
 }
 
 div#smoothingWrapper {
