@@ -1,8 +1,15 @@
 import "../css/styles.css";
 import "../css/normalize.css";
+import "../static/site-image.png";
+import "../static/apple-touch-icon.png";
+import "../static/favicon-32x32.png";
+import "../static/favicon-16x16.png";
+import "../static/site.webmanifest";
+import "../static/safari-pinned-tab.svg";
+
 import debounce from "debounce";
 
-let maxIterations = 100;
+let maxIterations = 150;
 let isSmoothed = true;
 const numWorkers = 8;
 let workers = [];
@@ -50,7 +57,7 @@ function createTile(coords, done) {
 function createMap() {
   const tiles = new L.GridLayer({ tileSize: 256 });
   tiles.createTile = createTile;
-  const options = { attributionControl: false, noWrap: true, maxZoom: 1000, zoomAnimationThreshold: 1000, scrollWheelZoom: true };
+  const options = { attributionControl: false, noWrap: true, maxZoom: 32, zoomAnimationThreshold: 1000, scrollWheelZoom: true };
   const myMap = L.map('leaflet-map', options).setView([0, 0], 2);
   tiles.addTo(myMap);
   return myMap;

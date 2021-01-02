@@ -11,7 +11,8 @@ const appConfig = {
   },
   plugins: [
     new HtmlWebpackPlugin({
-      template: "index.html"
+      template: "index.html",
+      root: path.resolve(__dirname, '.')
     })
   ],
   module: {
@@ -19,6 +20,14 @@ const appConfig = {
       {
         test: /\.css$/i,
         use: ["style-loader", "css-loader"],
+      },
+      {
+        test: /\.(png|jpe?g|gif|webmanifest|svg)$/i,
+        use: [
+          {
+            loader: 'file-loader?name=./static/[name].[ext]',
+          },
+        ],
       },
     ],
   },
