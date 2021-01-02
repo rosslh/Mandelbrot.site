@@ -22,10 +22,18 @@ const appConfig = {
         use: ["style-loader", "css-loader"],
       },
       {
-        test: /\.(png|jpe?g|gif|webmanifest|svg|ico|xml)$/i,
+        test: /\.(png|jpe?g|gif|svg|ico)$/i,
         use: [
           {
             loader: 'file-loader?name=./static/[name].[ext]',
+          },
+        ],
+      },
+      {
+        test: /\.(webmanifest|xml)$/i,
+        use: [
+          {
+            loader: 'file-loader?name=./[name].[ext]',
           },
         ],
       },
