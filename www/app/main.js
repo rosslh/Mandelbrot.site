@@ -15,7 +15,7 @@ import debounce from "debounce";
 
 let maxIterations = 150;
 let isSmoothed = true;
-const numWorkers = 8;
+const numWorkers = Math.min(navigator.hardwareConcurrency || 6, 10);
 let workers = [];
 
 function resetWorkers() {
@@ -71,7 +71,12 @@ function handleInputs() {
   const iterationsInput = document.getElementById("iterations");
   iterationsInput.value = maxIterations;
   iterationsInput.oninput = debounce(e => {
-    maxIterations = Number(e.target.value);
+    let parsedValue = Number(e.target.value);
+    if (isNaN(parsedValue) || parsedValue < 1) {
+      parsedValue = 150;
+    }
+    iterationsInput.value = parsedValue;
+    maxIterations = parsedValue;
     resetWorkers();
     refreshMap(myMap);
   }, 600);
