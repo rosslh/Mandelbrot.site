@@ -8,6 +8,9 @@ const workers = [...Array(numWorkers)].map((_, id) => ({
   activeJobs: []
 }));
 
+let maxIterations = 50;
+let isSmoothed = true;
+
 function main() {
   const tiles = new L.GridLayer({ tileSize: 256 });
   tiles.createTile = function (coords, done) {
@@ -20,18 +23,18 @@ function main() {
     const selectedWorker = workers.sort((a, b) => (a.activeJobs.length > b.activeJobs.length) ? 1 : -1)[0];
     selectedWorker.activeJobs.push(coordsString);
 
-    const handler = e => {
+    const tileRetrievedHandler = e => {
       if (e.data.coords === coordsString) {
-        selectedWorker.worker.removeEventListener("message", handler); // collect garbage
+        selectedWorker.worker.removeEventListener("message", tileRetrievedHandler); // collect garbage
         selectedWorker.activeJobs = selectedWorker.activeJobs.filter(j => j !== coordsString);
         const imageData = new ImageData(Uint8ClampedArray.from(e.data.pixels), 256, 256);
         ctx.putImageData(imageData, 0, 0);
         done(undefined, tile);
       }
     };
-    selectedWorker.worker.addEventListener("message", handler);
+    selectedWorker.worker.addEventListener("message", tileRetrievedHandler);
 
-    selectedWorker.worker.postMessage(coords);
+    selectedWorker.worker.postMessage({ coords, maxIterations, isSmoothed });
 
     return tile;
   }
