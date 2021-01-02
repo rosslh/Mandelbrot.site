@@ -1,6 +1,6 @@
 {
-    "name": "",
-    "short_name": "",
+    "name": "Mandelbrot Set Explorer",
+    "short_name": "Mandelbrot",
     "icons": [
         {
             "src": "/android-chrome-144x144.png",
