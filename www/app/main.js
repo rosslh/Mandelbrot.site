@@ -38,7 +38,7 @@ function main() {
 
     return tile;
   }
-  const options = { noWrap: true, maxZoom: 1000, zoomAnimationThreshold: 1000, scrollWheelZoom: true };
+  const options = { attributionControl: false, noWrap: true, maxZoom: 1000, zoomAnimationThreshold: 1000, scrollWheelZoom: true };
   const myMap = L.map('leaflet-map', options).setView([0, 0], 2);
   tiles.addTo(myMap);
 }
