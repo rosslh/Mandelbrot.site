@@ -105,7 +105,7 @@ pub fn get_tile(x: u32, y: u32, z: u32, max_iterations: u32, is_smoothed: bool) 
     generate_image(
         x as f64,
         y as f64,
-        (z as f64) - 2.0, // increase leafleat viewport
+        (z as f64) - 2.0, // increase leaflet viewport
         max_iterations,
         is_smoothed,
     )

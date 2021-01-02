@@ -10,38 +10,49 @@ import "../static/safari-pinned-tab.svg";
 import "../static/browserconfig.xml";
 import "../static/favicon.ico";
 import "../static/mstile-150x150.png";
-
 import debounce from "debounce";
 
-let maxIterations = 150;
+let maxIterations = 200;
 let isSmoothed = true;
 const numWorkers = Math.min(navigator.hardwareConcurrency || 6, 10);
 let workers = [];
 
-function resetWorkers() {
-  workers.forEach(({ worker }) => worker.terminate()); // terminate old workers/jobs
-  workers = [...Array(numWorkers)].map((_, id) => ({
-    id,
+function createWorker() {
+  const w = {
     worker: new Worker("./worker.js"),
-    activeJobs: []
-  }));
+    activeJobs: [],
+    ready: false
+  };
+  const workerReadyHandler = e => {
+    if (e.data.ready) {
+      w.worker.removeEventListener("message", workerReadyHandler); // collect garbage
+      w.ready = true;
+    }
+  };
+  w.worker.addEventListener("message", workerReadyHandler);
+  return w;
 }
 
-function refreshMap(map) {
-  // Workers take a moment to be ready. There's probably a better way to do this.
-  setTimeout(() => map._resetView(map.getCenter(), map.getZoom(), true), 1000);
-};
+async function resetWorkers() {
+  workers.forEach(({ worker }) => worker.terminate()); // terminate old workers/jobs
+  workers = [...Array(numWorkers)].map(createWorker);
+  while (!workers.some(w => w.ready)) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+}
 
 function createTile(coords, done) {
   const tile = L.DomUtil.create('canvas', 'leaflet-tile');
   const ctx = tile.getContext('2d');
   tile.width = 256;
   tile.height = 256;
-
   const coordsString = JSON.stringify(coords);
-  const selectedWorker = workers.sort((a, b) => (a.activeJobs.length > b.activeJobs.length) ? 1 : -1)[0];
+  const selectedWorker = workers.filter(w => w.ready).sort((a, b) => (a.activeJobs.length > b.activeJobs.length) ? 1 : -1)[0];
+  if (!selectedWorker) {
+    alert("Sorry! Something went wrong. Try refreshing your page.");
+    return tile;
+  }
   selectedWorker.activeJobs.push(coordsString);
-
   const tileRetrievedHandler = e => {
     if (e.data.coords === coordsString) {
       selectedWorker.worker.removeEventListener("message", tileRetrievedHandler); // collect garbage
@@ -52,9 +63,7 @@ function createTile(coords, done) {
     }
   };
   selectedWorker.worker.addEventListener("message", tileRetrievedHandler);
-
   selectedWorker.worker.postMessage({ coords, maxIterations, isSmoothed });
-
   return tile;
 }
 
@@ -62,35 +71,37 @@ function createMap() {
   const tiles = new L.GridLayer({ tileSize: 256 });
   tiles.createTile = createTile;
   const options = { attributionControl: false, noWrap: true, maxZoom: 32, zoomAnimationThreshold: 1000, scrollWheelZoom: true };
-  const myMap = L.map('leaflet-map', options).setView([0, 0], 2);
-  tiles.addTo(myMap);
-  return myMap;
+  const map = L.map('leaflet-map', options).setView([0, 0], 2);
+  tiles.addTo(map);
+  return map;
 }
 
-function handleInputs() {
+function refreshMap(map) {
+  map._resetView(map.getCenter(), map.getZoom(), true);
+};
+
+function handleInputs(map) {
   const iterationsInput = document.getElementById("iterations");
   iterationsInput.value = maxIterations;
   iterationsInput.oninput = debounce(e => {
     let parsedValue = Number(e.target.value);
     if (isNaN(parsedValue) || parsedValue < 1) {
-      parsedValue = 150;
+      parsedValue = 200;
     }
     iterationsInput.value = parsedValue;
     maxIterations = parsedValue;
-    resetWorkers();
-    refreshMap(myMap);
-  }, 600);
-
+    resetWorkers().then(() => {
+      refreshMap(map);
+    })
+  }, 500);
   const smoothingInput = document.getElementById("smoothing");
   smoothingInput.checked = true;
   smoothingInput.onclick = e => {
     isSmoothed = e.target.checked;
-    resetWorkers();
-    refreshMap(myMap);
+    resetWorkers().then(() => {
+      refreshMap(map);
+    })
   };
 }
 
-resetWorkers();
-const myMap = createMap();
-refreshMap(myMap);
-handleInputs();
+resetWorkers().then(() => handleInputs(createMap()));

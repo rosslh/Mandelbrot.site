@@ -9,4 +9,5 @@ import("../../crate-wasm/pkg").then(wasm => {
       console.log(err);
     }
   });
+  self.postMessage({ ready: true });
 });
