@@ -1,14 +1,14 @@
 import "../css/styles.css";
 import "../css/normalize.css";
 
-const numWorkers = 6; // TODO: use multiple workers
+const numWorkers = 6;
 const workers = [...Array(numWorkers)].map((_, id) => ({
   id,
   worker: new Worker("./worker.js"),
   activeJobs: []
 }));
 
-let maxIterations = 50;
+let maxIterations = 100;
 let isSmoothed = true;
 
 function main() {
