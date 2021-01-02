@@ -17,6 +17,16 @@
 </head>
 
 <body>
+  <div id="inputsWrapper">
+    <div id="iterationsWrapper">
+      <label for="iterations">Iterations (quality):</label><br />
+      <input type="number" id="iterations" name="iterations" value="100" min="10" max="100000" step="10">
+    </div>
+    <div id="smoothingWrapper">
+      <input type="checkbox" id="smoothing" name="smoothing" checked>
+      <label for="smoothing">Color smoothing</label>
+    </div>
+  </div>
   <div id="leaflet-map"></div>
 </body>
 

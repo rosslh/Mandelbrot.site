@@ -2,3 +2,40 @@
     height: 100vh;
     width: 100%;
 }
+
+body {
+    position: relative;
+}
+
+div#inputsWrapper {
+    color: white;
+    position: absolute;
+    top: 5px;
+    right: 10px;
+    z-index: 2000;
+    text-shadow: 0 0 1px #222;
+}
+
+div#iterationsWrapper > * {
+    display: block;
+    margin: 5px 0;
+}
+
+input#iterations {
+    border-color: transparent;
+    border-radius: 2px;
+    padding: 4px;
+}
+
+div#smoothingWrapper {
+    display: flex;
+    align-items: center;
+}
+
+div#smoothingWrapper > * {
+    margin: 10px 0 0;
+}
+
+input#smoothing {
+    margin-right: 5px;
+}
