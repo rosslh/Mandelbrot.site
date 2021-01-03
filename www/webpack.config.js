@@ -1,6 +1,6 @@
 const path = require("path");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
-
+const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const dist = path.resolve(__dirname, "dist");
 const WasmPackPlugin = require("@wasm-tool/wasm-pack-plugin");
 
@@ -13,13 +13,22 @@ const appConfig = {
     new HtmlWebpackPlugin({
       template: "index.html",
       root: path.resolve(__dirname, '.')
-    })
+    }),
+    new MiniCssExtractPlugin()
   ],
   module: {
     rules: [
       {
         test: /\.css$/i,
-        use: ["style-loader", "css-loader"],
+        use: [
+          {
+            loader: MiniCssExtractPlugin.loader,
+            options: {
+              publicPath: 'css/',
+            },
+          },
+          "css-loader"
+        ],
       },
       {
         test: /\.(png|jpe?g|gif|svg|ico)$/i,

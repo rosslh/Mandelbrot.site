@@ -95,15 +95,17 @@ function handleInputs(map) {
   }, 1000);
   const workersInput = document.getElementById("workers");
   workersInput.value = numWorkers;
-  workersInput.oninput = e => {
+  workersInput.oninput = debounce(e => {
     let parsedValue = Number(e.target.value);
     if (isNaN(parsedValue) || parsedValue < 1) {
       parsedValue = initNumWorkers;
+    } else if (parsedValue > 20) {
+      parsedValue = 20;
     }
     workersInput.value = parsedValue;
     numWorkers = parsedValue;
     refreshMap(map);
-  };
+  }, 1000);
   const smoothingInput = document.getElementById("smoothing");
   smoothingInput.checked = true;
   smoothingInput.onclick = e => {
