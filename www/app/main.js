@@ -11,11 +11,13 @@ import "../static/browserconfig.xml";
 import "../static/favicon.ico";
 import "../static/mstile-150x150.png";
 import debounce from "debounce";
+import "../node_modules/leaflet/dist/leaflet.css";
+import L from "leaflet";
 
 let maxIterations = 200;
 let isSmoothed = true;
-const numCores = navigator.hardwareConcurrency || 6;
-let numWorkers = numCores;
+const initNumWorkers = Math.min(navigator.hardwareConcurrency || 4, 20);
+let numWorkers = initNumWorkers;
 let workers = [];
 
 function createWorker() {
@@ -38,7 +40,7 @@ async function resetWorkers() {
   workers.forEach(({ worker }) => worker.terminate()); // terminate old workers/jobs
   workers = [...Array(numWorkers)].map(createWorker);
   while (!workers.some(w => w.ready)) {
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 300));
   }
 }
 
@@ -90,18 +92,18 @@ function handleInputs(map) {
     iterationsInput.value = parsedValue;
     maxIterations = parsedValue;
     refreshMap(map);
-  }, 500);
+  }, 1000);
   const workersInput = document.getElementById("workers");
   workersInput.value = numWorkers;
-  workersInput.oninput = debounce(e => {
+  workersInput.oninput = e => {
     let parsedValue = Number(e.target.value);
     if (isNaN(parsedValue) || parsedValue < 1) {
-      parsedValue = numCores;
+      parsedValue = initNumWorkers;
     }
     workersInput.value = parsedValue;
     numWorkers = parsedValue;
     refreshMap(map);
-  }, 500);
+  };
   const smoothingInput = document.getElementById("smoothing");
   smoothingInput.checked = true;
   smoothingInput.onclick = e => {
