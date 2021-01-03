@@ -15,9 +15,8 @@ practice/
 .vscode/
 
 target
-crate-wasm/pkg
 wasm-pack.log
 node_modules
 dist
-www/pkg
-www/.bin
+pkg
+.bin
