@@ -10,8 +10,8 @@ import "../static/safari-pinned-tab.svg";
 import "../static/browserconfig.xml";
 import "../static/favicon.ico";
 import "../static/mstile-150x150.png";
-import debounce from "debounce";
 import "../node_modules/leaflet/dist/leaflet.css";
+import debounce from "debounce";
 import L from "leaflet";
 
 let maxIterations = 200;
@@ -23,8 +23,7 @@ let workers = [];
 function createWorker() {
   const w = {
     worker: new Worker("./worker.js"),
-    activeJobs: [],
-    ready: false
+    activeJobs: []
   };
   const workerReadyHandler = e => {
     if (e.data.ready) {
@@ -66,15 +65,6 @@ function createTile(coords, done) {
   return tile;
 }
 
-function createMap() {
-  const tiles = new L.GridLayer({ tileSize: 256 });
-  tiles.createTile = createTile;
-  const options = { attributionControl: false, maxZoom: 32, zoomAnimationThreshold: 32 };
-  const map = L.map('leaflet-map', options).setView([0, 0], 2);
-  tiles.addTo(map);
-  return map;
-}
-
 function refreshMap(map) {
   resetWorkers().then(() => {
     map._resetView(map.getCenter(), map.getZoom(), true);
@@ -85,7 +75,7 @@ function handleInputs(map) {
   const iterationsInput = document.getElementById("iterations");
   iterationsInput.value = maxIterations;
   iterationsInput.oninput = debounce(e => {
-    let parsedValue = Number(e.target.value);
+    let parsedValue = parseInt(e.target.value, 10);
     if (isNaN(parsedValue) || parsedValue < 1) {
       parsedValue = 200;
     }
@@ -96,7 +86,7 @@ function handleInputs(map) {
   const workersInput = document.getElementById("workers");
   workersInput.value = numWorkers;
   workersInput.oninput = debounce(e => {
-    let parsedValue = Number(e.target.value);
+    let parsedValue = parseInt(e.target.value, 10);
     if (isNaN(parsedValue) || parsedValue < 1) {
       parsedValue = initNumWorkers;
     } else if (parsedValue > 20) {
@@ -115,4 +105,12 @@ function handleInputs(map) {
   document.getElementById("refresh").onclick = () => refreshMap(map);
 }
 
-resetWorkers().then(() => handleInputs(createMap()));
+function createMap() {
+  const map = L.map('leaflet-map', { attributionControl: false, maxZoom: 32, zoomAnimationThreshold: 32 }).setView([0, 0], 2);
+  const tiles = new L.GridLayer({ tileSize: 256 });
+  tiles.createTile = createTile;
+  tiles.addTo(map);
+  handleInputs(map);
+}
+
+resetWorkers().then(createMap);
