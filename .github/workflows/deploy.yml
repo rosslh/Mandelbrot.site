@@ -1,0 +1,27 @@
+on: push
+name: publish web app
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - name: Install
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - uses: actions/setup-node@v2.1.2
+        with:
+          node-version: "10"
+      - name: Install dependencies
+        working-directory: ./www
+        run: |
+          npm ci --no-optional
+      - name: Build client
+        working-directory: ./www
+        run: |
+          npm run build
+      - name: Publish
+        uses: netlify/actions/cli@master
+        with:
+          args: deploy --dir=www/dist
+        env:
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
