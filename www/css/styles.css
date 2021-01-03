@@ -10,24 +10,39 @@ body {
 div#inputsWrapper {
     color: white;
     position: absolute;
-    top: 5px;
-    right: 10px;
+    top: 0;
+    right: 0;
     z-index: 2000;
-    text-shadow: 0 0 1px #222;
-    width: 150px;
+    text-shadow: 0 0 2px #000;
+    width: 190px;
     font-size: 14px;
+    display: flex;
+    flex-direction: column;
+    padding: 5px 10px;
+    background-color: #00000033;
+    backdrop-filter: blur(2px);
+    border-bottom-left-radius: 3px;
 }
 
-div#iterationsWrapper > * {
-    display: block;
+div#inputsWrapper > * {
     margin: 5px 0;
 }
 
-input#iterations {
+div.numberInputWrapper {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+div.numberInputWrapper > * {
+    display: block;
+}
+
+input[type=number] {
     border-color: transparent;
-    border-radius: 2px;
-    padding: 4px;
-    width: 100%;
+    border-radius: 3px;
+    width: 100px;
+    padding: 0 4px;
+    margin-left: 10px;
 }
 
 div#smoothingWrapper {
@@ -35,10 +50,12 @@ div#smoothingWrapper {
     align-items: center;
 }
 
-div#smoothingWrapper > * {
-    margin: 10px 0 0;
-}
-
 input#smoothing {
     margin-right: 5px;
+}
+
+button {
+    border: none;
+    border-radius: 3px;
+    padding: 2px;
 }
