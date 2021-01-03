@@ -14,14 +14,14 @@ div#inputsWrapper {
     right: 0;
     z-index: 2000;
     text-shadow: 0 0 2px #000;
-    width: 190px;
+    width: 185px;
     font-size: 14px;
     display: flex;
     flex-direction: column;
-    padding: 5px 10px;
+    padding: 3px 6px;
     background-color: #00000033;
     backdrop-filter: blur(2px);
-    border-bottom-left-radius: 3px;
+    border-bottom-left-radius: 2px;
 }
 
 div#inputsWrapper > * {
@@ -37,11 +37,8 @@ div.numberInputWrapper > * {
     display: block;
 }
 
-input[type=number] {
-    border-color: transparent;
-    border-radius: 3px;
+div.numberInputWrapper > input {
     width: 100px;
-    padding: 0 4px;
     margin-left: 10px;
 }
 
@@ -54,8 +51,14 @@ input#smoothing {
     margin-right: 5px;
 }
 
-button {
+button, input {
     border: none;
-    border-radius: 3px;
+    border-radius: 2px;
     padding: 2px;
+    background-color: white;
+    transition: opacity 0.3s ease;
+}
+
+button:not(:hover):not(:active) {
+    opacity: 0.8;
 }

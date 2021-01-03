@@ -49,10 +49,6 @@ function createTile(coords, done) {
   tile.height = 256;
   const coordsString = JSON.stringify(coords);
   const selectedWorker = workers.filter(w => w.ready).sort((a, b) => (a.activeJobs.length > b.activeJobs.length) ? 1 : -1)[0];
-  if (!selectedWorker) {
-    alert("Sorry! Something went wrong. Try refreshing the page.");
-    return tile;
-  }
   selectedWorker.activeJobs.push(coordsString);
   const tileRetrievedHandler = e => {
     if (e.data.coords === coordsString) {
