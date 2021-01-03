@@ -7,21 +7,41 @@ body {
     position: relative;
 }
 
-div#inputsWrapper {
-    color: white;
-    position: absolute;
-    top: 0;
-    right: 0;
-    z-index: 2000;
-    text-shadow: 0 0 2px #000;
-    width: 185px;
-    font-size: 14px;
-    display: flex;
-    flex-direction: column;
+div.overlay {
     padding: 3px 6px;
     background-color: #00000033;
     backdrop-filter: blur(2px);
+    z-index: 2000;
+    text-shadow: 0 0 2px #000;
+    color: white;
+    position: absolute;
+    right: 0;
+}
+
+div.overlay a {
+    color: white;
+}
+
+div#inputsWrapper {
+    top: 0;
+    width: 185px;
+    display: flex;
+    flex-direction: column;
+    font-size: 14px;
     border-bottom-left-radius: 2px;
+}
+
+div#attribution {
+    bottom: 0;
+    right: 0;
+    font-size: 12px;
+    display: flex;
+    border-top-left-radius: 2px;
+}
+
+div#attribution .pipe {
+    color: #ccc;
+    margin: 0 4px;
 }
 
 div#inputsWrapper > * {
