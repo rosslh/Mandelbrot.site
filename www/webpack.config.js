@@ -5,7 +5,7 @@ const dist = path.resolve(__dirname, "dist");
 const WasmPackPlugin = require("@wasm-tool/wasm-pack-plugin");
 
 const appConfig = {
-  entry: "./app/main.js",
+  entry: "./app/main.ts",
   devServer: { contentBase: dist },
   plugins: [
     new HtmlWebpackPlugin({ template: "index.html", root: path.resolve(__dirname, '.') }),
@@ -13,6 +13,11 @@ const appConfig = {
   ],
   module: {
     rules: [
+      {
+        test: /\.ts$/,
+        use: 'ts-loader',
+        exclude: /node_modules/,
+      },
       {
         test: /\.css$/i,
         use: [
@@ -31,7 +36,7 @@ const appConfig = {
     ],
   },
   resolve: {
-    extensions: [".js"]
+    extensions: [".ts", ".js"]
   },
   output: { path: dist, filename: "app.js" }
 };
