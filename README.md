@@ -4,9 +4,9 @@ This project is based on [this Rust WASM worker template](https://github.com/DDR
 
 ## Code directory
 
-- [Leaflet tile generation - <code>www/app/main.ts</code>](www/app/main.ts)
-- [Web Worker - <code>www/worker/worker.js</code>](www/worker/worker.js)
 - [Mandelbrot set code - <code>crate-wasm/src/lib.rs</code>](crate-wasm/src/lib.rs)
+- [Web Worker - <code>www/worker/worker.js</code>](www/worker/worker.js)
+- [Leaflet tile generation - <code>www/app/main.ts</code>](www/app/main.ts)
 
 ## Building locally
 

@@ -17,6 +17,10 @@ html {
     width: 100%;
 }
 
+html, .leaflet-container {
+    background-color: #24181F !important;
+}
+
 div.overlay {
     padding: 3px 6px;
     background-color: #00000033;
