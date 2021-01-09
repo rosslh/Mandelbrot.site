@@ -111,6 +111,7 @@ fn generate_image(
             let g = pixel[1];
             let b = pixel[2];
 
+            #[allow(non_snake_case)]
             let UInt8ClampedArray_max = 255;
 
             img[index] = r;
