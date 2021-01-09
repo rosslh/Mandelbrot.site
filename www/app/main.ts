@@ -108,9 +108,8 @@ function createTile(coords: L.Coords, done: Function) {
 
 function createMap() {
   const map: L.Map = L.map('leaflet-map', { attributionControl: false, maxZoom: 32, zoomAnimationThreshold: 32 }).setView([0, 0], 2);
-  const MandelbrotLayer = L.GridLayer.extend({ createTile })
-  const tiles = new MandelbrotLayer();
-  tiles.addTo(map);
+  const MandelbrotLayer = L.GridLayer.extend({ createTile });
+  new MandelbrotLayer().addTo(map);
   handleInputs(map);
 }
 

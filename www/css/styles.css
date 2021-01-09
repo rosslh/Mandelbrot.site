@@ -92,3 +92,7 @@ button, input {
 button:not(:hover):not(:active) {
     opacity: 0.8;
 }
+
+button {
+    cursor: pointer;
+}
