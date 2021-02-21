@@ -16,26 +16,31 @@ fn get_escape_time(
     y: f64,
     max_iterations: u32,
     escape_radius: f64,
-    is_smoothed: bool,
     exponent: u32
 ) -> (u32, f64) {
     let c: Complex64 = Complex64::new(x, y);
-    let mut z: Complex64 = c.clone();
+    let mut z: Complex64 = c;
 
     let mut iter: u32 = 0;
-    while z.norm() < escape_radius && iter < max_iterations {
-        iter += 1;
-        z = z.powu(exponent) + c;
-    }
 
-    // https://stackoverflow.com/questions/369438/smooth-spectrum-for-mandelbrot-set-rendering
-    let smoothed = if is_smoothed {
-        (iter as f64) + 1.0 - z.norm().ln().ln() / consts::LN_2
+    if exponent == 2 {
+        while z.norm() < escape_radius && iter < max_iterations {
+            iter += 1;
+            z = z * z + c;
+        }
+
+        // https://stackoverflow.com/questions/369438/smooth-spectrum-for-mandelbrot-set-rendering
+        let smoothed = (iter as f64) + 1.0 - z.norm().ln().ln() / consts::LN_2;
+
+        (iter, smoothed)
     } else {
-        iter as f64
-    };
+        while z.norm() < escape_radius && iter < max_iterations {
+            iter += 1;
+            z = z.powu(exponent) + c;
+        }
 
-    (iter, smoothed)
+        (iter, iter as f64)
+    }
 }
 
 // map leaflet coordinates to complex plane
@@ -52,7 +57,6 @@ fn generate_image(
     center_y: f64,
     z: f64,
     max_iterations: u32,
-    is_smoothed: bool,
     exponent: u32
 ) -> [u8; 256 * 256 * 4] {
     // size of leaflet tile
@@ -71,12 +75,12 @@ fn generate_image(
 
     let scaled_max_iterations = (max_iterations * 20) as usize;
     let black = [0, 0, 0];
-    let escape_radius = if is_smoothed { 3.0 } else { 2.0 };
+    let escape_radius = if exponent == 2 { 3.0 } else { 2.0 };
 
     for (x, im) in im_range {
         for (y, re) in re_range.clone() {
             let (escape_time, smoothed_value) =
-                get_escape_time(re, im, max_iterations, escape_radius, is_smoothed, exponent);
+                get_escape_time(re, im, max_iterations, escape_radius, exponent);
 
             let pixel: [u8; 3] = if escape_time == max_iterations {
                 black
@@ -111,13 +115,12 @@ fn generate_image(
 }
 
 #[wasm_bindgen]
-pub fn get_tile(x: u32, y: u32, z: u32, max_iterations: u32, is_smoothed: bool, exponent: u32) -> Vec<u8> {
+pub fn get_tile(x: u32, y: u32, z: u32, max_iterations: u32, exponent: u32) -> Vec<u8> {
     let image_data = generate_image(
         x as f64,
         y as f64,
         (z as f64) - 2.0, // increase leaflet viewport
         max_iterations,
-        is_smoothed,
         exponent,
     );
 

@@ -5,7 +5,7 @@ import * as L from "leaflet";
 interface WorkerContainer { worker: Worker, activeJobs: Array<string>, ready: boolean }
 let workers: Array<WorkerContainer> = [];
 const initNumWorkers = Math.min(navigator.hardwareConcurrency || 4, 60);
-let maxIterations = 200, exponent = 2, isSmoothed = true, numWorkers = initNumWorkers;
+let maxIterations = 200, exponent = 2, numWorkers = initNumWorkers;
 
 function createWorker() {
   const w: WorkerContainer = { worker: new Worker("./worker.js"), activeJobs: [], ready: false };
@@ -72,12 +72,6 @@ function handleInputs(map: L.Map) {
     refreshMap(map);
   }, 1000);
 
-  const smoothingInput = <HTMLInputElement>document.getElementById("smoothing");
-  smoothingInput.checked = true;
-  smoothingInput.onclick = ({ target }) => {
-    isSmoothed = (<HTMLInputElement>target).checked;
-    refreshMap(map);
-  };
   document.getElementById("refresh").onclick = () => refreshMap(map);
 }
 
@@ -102,7 +96,7 @@ function createTile(coords: L.Coords, done: Function) {
     }
   };
   selectedWorker.worker.addEventListener("message", tileRetrievedHandler);
-  selectedWorker.worker.postMessage({ coords, maxIterations, exponent, isSmoothed });
+  selectedWorker.worker.postMessage({ coords, maxIterations, exponent });
   return tile;
 }
 
