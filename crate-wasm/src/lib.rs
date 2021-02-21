@@ -21,13 +21,11 @@ fn get_escape_time(
 ) -> (u32, f64) {
     let c: Complex64 = Complex64::new(x, y);
     let mut z: Complex64 = c.clone();
-    let e: Complex64 = Complex64::new(exponent.into(),0.0);
-
 
     let mut iter: u32 = 0;
     while z.norm() < escape_radius && iter < max_iterations {
         iter += 1;
-        z = z.powc(e) + c;
+        z = z.powu(exponent) + c;
     }
 
     // https://stackoverflow.com/questions/369438/smooth-spectrum-for-mandelbrot-set-rendering

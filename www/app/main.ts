@@ -5,7 +5,7 @@ import * as L from "leaflet";
 interface WorkerContainer { worker: Worker, activeJobs: Array<string>, ready: boolean }
 let workers: Array<WorkerContainer> = [];
 const initNumWorkers = Math.min(navigator.hardwareConcurrency || 4, 60);
-let maxIterations = 200, exponent = 5, isSmoothed = true, numWorkers = initNumWorkers;
+let maxIterations = 200, exponent = 2, isSmoothed = true, numWorkers = initNumWorkers;
 
 function createWorker() {
   const w: WorkerContainer = { worker: new Worker("./worker.js"), activeJobs: [], ready: false };
@@ -50,7 +50,7 @@ function handleInputs(map: L.Map) {
   exponentInput.value = String(exponent);
   exponentInput.oninput = debounce(({ target }) => {
     let parsedValue = parseInt((<HTMLInputElement>target).value, 10);
-    if (isNaN(parsedValue) || parsedValue < 1) {
+    if (isNaN(parsedValue) || parsedValue < 2) {
       parsedValue = 2;
     }
     exponentInput.value = String(parsedValue);
