@@ -10,19 +10,6 @@ use std::f64::consts;
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-fn in_cardioid(x: f64, y: f64) -> bool {
-    let a = x - 1.0 / 4.0;
-    let q = a * a + y * y;
-
-    q * (q + a) <= 0.25 * y * y
-}
-
-fn in_bulb(x: f64, y: f64) -> bool {
-    let a = x + 1.0;
-
-    a * a + y * y <= 0.0625 // <= 1/16
-}
-
 // how many iterations does it take to escape?
 fn get_escape_time(
     x: f64,
@@ -30,18 +17,15 @@ fn get_escape_time(
     max_iterations: u32,
     escape_radius: f64,
     is_smoothed: bool,
+    exponent: u32
 ) -> (u32, f64) {
-    if in_cardioid(x, y) || in_bulb(x, y) {
-        return (max_iterations, 0.0);
-    }
-
     let c: Complex64 = Complex64::new(x, y);
     let mut z: Complex64 = c.clone();
 
     let mut iter: u32 = 0;
     while z.norm() < escape_radius && iter < max_iterations {
         iter += 1;
-        z = z * z + c;
+        z = z.powu(exponent) + c;
     }
 
     // https://stackoverflow.com/questions/369438/smooth-spectrum-for-mandelbrot-set-rendering
@@ -69,6 +53,7 @@ fn generate_image(
     z: f64,
     max_iterations: u32,
     is_smoothed: bool,
+    exponent: u32
 ) -> [u8; 256 * 256 * 4] {
     // size of leaflet tile
     let size: u32 = 256;
@@ -91,7 +76,7 @@ fn generate_image(
     for (x, im) in im_range {
         for (y, re) in re_range.clone() {
             let (escape_time, smoothed_value) =
-                get_escape_time(re, im, max_iterations, escape_radius, is_smoothed);
+                get_escape_time(re, im, max_iterations, escape_radius, is_smoothed, exponent);
 
             let pixel: [u8; 3] = if escape_time == max_iterations {
                 black
@@ -126,13 +111,14 @@ fn generate_image(
 }
 
 #[wasm_bindgen]
-pub fn get_tile(x: u32, y: u32, z: u32, max_iterations: u32, is_smoothed: bool) -> Vec<u8> {
+pub fn get_tile(x: u32, y: u32, z: u32, max_iterations: u32, is_smoothed: bool, exponent: u32) -> Vec<u8> {
     let image_data = generate_image(
         x as f64,
         y as f64,
         (z as f64) - 2.0, // increase leaflet viewport
         max_iterations,
         is_smoothed,
+        exponent,
     );
 
     image_data.to_vec()

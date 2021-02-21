@@ -5,7 +5,7 @@ import * as L from "leaflet";
 interface WorkerContainer { worker: Worker, activeJobs: Array<string>, ready: boolean }
 let workers: Array<WorkerContainer> = [];
 const initNumWorkers = Math.min(navigator.hardwareConcurrency || 4, 60);
-let maxIterations = 200, isSmoothed = true, numWorkers = initNumWorkers;
+let maxIterations = 200, exponent = 2, isSmoothed = true, numWorkers = initNumWorkers;
 
 function createWorker() {
   const w: WorkerContainer = { worker: new Worker("./worker.js"), activeJobs: [], ready: false };
@@ -43,6 +43,18 @@ function handleInputs(map: L.Map) {
     }
     iterationsInput.value = String(parsedValue);
     maxIterations = parsedValue;
+    refreshMap(map);
+  }, 1000);
+  
+  const exponentInput = <HTMLInputElement>document.getElementById("exponent");
+  exponentInput.value = String(exponent);
+  exponentInput.oninput = debounce(({ target }) => {
+    let parsedValue = parseInt((<HTMLInputElement>target).value, 10);
+    if (isNaN(parsedValue) || parsedValue < 2) {
+      parsedValue = 2;
+    }
+    exponentInput.value = String(parsedValue);
+    exponent = parsedValue;
     refreshMap(map);
   }, 1000);
 
@@ -90,7 +102,7 @@ function createTile(coords: L.Coords, done: Function) {
     }
   };
   selectedWorker.worker.addEventListener("message", tileRetrievedHandler);
-  selectedWorker.worker.postMessage({ coords, maxIterations, isSmoothed });
+  selectedWorker.worker.postMessage({ coords, maxIterations, exponent, isSmoothed });
   return tile;
 }
 
