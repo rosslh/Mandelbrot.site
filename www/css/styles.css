@@ -38,7 +38,7 @@ div.overlay a {
 
 div#inputsWrapper {
     top: 0;
-    width: 185px;
+    width: 165px;
     display: flex;
     flex-direction: column;
     font-size: 14px;
@@ -72,7 +72,7 @@ div.numberInputWrapper > * {
 }
 
 div.numberInputWrapper > input {
-    width: 100px;
+    width: 80px;
     margin-left: 10px;
 }
 

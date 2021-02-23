@@ -15,7 +15,7 @@ fn get_escape_time(
     y: f64,
     max_iterations: u32,
     escape_radius: f64,
-    exponent: u32
+    exponent: u32,
 ) -> (u32, f64) {
     let c: Complex64 = Complex64::new(x, y);
     let mut z: Complex64 = c;
@@ -28,10 +28,8 @@ fn get_escape_time(
     }
 
     // See: https://www.iquilezles.org/www/articles/mset_smooth/mset_smooth.htm
-    let smoothed = f64::from(iter) - (
-        (z.norm().ln() / escape_radius.ln()).ln()
-        / f64::from(exponent).ln()
-    );
+    let smoothed =
+        f64::from(iter) - ((z.norm().ln() / escape_radius.ln()).ln() / f64::from(exponent).ln());
 
     (iter, smoothed)
 }
@@ -50,7 +48,7 @@ fn generate_image(
     center_y: f64,
     z: f64,
     max_iterations: u32,
-    exponent: u32
+    exponent: u32,
 ) -> [u8; 256 * 256 * 4] {
     // size of leaflet tile
     let size: u32 = 256;
