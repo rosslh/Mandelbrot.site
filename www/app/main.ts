@@ -27,9 +27,13 @@ async function resetWorkers() {
   }
 }
 
-function refreshMap(map: any) {
+function refreshMap(map: any, resetView=false) {
   resetWorkers().then(() => {
-    map._resetView(map.getCenter(), map.getZoom(), true);
+    if (resetView) {
+      map._resetView([0,0], 2, true);
+    } else {
+      map._resetView(map.getCenter(), map.getZoom(), true);
+    }
   });
 };
 
@@ -49,13 +53,13 @@ function handleInputs(map: L.Map) {
   const exponentInput = <HTMLInputElement>document.getElementById("exponent");
   exponentInput.value = String(exponent);
   exponentInput.oninput = debounce(({ target }) => {
-    let parsedValue = parseInt((<HTMLInputElement>target).value, 10);
-    if (isNaN(parsedValue) || parsedValue < 2) {
+    let parsedValue = parseInt((<HTMLInputElement>target).value);
+    if (isNaN(parsedValue) || parsedValue <= 0) {
       parsedValue = 2;
     }
     exponentInput.value = String(parsedValue);
     exponent = parsedValue;
-    refreshMap(map);
+    refreshMap(map, true);
   }, 1000);
 
   const workersInput = <HTMLInputElement>document.getElementById("workers");

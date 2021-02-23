@@ -5,7 +5,7 @@
   "repository": "https://github.com/rosslh/Rust-Fractals",
   "license": "Apache-2.0/MIT",
   "scripts": {
-    "start": "webpack-dev-server -d",
+    "start": "webpack-dev-server -d --port 9090",
     "build": "webpack --mode production"
   },
   "bin": {

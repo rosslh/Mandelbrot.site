@@ -3,7 +3,6 @@ use wasm_bindgen::prelude::*;
 
 use itertools_num::linspace;
 use num::complex::Complex64;
-use std::f64::consts;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global allocator.
 #[cfg(feature = "wee_alloc")]
@@ -23,24 +22,18 @@ fn get_escape_time(
 
     let mut iter: u32 = 0;
 
-    if exponent == 2 {
-        while z.norm() < escape_radius && iter < max_iterations {
-            iter += 1;
-            z = z * z + c;
-        }
-
-        // https://stackoverflow.com/questions/369438/smooth-spectrum-for-mandelbrot-set-rendering
-        let smoothed = (iter as f64) + 1.0 - z.norm().ln().ln() / consts::LN_2;
-
-        (iter, smoothed)
-    } else {
-        while z.norm() < escape_radius && iter < max_iterations {
-            iter += 1;
-            z = z.powu(exponent) + c;
-        }
-
-        (iter, iter as f64)
+    while z.norm() < escape_radius && iter < max_iterations {
+        iter += 1;
+        z = z.powu(exponent) + c;
     }
+
+    // See: https://www.iquilezles.org/www/articles/mset_smooth/mset_smooth.htm
+    let smoothed = f64::from(iter) - (
+        (z.norm().ln() / escape_radius.ln()).ln()
+        / f64::from(exponent).ln()
+    );
+
+    (iter, smoothed)
 }
 
 // map leaflet coordinates to complex plane
@@ -70,12 +63,13 @@ fn generate_image(
     let (re_min, im_min) = map_coordinates(center_x, center_y, z);
     let (re_max, im_max) = map_coordinates(center_x + 1.0, center_y + 1.0, z);
 
-    let re_range = linspace(re_min, re_max, size as usize).enumerate();
-    let im_range = linspace(im_min, im_max, size as usize).enumerate();
+    let linspace_size = size as usize;
+    let re_range = linspace(re_min, re_max, linspace_size).enumerate();
+    let im_range = linspace(im_min, im_max, linspace_size).enumerate();
 
     let scaled_max_iterations = (max_iterations * 20) as usize;
     let black = [0, 0, 0];
-    let escape_radius = if exponent == 2 { 3.0 } else { 2.0 };
+    let escape_radius = 3.0; // has to be >=3 for color smoothing
 
     for (x, im) in im_range {
         for (y, re) in re_range.clone() {
@@ -94,7 +88,7 @@ fn generate_image(
             };
 
             // index = ((current row * row length) + current column) * 4 to fit r,g,b,a values
-            let index = (x * (size as usize) + y) * 4;
+            let index = (x * size as usize + y) * 4;
 
             let r = pixel[0];
             let g = pixel[1];
@@ -117,9 +111,9 @@ fn generate_image(
 #[wasm_bindgen]
 pub fn get_tile(x: u32, y: u32, z: u32, max_iterations: u32, exponent: u32) -> Vec<u8> {
     let image_data = generate_image(
-        x as f64,
-        y as f64,
-        (z as f64) - 2.0, // increase leaflet viewport
+        f64::from(x),
+        f64::from(y),
+        f64::from(z) - 2.0, // increase leaflet viewport
         max_iterations,
         exponent,
     );
