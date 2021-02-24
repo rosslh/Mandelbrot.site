@@ -1,8 +1,6 @@
 [workspace]
 
-members = [
-    "crate-wasm"
-]
+members = ["crate-wasm"]
 
 [profile.release]
 opt-level = "s"

@@ -43,31 +43,37 @@ fn map_coordinates(x: f64, y: f64, z: f64) -> (f64, f64) {
     (re, im)
 }
 
+// size of leaflet tile
+const IMAGE_SIDE_LENGTH: usize = 256;
+const NUM_COLOR_CHANNELS: usize = 4;
+const OUTPUT_SIZE: usize = IMAGE_SIDE_LENGTH * IMAGE_SIDE_LENGTH * NUM_COLOR_CHANNELS;
+
 fn generate_image(
     center_x: f64,
     center_y: f64,
     z: f64,
     max_iterations: u32,
     exponent: u32,
-) -> [u8; 256 * 256 * 4] {
-    // size of leaflet tile
-    let size: u32 = 256;
+) -> [u8; OUTPUT_SIZE] {
+    let min_channel_value = 0;
+    let max_channel_value = 255;
+    let palette = colorous::TURBO;
 
     // Canvas API expects UInt8ClampedArray
-    let mut img: [u8; 256 * 256 * 4] = [0; 256 * 256 * 4]; // [ r, g, b, a, r, g, b, a, r, g, b, a...]
-
-    let palette = colorous::TURBO;
+    let mut img: [u8; OUTPUT_SIZE] = [min_channel_value; OUTPUT_SIZE]; // [ r, g, b, a, r, g, b, a, r, g, b, a...]
 
     let (re_min, im_min) = map_coordinates(center_x, center_y, z);
     let (re_max, im_max) = map_coordinates(center_x + 1.0, center_y + 1.0, z);
 
-    let linspace_size = size as usize;
-    let re_range = linspace(re_min, re_max, linspace_size).enumerate();
-    let im_range = linspace(im_min, im_max, linspace_size).enumerate();
+    let re_range = linspace(re_min, re_max, IMAGE_SIDE_LENGTH).enumerate();
+    let im_range = linspace(im_min, im_max, IMAGE_SIDE_LENGTH).enumerate();
 
-    let scaled_max_iterations = (max_iterations * 20) as usize;
-    let black = [0, 0, 0];
-    let escape_radius = 3.0; // has to be >=3 for color smoothing
+    let palette_scale_factor = 20.0;
+    let scaled_max_iterations = (max_iterations * palette_scale_factor as u32) as usize;
+    let black = [min_channel_value; 3];
+
+    // radius has to be >=3 for color smoothing
+    let escape_radius = 3.0;
 
     for (x, im) in im_range {
         for (y, re) in re_range.clone() {
@@ -77,29 +83,24 @@ fn generate_image(
             let pixel: [u8; 3] = if escape_time == max_iterations {
                 black
             } else {
-                let color = palette.eval_rational(
-                    (smoothed_value * 20.0) as usize, // more colors to reduce banding
-                    scaled_max_iterations,
-                );
+                // more colors to reduce banding
+                let scaled_value = (smoothed_value * palette_scale_factor) as usize;
+                let color = palette.eval_rational(scaled_value, scaled_max_iterations);
 
                 color.as_array()
             };
 
             // index = ((current row * row length) + current column) * 4 to fit r,g,b,a values
-            let index = (x * size as usize + y) * 4;
+            let index = (x * IMAGE_SIDE_LENGTH + y) * NUM_COLOR_CHANNELS;
 
             let r = pixel[0];
             let g = pixel[1];
             let b = pixel[2];
 
-            #[allow(non_snake_case)]
-            let UInt8ClampedArray_max = 255;
-
             img[index] = r;
             img[index + 1] = g;
             img[index + 2] = b;
-            // alpha value:
-            img[index + 3] = UInt8ClampedArray_max;
+            img[index + 3] = max_channel_value;
         }
     }
 

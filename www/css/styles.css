@@ -53,11 +53,6 @@ div#attribution {
     border-top-left-radius: 2px;
 }
 
-div#attribution .pipe {
-    color: #ccc;
-    margin: 0 4px;
-}
-
 div#inputsWrapper > * {
     margin: 5px 0;
 }
@@ -74,15 +69,6 @@ div.numberInputWrapper > * {
 div.numberInputWrapper > input {
     width: 80px;
     margin-left: 10px;
-}
-
-div#smoothingWrapper {
-    display: flex;
-    align-items: center;
-}
-
-input#smoothing {
-    margin-right: 5px;
 }
 
 button, input {

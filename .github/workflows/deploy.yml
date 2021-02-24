@@ -14,7 +14,7 @@ jobs:
         working-directory: ./www
         run: |
           npm ci --no-optional
-      - name: Build client
+      - name: Build project
         working-directory: ./www
         run: |
           npm run build
