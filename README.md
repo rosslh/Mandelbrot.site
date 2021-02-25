@@ -4,14 +4,14 @@ This project is based on [this Rust WASM worker template](https://github.com/DDR
 
 ## Code directory
 
-- [Mandelbrot set code - <code>crate-wasm/src/lib.rs</code>](crate-wasm/src/lib.rs)
-- [Rust tests - <code>crate-wasm/src/lib_test.rs</code>](crate-wasm/src/lib_test.rs)
-- [Web Worker - <code>www/app/worker.js</code>](www/app/worker.js)
-- [Leaflet tile generation - <code>www/app/main.ts</code>](www/app/main.ts)
+- [Mandelbrot set code - <code>mandelbrot/src/lib.rs</code>](mandelbrot/src/lib.rs)
+- [Rust tests - <code>mandelbrot/src/lib_test.rs</code>](mandelbrot/src/lib_test.rs)
+- [Web Worker - <code>client/app/worker.js</code>](client/app/worker.js)
+- [Leaflet tile generation - <code>client/app/main.ts</code>](client/app/main.ts)
 
 ## Local development
 
-- Build scripts are available in [<code>www/package.json</code>](www/package.json). You can use the following commands from within `www/`:
+- Build scripts are available in [<code>client/package.json</code>](client/package.json). You can use the following commands from within `client/`:
     - `npm install` -- Install npm dependencies
     - `npm run start` -- Serve the project locally for development at `http://localhost:9090`
     - `npm run build` -- Build the project for production

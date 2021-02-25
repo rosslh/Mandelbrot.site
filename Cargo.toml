@@ -1,6 +1,6 @@
 [workspace]
 
-members = ["crate-wasm"]
+members = ["mandelbrot"]
 
 [profile.release]
 opt-level = "s"

@@ -44,7 +44,7 @@ const appConfig = {
 const workerConfig = {
   entry: "./app/worker.js",
   target: "webworker",
-  plugins: [new WasmPackPlugin({ crateDirectory: path.resolve(__dirname, "../crate-wasm") })],
+  plugins: [new WasmPackPlugin({ crateDirectory: path.resolve(__dirname, "../mandelbrot") })],
   resolve: {
     extensions: [".js", ".wasm"],
     fallback: { util: require.resolve("util/"), long: require.resolve("long/") },

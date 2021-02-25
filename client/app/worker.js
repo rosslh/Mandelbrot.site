@@ -1,5 +1,5 @@
 import { stringify } from './utils';
-import("../../crate-wasm/pkg").then(wasm => {
+import("../../mandelbrot/pkg").then(wasm => {
   wasm.init();
   self.addEventListener("message", ev => {
     try {

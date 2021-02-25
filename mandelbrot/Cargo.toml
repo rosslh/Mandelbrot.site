@@ -1,11 +1,11 @@
 [package]
-authors = ["The RustWasm Developers"]
+authors = ["Ross Hill"]
 categories = ["wasm"]
-description = "My super awesome WebAssembly crate!"
+description = "Generates Mandelbrot set images"
 license = "Apache-2.0/MIT"
-name = "crate-wasm"
+name = "mandelbrot"
 readme = "./README.md"
-repository = "https://github.com/rustwasm/rust-wasm-worker-template"
+repository = "https://github.com/rosslh/rust-mandelbrot-set"
 version = "0.2.0"
 edition = "2018"
 
