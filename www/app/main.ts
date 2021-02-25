@@ -1,4 +1,5 @@
 import "./static";
+import { stringify } from "./utils";
 import * as debounce from "debounce";
 import * as L from "leaflet";
 
@@ -62,7 +63,7 @@ function createTile(coords: L.Coords, done: Done) {
   const tile = <HTMLCanvasElement>L.DomUtil.create('canvas', 'leaflet-tile');
   const ctx = tile.getContext('2d');
   tile.width = 256, tile.height = 256;
-  const coordsString = JSON.stringify(coords);
+  const coordsString = stringify(coords);
   const selectedWorker = workers.filter(w => w.ready).sort((a, b) => (a.activeJobs.length > b.activeJobs.length) ? 1 : -1)[0];
   selectedWorker.activeJobs.push(coordsString);
   const tileRetrievedHandler = ({ data }: MessageFromWorker) => {

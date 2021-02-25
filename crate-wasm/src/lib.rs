@@ -1,4 +1,9 @@
 mod utils;
+
+#[cfg(test)]
+#[path = "lib_test.rs"]
+mod lib_test;
+
 use wasm_bindgen::prelude::*;
 
 use itertools_num::linspace;
