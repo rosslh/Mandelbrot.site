@@ -109,14 +109,15 @@ async function saveImage(map: RefreshableMap) {
 }
 
 function toggleFullScreen() {
-  if (document.fullscreenElement) {
-    document.exitFullscreen();
-    document.getElementById("full-screen").innerText = "Full Screen";
-  } else {
-    document.body.requestFullscreen();
-    document.getElementById("full-screen").innerText = "Exit Full Screen";
-  }
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.body.requestFullscreen();
 }
+
+document.addEventListener('fullscreenchange', () => {
+  const btn = document.getElementById("full-screen");
+  if (document.fullscreenElement) btn.innerText = "Exit Full Screen";
+  else btn.innerText = "Full Screen";
+});
 
 // setInterval(() => console.log(workers.map((w) => w.activeJobs)), 1000);
 resetWorkers().then(createMap);
