@@ -23,6 +23,8 @@
   },
   "devDependencies": {
     "@types/debounce": "^1.2.0",
+    "@types/dom-to-image": "^2.6.2",
+    "@types/file-saver": "^2.0.1",
     "@types/leaflet": "^1.5.19",
     "@typescript-eslint/eslint-plugin": "^4.15.2",
     "@typescript-eslint/parser": "^4.15.2",
@@ -41,7 +43,9 @@
   },
   "dependencies": {
     "debounce": "^1.2.0",
+    "dom-to-image": "^2.6.0",
     "fast-json-stringify": "^2.4.2",
+    "file-saver": "^2.0.5",
     "leaflet": "^1.7.1",
     "long": "^4.0.0",
     "util": "^0.12.3"

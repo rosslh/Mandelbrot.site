@@ -29,7 +29,6 @@ div.overlay {
     text-shadow: 0 0 2px #000;
     color: white;
     position: absolute;
-    right: 0;
 }
 
 div.overlay a {
@@ -38,11 +37,19 @@ div.overlay a {
 
 div#inputsWrapper {
     top: 0;
+    right: 0;
     width: 165px;
     display: flex;
     flex-direction: column;
     font-size: 14px;
     border-bottom-left-radius: 2px;
+}
+
+div#inputsWrapper .inputSeparator {
+  height: 8px;
+  margin: 0 0 8px !important;
+  border-bottom: 1px solid white;
+  opacity: 0.3;
 }
 
 div#attribution {
@@ -76,13 +83,9 @@ button, input {
     border-radius: 2px;
     padding: 2px;
     background-color: white;
-    transition: opacity 0.3s ease;
-}
-
-button:not(:hover):not(:active) {
-    opacity: 0.8;
 }
 
 button {
     cursor: pointer;
+    opacity: 0.9;
 }

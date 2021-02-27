@@ -2,12 +2,15 @@ import "./static";
 import { stringify } from "./utils";
 import * as debounce from "debounce";
 import * as L from "leaflet";
+import { saveAs } from "file-saver";
+import domToImage from "dom-to-image";
 
 interface WorkerContainer { worker: Worker, activeJobs: number, ready: boolean }
 interface MandelbrotConfig { iterations: number, exponent: number, workers: number }
 let workers: Array<WorkerContainer> = [];
 const initNumWorkers = Math.min(navigator.hardwareConcurrency || 4, 64);
 const config: MandelbrotConfig = { iterations: 200, exponent: 2, workers: initNumWorkers };
+const mapId = "leaflet-map";
 
 function createWorker() {
   const w: WorkerContainer = { worker: new Worker("./worker.js"), activeJobs: 0, ready: false };
@@ -61,6 +64,8 @@ function handleInputs(map: RefreshableMap) {
   handleInput({ id: "exponent", map, minValue: 2, defaultValue: 2, maxValue: 1000000, resetView: true });
   handleInput({ id: "workers", map, minValue: 1, defaultValue: initNumWorkers, maxValue: 64 });
   document.getElementById("refresh").onclick = () => refreshMap(map);
+  document.getElementById("full-screen").onclick = toggleFullScreen;
+  document.getElementById("save-image").onclick = () => saveImage(map);
 }
 
 interface MessageFromWorker { data: { coords: string; pixels: Array<number> } }
@@ -87,10 +92,30 @@ function createTile(coords: L.Coords, done: Done) {
 }
 
 function createMap() {
-  const map: RefreshableMap = <RefreshableMap>L.map("leaflet-map", { attributionControl: false, maxZoom: 32, zoomAnimationThreshold: 32 }).setView([0, 0], 2);
+  const map: RefreshableMap = <RefreshableMap>L.map(mapId, { attributionControl: false, maxZoom: 32, zoomAnimationThreshold: 32 }).setView([0, 0], 2);
   const MandelbrotLayer = L.GridLayer.extend({ createTile });
   new MandelbrotLayer().addTo(map);
   handleInputs(map);
+}
+
+async function saveImage(map: RefreshableMap) {
+  const zoomControl = map.zoomControl;
+  const mapElement = document.getElementById(mapId);
+  const width = mapElement.offsetWidth, height = mapElement.offsetHeight;
+  map.removeControl(zoomControl);
+  const blob = await domToImage.toBlob(mapElement, { width, height });
+  map.addControl(zoomControl);
+  saveAs(blob, `mandelbrot-${Date.now()}.png`);
+}
+
+function toggleFullScreen() {
+  if (document.fullscreenElement) {
+    document.exitFullscreen();
+    document.getElementById("full-screen").innerText = "Full Screen";
+  } else {
+    document.body.requestFullscreen();
+    document.getElementById("full-screen").innerText = "Exit Full Screen";
+  }
 }
 
 // setInterval(() => console.log(workers.map((w) => w.activeJobs)), 1000);
