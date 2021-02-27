@@ -64,8 +64,18 @@ function handleInputs(map: RefreshableMap) {
   handleInput({ id: "exponent", map, minValue: 2, defaultValue: 2, maxValue: 1000000, resetView: true });
   handleInput({ id: "workers", map, minValue: 1, defaultValue: initNumWorkers, maxValue: 64 });
   document.getElementById("refresh").onclick = () => refreshMap(map);
-  document.getElementById("full-screen").onclick = toggleFullScreen;
-  document.getElementById("save-image").onclick = () => saveImage(map);
+
+  const fullScreenBtn = document.getElementById("full-screen");
+  if (document.fullscreenEnabled) fullScreenBtn.onclick = toggleFullScreen;
+  else fullScreenBtn.style.display = "none";
+
+  const saveBtn = document.getElementById("save-image");
+  try {
+    if (new Blob) saveBtn.onclick = () => saveImage(map);
+    else throw "FileSaver not supported";
+  } catch (e) {
+    saveBtn.style.display = "none";
+  }
 }
 
 interface MessageFromWorker { data: { coords: string; pixels: Array<number> } }
