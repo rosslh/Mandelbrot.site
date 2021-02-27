@@ -6,7 +6,7 @@
   "license": "Apache-2.0/MIT",
   "scripts": {
     "start": "webpack-dev-server -d --port 9090",
-    "build": "cargo build && webpack --mode production",
+    "build": "webpack --mode production",
     "lint": "eslint . --ignore-path ../.gitignore && cargo clippy",
     "format": "eslint . --ignore-path ../.gitignore --fix && cargo fmt",
     "test": "cargo test"
