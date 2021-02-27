@@ -6,11 +6,11 @@ import { saveAs } from "file-saver";
 import domToImage from "dom-to-image";
 
 interface WorkerContainer { worker: Worker, activeJobs: number, ready: boolean }
-interface MandelbrotConfig { iterations: number, exponent: number, workers: number }
+interface MandelbrotConfig { iterations: number, exponent: number, workers: number, tileSize: number }
 let workers: Array<WorkerContainer> = [];
-const initNumWorkers = Math.min(navigator.hardwareConcurrency || 4, 64);
-const config: MandelbrotConfig = { iterations: 200, exponent: 2, workers: initNumWorkers };
+const config: MandelbrotConfig = { iterations: 200, exponent: 2, workers: Math.min(navigator.hardwareConcurrency || 4, 64), tileSize: 200 };
 const mapId = "leaflet-map";
+let mandelbrotLayer: MandelbrotLayer;
 
 function createWorker() {
   const w: WorkerContainer = { worker: new Worker("./worker.js"), activeJobs: 0, ready: false };
@@ -39,7 +39,7 @@ async function refreshMap(map: RefreshableMap, resetView = false) {
 }
 
 interface Input {
-  id: "iterations" | "exponent" | "workers";
+  id: "iterations" | "exponent" | "workers" | "tileSize";
   map: RefreshableMap;
   minValue: number;
   defaultValue: number;
@@ -55,14 +55,16 @@ function handleInput({ id, map, defaultValue, minValue, maxValue, resetView }: I
       parsedValue = defaultValue;
     input.value = String(parsedValue);
     config[id] = parsedValue;
+    if (id === "tileSize") refreshLayers(map);
     refreshMap(map, resetView);
   }, 1000);
 }
 
 function handleInputs(map: RefreshableMap) {
-  handleInput({ id: "iterations", map, minValue: 1, defaultValue: 200, maxValue: Math.pow(10, 9) });
-  handleInput({ id: "exponent", map, minValue: 2, defaultValue: 2, maxValue: 1000000, resetView: true });
-  handleInput({ id: "workers", map, minValue: 1, defaultValue: initNumWorkers, maxValue: 64 });
+  handleInput({ id: "iterations", map, minValue: 1, defaultValue: config.tileSize, maxValue: Math.pow(10, 9) });
+  handleInput({ id: "exponent", map, minValue: 2, defaultValue: config.exponent, maxValue: 1000000, resetView: true });
+  handleInput({ id: "workers", map, minValue: 1, defaultValue: config.workers, maxValue: 64 });
+  handleInput({ id: "tileSize", map, minValue: 10, defaultValue: config.tileSize, maxValue: 2000 });
   document.getElementById("refresh").onclick = () => refreshMap(map);
 
   const fullScreenBtn = document.getElementById("full-screen");
@@ -83,7 +85,7 @@ interface Done { (error: null, tile: HTMLCanvasElement): void }
 function createTile(coords: L.Coords, done: Done) {
   const tile = <HTMLCanvasElement>L.DomUtil.create("canvas", "leaflet-tile");
   const ctx = tile.getContext("2d");
-  (tile.width = 256), (tile.height = 256);
+  (tile.width = config.tileSize), (tile.height = config.tileSize);
   const coordsString = stringify(coords);
   const selectedWorker = workers.filter(w => w.ready).reduce((leastActive, worker) => (worker.activeJobs < leastActive.activeJobs ? worker : leastActive), workers[0]);
   selectedWorker.activeJobs += 1;
@@ -91,20 +93,28 @@ function createTile(coords: L.Coords, done: Done) {
     if (data.coords === coordsString) {
       selectedWorker.worker.removeEventListener("message", tileRetrievedHandler);
       selectedWorker.activeJobs = Math.max(selectedWorker.activeJobs - 1, 0);
-      const imageData = new ImageData(Uint8ClampedArray.from(data.pixels), 256, 256);
+      const imageData = new ImageData(Uint8ClampedArray.from(data.pixels), config.tileSize, config.tileSize);
       ctx.putImageData(imageData, 0, 0);
       done(null, tile);
     }
   };
   selectedWorker.worker.addEventListener("message", tileRetrievedHandler);
-  selectedWorker.worker.postMessage({ coords, maxIterations: config.iterations, exponent: config.exponent });
+  selectedWorker.worker.postMessage({ coords, maxIterations: config.iterations, exponent: config.exponent, tileSize: config.tileSize });
   return tile;
+}
+
+class MandelbrotLayer extends L.GridLayer {
+  createTile = createTile;
+}
+
+function refreshLayers(map: RefreshableMap) {
+  if (mandelbrotLayer) map.removeLayer(mandelbrotLayer);
+  mandelbrotLayer = new MandelbrotLayer({ tileSize: config.tileSize }).addTo(map);
 }
 
 function createMap() {
   const map: RefreshableMap = <RefreshableMap>L.map(mapId, { attributionControl: false, maxZoom: 32, zoomAnimationThreshold: 32 }).setView([0, 0], 2);
-  const MandelbrotLayer = L.GridLayer.extend({ createTile });
-  new MandelbrotLayer().addTo(map);
+  refreshLayers(map);
   handleInputs(map);
 }
 

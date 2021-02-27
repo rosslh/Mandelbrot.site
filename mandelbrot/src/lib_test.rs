@@ -3,7 +3,6 @@ use super::*;
 #[cfg(test)]
 mod lib_test {
     const MAX_ITERATIONS: u32 = 1000;
-    const IMAGE_SIZE: usize = 256 * 256 * 4;
     #[test]
     fn get_escape_time_if_not_in_set_escapes() {
         let escapes_iterations_top_left =
@@ -25,22 +24,24 @@ mod lib_test {
     }
 
     #[test]
-    fn generate_image_outputs_correct_length() {
-        let image = super::generate_image(0.0, 0.0, 2.0, MAX_ITERATIONS, 2);
-        assert_eq!(image.len(), IMAGE_SIZE);
+    fn get_tile_outputs_correct_length() {
+        let image_size: usize = 256 * 256 * 4;
 
-        let zoomed_image = super::generate_image(8476.0, 9507.0, 12.0, MAX_ITERATIONS, 2);
-        assert_eq!(zoomed_image.len(), IMAGE_SIZE);
+        let image = super::get_tile(0.0, 0.0, 2.0, MAX_ITERATIONS, 2, 256);
+        assert_eq!(image.len(), image_size);
+
+        let zoomed_image = super::get_tile(8476.0, 9507.0, 12.0, MAX_ITERATIONS, 2, 256);
+        assert_eq!(zoomed_image.len(), image_size);
     }
 
     #[test]
-    fn generate_image_outputs_valid_colors() {
-        let image = super::generate_image(0.0, 0.0, 2.0, MAX_ITERATIONS, 2);
+    fn get_tile_outputs_valid_colors() {
+        let image = super::get_tile(0.0, 0.0, 2.0, MAX_ITERATIONS, 2, 256);
         for n in image.clone().iter_mut() {
             assert!(n >= &mut 0 && n <= &mut 255);
         }
 
-        let zoomed_image = super::generate_image(8476.0, 9507.0, 12.0, MAX_ITERATIONS, 2);
+        let zoomed_image = super::get_tile(8476.0, 9507.0, 12.0, MAX_ITERATIONS, 2, 256);
         for n in zoomed_image.clone().iter_mut() {
             assert!(n >= &mut 0 && n <= &mut 255);
         }

@@ -40,38 +40,40 @@ fn get_escape_time(
 }
 
 // map leaflet coordinates to complex plane
-fn map_coordinates(x: f64, y: f64, z: f64) -> (f64, f64) {
-    let n: f64 = 2.0f64.powf(z);
-    let re = x / n * 2.0 - 4.5;
-    let im = y / n * 2.0 - 4.0;
+fn map_coordinates(x: f64, y: f64, z: f64, tile_size: usize) -> (f64, f64) {
+    let zoom_factor = tile_size as f64 / 128.5;
+    let d: f64 = 2.0f64.powf(z - 2.0);
+    let re = x / d * zoom_factor - 4.0;
+    let im = y / d * zoom_factor - 4.0;
 
     (re, im)
 }
 
 // size of leaflet tile
-const IMAGE_SIDE_LENGTH: usize = 256;
 const NUM_COLOR_CHANNELS: usize = 4;
-const OUTPUT_SIZE: usize = IMAGE_SIDE_LENGTH * IMAGE_SIDE_LENGTH * NUM_COLOR_CHANNELS;
 
-fn generate_image(
+#[wasm_bindgen]
+pub fn get_tile(
     center_x: f64,
     center_y: f64,
     z: f64,
     max_iterations: u32,
     exponent: u32,
-) -> [u8; OUTPUT_SIZE] {
+    image_side_length: usize,
+) -> Vec<u8> {
     let min_channel_value = 0;
     let max_channel_value = 255;
     let palette = colorous::TURBO;
+    let output_size: usize = image_side_length * image_side_length * NUM_COLOR_CHANNELS;
 
     // Canvas API expects UInt8ClampedArray
-    let mut img: [u8; OUTPUT_SIZE] = [min_channel_value; OUTPUT_SIZE]; // [ r, g, b, a, r, g, b, a, r, g, b, a...]
+    let mut img: Vec<u8> = vec![0; output_size]; // [ r, g, b, a, r, g, b, a, r, g, b, a... ]
 
-    let (re_min, im_min) = map_coordinates(center_x, center_y, z);
-    let (re_max, im_max) = map_coordinates(center_x + 1.0, center_y + 1.0, z);
+    let (re_min, im_min) = map_coordinates(center_x, center_y, z, image_side_length);
+    let (re_max, im_max) = map_coordinates(center_x + 1.0, center_y + 1.0, z, image_side_length);
 
-    let re_range = linspace(re_min, re_max, IMAGE_SIDE_LENGTH).enumerate();
-    let im_range = linspace(im_min, im_max, IMAGE_SIDE_LENGTH).enumerate();
+    let re_range = linspace(re_min, re_max, image_side_length).enumerate();
+    let im_range = linspace(im_min, im_max, image_side_length).enumerate();
 
     let palette_scale_factor = 20.0;
     let scaled_max_iterations = (max_iterations * palette_scale_factor as u32) as usize;
@@ -96,7 +98,7 @@ fn generate_image(
             };
 
             // index = ((current row * row length) + current column) * 4 to fit r,g,b,a values
-            let index = (x * IMAGE_SIDE_LENGTH + y) * NUM_COLOR_CHANNELS;
+            let index = (x * image_side_length + y) * NUM_COLOR_CHANNELS;
 
             let r = pixel[0];
             let g = pixel[1];
@@ -110,19 +112,6 @@ fn generate_image(
     }
 
     img
-}
-
-#[wasm_bindgen]
-pub fn get_tile(x: u32, y: u32, z: u32, max_iterations: u32, exponent: u32) -> Vec<u8> {
-    let image_data = generate_image(
-        f64::from(x),
-        f64::from(y),
-        f64::from(z) - 2.0, // increase leaflet viewport
-        max_iterations,
-        exponent,
-    );
-
-    image_data.to_vec()
 }
 
 #[wasm_bindgen]

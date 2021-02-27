@@ -45,15 +45,19 @@
   <div id="inputsWrapper" class="overlay">
     <div class="numberInputWrapper">
       <label for="iterations">Iterations:</label>
-      <input type="number" id="iterations" name="iterations" min="10" max="100000" step="10">
+      <input type="number" id="iterations" name="iterations" min="1" max="1000000000" step="20">
     </div>
     <div class="numberInputWrapper">
       <label for="exponent">Exponent:</label>
-      <input type="number" id="exponent" name="exponent" min="1" max="24" step="1">
+      <input type="number" id="exponent" name="exponent" min="2" max="1000000" step="1">
     </div>
     <div class="numberInputWrapper">
       <label for="workers">Workers:</label>
-      <input type="number" id="workers" name="workers" min="1" max="20" step="1">
+      <input type="number" id="workers" name="workers" min="1" max="64" step="1">
+    </div>
+    <div class="numberInputWrapper">
+      <label for="tileSize">Tile Size:</label>
+      <input type="number" id="tileSize" name="tileSize" min="10" max="2000" step="10">
     </div>
     <button id="refresh" type="button">
       ↻ Refresh
