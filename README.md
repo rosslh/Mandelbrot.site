@@ -17,6 +17,5 @@ This project is based on [this Rust WASM worker template](https://github.com/DDR
     - `npm run build` -- Build the project for production
     - `npm run test` -- Run Rust tests
     - `npm run lint` -- Find problems with code
-    - `npm run format` -- Fix code formatting
 
 If you get weird errors, try running `./clean.sh` to purge all dependency caches.

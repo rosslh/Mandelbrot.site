@@ -8,7 +8,6 @@
     "start": "webpack-dev-server -d --port 9090",
     "build": "webpack --mode production",
     "lint": "eslint . --ignore-path ../.gitignore && cargo clippy",
-    "format": "eslint . --ignore-path ../.gitignore --fix && cargo fmt",
     "test": "cargo test"
   },
   "bin": {
