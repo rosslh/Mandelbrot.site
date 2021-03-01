@@ -45,19 +45,19 @@
   <div id="inputsWrapper" class="overlay">
     <div class="numberInputWrapper">
       <label for="iterations">Iterations:</label>
-      <input type="number" id="iterations" name="iterations" min="1" max="1000000000" step="20">
+      <input type="text" id="iterations" name="iterations">
     </div>
     <div class="numberInputWrapper">
       <label for="exponent">Exponent:</label>
-      <input type="number" id="exponent" name="exponent" min="2" max="1000000" step="1">
+      <input type="text" id="exponent" name="exponent">
     </div>
     <div class="numberInputWrapper">
       <label for="workers">Workers:</label>
-      <input type="number" id="workers" name="workers" min="1" max="64" step="1">
+      <input type="text" id="workers" name="workers">
     </div>
     <div class="numberInputWrapper">
       <label for="tileSize">Tile Size:</label>
-      <input type="number" id="tileSize" name="tileSize" min="10" max="2000" step="10">
+      <input type="text" id="tileSize" name="tileSize">
     </div>
     <button id="refresh" type="button">
       ↻ Refresh
@@ -71,7 +71,9 @@
     </button>
   </div>
   <div id="attribution" class="overlay">
-    <span><a href="https://rosshill.ca" target="_blank" rel="noopener noreferrer">Ross Hill</a> and <a href="https://github.com/rosslh/rust-mandelbrot-set/graphs/contributors" target="_blank" rel="noopener noreferrer">contributors</a></span>
+    <span><a href="https://rosshill.ca" target="_blank" rel="noopener noreferrer">Ross Hill</a> and <a
+        href="https://github.com/rosslh/rust-mandelbrot-set/graphs/contributors" target="_blank"
+        rel="noopener noreferrer">contributors</a></span>
   </div>
   <div id="leaflet-map"></div>
 </body>
