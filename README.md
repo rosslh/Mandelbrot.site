@@ -2,7 +2,10 @@
 
 [Rust Mandelbrot Set Explorer](https://rust-mandelbrot.netlify.app) is a web app that lets you explore the Mandelbrot set fractal. Built with Rust, compiled to WebAssembly, running on Web Workers.
 
-[![img](https://rust-mandelbrot.netlify.app/static/site-image.png)](https://rust-mandelbrot.netlify.app)
+[![img](https://raw.githubusercontent.com/rosslh/rust-mandelbrot-set/master/readme-images/site-image.png)](https://rust-mandelbrot.netlify.app)
+
+[![img](https://raw.githubusercontent.com/rosslh/rust-mandelbrot-set/master/readme-images/example-output.png)](https://rust-mandelbrot.netlify.app)
+
 ## Code directory
 
 - [Mandelbrot set code - <code>mandelbrot/src/lib.rs</code>](mandelbrot/src/lib.rs)
