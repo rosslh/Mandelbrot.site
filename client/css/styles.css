@@ -10,6 +10,7 @@ body {
     position: relative;
     height: 100%;
     width: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
 }
 
 html {
@@ -52,11 +53,29 @@ div#inputsWrapper .inputSeparator {
   opacity: 0.3;
 }
 
+div#ref {
+  bottom: 0;
+  left: 0;
+  font-size: 12px;
+  display: inline-block;
+  border-top-right-radius: 2px;
+}
+
+div#ref a {
+  color: #3bd671;
+  font-weight: bold;
+  text-decoration: none;
+}
+
+div#ref a:hover {
+  text-decoration: underline;
+}
+
 div#attribution {
     bottom: 0;
     right: 0;
     font-size: 12px;
-    display: flex;
+    display: inline-block;
     border-top-left-radius: 2px;
 }
 
@@ -88,4 +107,10 @@ button, input {
 button {
     cursor: pointer;
     opacity: 0.9;
+}
+
+@media (max-width: 700px) {
+    div#ref {
+        display: none;
+    }
 }
