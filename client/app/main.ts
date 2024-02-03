@@ -5,15 +5,45 @@ import * as L from "leaflet";
 import { saveAs } from "file-saver";
 import domToImage from "dom-to-image";
 
-interface WorkerContainer { worker: Worker, activeJobs: number, ready: boolean }
-interface MandelbrotConfig { iterations: number, exponent: number, workers: number, tileSize: number }
+interface WorkerContainer {
+  worker: Worker;
+  activeJobs: number;
+  ready: boolean;
+}
+interface MandelbrotConfig {
+  iterations: number;
+  exponent: number;
+}
+interface Input {
+  id: "iterations" | "exponent";
+  map: MandelbrotMap;
+  minValue: number;
+  defaultValue: number;
+  maxValue: number;
+  resetView?: boolean;
+}
+interface MessageFromWorker {
+  data: {
+    image: Uint8ClampedArray;
+    coords: string;
+  };
+}
+interface Done {
+  (error: null, tile: HTMLCanvasElement): void;
+}
+
 let workers: Array<WorkerContainer> = [];
-const config: MandelbrotConfig = { iterations: 200, exponent: 2, workers: Math.min(navigator.hardwareConcurrency || 4, 64), tileSize: 200 };
-const mapId = "leaflet-map";
-let mandelbrotLayer: MandelbrotLayer;
+const config: MandelbrotConfig = {
+  iterations: 200,
+  exponent: 2,
+};
 
 function createWorker() {
-  const w: WorkerContainer = { worker: new Worker("./worker.js"), activeJobs: 0, ready: false };
+  const w: WorkerContainer = {
+    worker: new Worker("./worker.js"),
+    activeJobs: 0,
+    ready: false,
+  };
   const workerReadyHandler = (e: MessageEvent) => {
     if (e.data.ready) {
       w.ready = true;
@@ -25,119 +55,249 @@ function createWorker() {
 }
 
 async function resetWorkers() {
-  workers.forEach(({ worker }) => worker.terminate()); // terminate old workers/jobs
-  workers = [...Array(config.workers)].map(createWorker);
-  while (!workers.every(w => w.ready)) await new Promise(resolve => setTimeout(resolve, 300));
-}
-
-interface ResetView { (center: Array<number> | L.LatLng, zoom: number): void }
-interface RefreshableMap extends L.Map { _resetView: ResetView }
-async function refreshMap(map: RefreshableMap, resetView = false) {
-  await resetWorkers();
-  if (resetView) map._resetView([0, 0], 2);
-  else map._resetView(map.getCenter(), map.getZoom());
-}
-
-interface Input {
-  id: "iterations" | "exponent" | "workers" | "tileSize";
-  map: RefreshableMap;
-  minValue: number;
-  defaultValue: number;
-  maxValue: number;
-  resetView?: boolean;
-}
-function handleInput({ id, map, defaultValue, minValue, maxValue, resetView }: Input) {
-  const input = <HTMLInputElement>document.getElementById(id);
-  input.value = String(config[id]);
-  input.oninput = debounce(({ target }) => {
-    let parsedValue = parseInt((<HTMLInputElement>target).value, 10);
-    if (isNaN(parsedValue) || parsedValue < minValue || parsedValue > maxValue)
-      parsedValue = defaultValue;
-    input.value = String(parsedValue);
-    config[id] = parsedValue;
-    if (id === "tileSize") refreshLayers(map);
-    refreshMap(map, resetView);
-  }, 1000);
-}
-
-function handleInputs(map: RefreshableMap) {
-  handleInput({ id: "iterations", map, minValue: 1, defaultValue: config.tileSize, maxValue: Math.pow(10, 9) });
-  handleInput({ id: "exponent", map, minValue: 2, defaultValue: config.exponent, maxValue: 1000000, resetView: true });
-  handleInput({ id: "workers", map, minValue: 1, defaultValue: config.workers, maxValue: 64 });
-  handleInput({ id: "tileSize", map, minValue: 10, defaultValue: config.tileSize, maxValue: 2000 });
-  document.getElementById("refresh").onclick = () => refreshMap(map);
-
-  const fullScreenBtn = document.getElementById("full-screen");
-  if (document.fullscreenEnabled) fullScreenBtn.onclick = toggleFullScreen;
-  else fullScreenBtn.style.display = "none";
-
-  const saveBtn = document.getElementById("save-image");
-  try {
-    if (new Blob) saveBtn.onclick = () => saveImage(map);
-    else throw "FileSaver not supported";
-  } catch (e) {
-    saveBtn.style.display = "none";
+  for (const { worker } of workers) {
+    worker.terminate();
+  }
+  const numWorkers = Math.min(navigator.hardwareConcurrency || 4, 64);
+  workers = [...new Array(numWorkers)].map(createWorker);
+  while (!workers.every((w) => w.ready)) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
   }
 }
 
-interface MessageFromWorker { data: { coords: string; pixels: Array<number> } }
-interface Done { (error: null, tile: HTMLCanvasElement): void }
-function createTile(coords: L.Coords, done: Done) {
-  const tile = <HTMLCanvasElement>L.DomUtil.create("canvas", "leaflet-tile");
-  const ctx = tile.getContext("2d");
-  (tile.width = config.tileSize), (tile.height = config.tileSize);
-  const coordsString = stringify(coords);
-  const selectedWorker = workers.filter(w => w.ready).reduce((leastActive, worker) => (worker.activeJobs < leastActive.activeJobs ? worker : leastActive), workers[0]);
-  selectedWorker.activeJobs += 1;
-  const tileRetrievedHandler = ({ data }: MessageFromWorker) => {
-    if (data.coords === coordsString) {
-      selectedWorker.worker.removeEventListener("message", tileRetrievedHandler);
-      selectedWorker.activeJobs = Math.max(selectedWorker.activeJobs - 1, 0);
-      const imageData = new ImageData(Uint8ClampedArray.from(data.pixels), config.tileSize, config.tileSize);
-      ctx.putImageData(imageData, 0, 0);
-      done(null, tile);
+function handleInput({
+  id,
+  map,
+  defaultValue,
+  minValue,
+  maxValue,
+  resetView,
+}: Input) {
+  const input = <HTMLInputElement>document.getElementById(id);
+  input.value = String(config[id]);
+  input.oninput = debounce(({ target }) => {
+    let parsedValue = Number.parseInt((<HTMLInputElement>target).value, 10);
+    if (
+      isNaN(parsedValue) ||
+      parsedValue < minValue ||
+      parsedValue > maxValue
+    ) {
+      parsedValue = defaultValue;
     }
-  };
-  selectedWorker.worker.addEventListener("message", tileRetrievedHandler);
-  selectedWorker.worker.postMessage({ coords, maxIterations: config.iterations, exponent: config.exponent, tileSize: config.tileSize });
-  return tile;
+    input.value = String(parsedValue);
+    config[id] = parsedValue;
+    map.refresh(resetView);
+  }, 1000);
+}
+
+function handleInputs(map: MandelbrotMap) {
+  handleInput({
+    id: "iterations",
+    map,
+    minValue: 1,
+    defaultValue: 200,
+    maxValue: 10 ** 9,
+  });
+  handleInput({
+    id: "exponent",
+    map,
+    minValue: 2,
+    defaultValue: config.exponent,
+    maxValue: 10 ** 9,
+    resetView: true,
+  });
+
+  const refreshButton: HTMLButtonElement = document.querySelector("#refresh");
+  refreshButton.onclick = () => map.refresh();
+
+  const fullScreenButton: HTMLButtonElement =
+    document.querySelector("#full-screen");
+  if (document.fullscreenEnabled) {
+    fullScreenButton.onclick = toggleFullScreen;
+  } else {
+    fullScreenButton.style.display = "none";
+  }
+
+  const saveButton: HTMLButtonElement = document.querySelector("#save-image");
+  try {
+    // eslint-disable-next-line no-constant-condition
+    if (new Blob()) {
+      saveButton.onclick = () => map.saveImage();
+    } else {
+      throw "FileSaver not supported";
+    }
+  } catch {
+    saveButton.style.display = "none";
+  }
+
+  function toggleFullScreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      document.body.requestFullscreen();
+    }
+  }
+
+  document.addEventListener("fullscreenchange", () => {
+    const button: HTMLButtonElement = document.querySelector("#full-screen");
+    button.innerText = document.fullscreenElement
+      ? "Exit Full Screen"
+      : "Full Screen";
+  });
 }
 
 class MandelbrotLayer extends L.GridLayer {
-  createTile = createTile;
+  tileSize: number;
+
+  constructor(options?: L.GridLayerOptions) {
+    super(options);
+    this.tileSize = 200;
+  }
+
+  private getMappedCoords(coords: L.Coords) {
+    const mapCoordinates = (
+      x: number,
+      y: number,
+      z: number,
+      tileSize: number
+    ): { re: number; im: number } => {
+      const scaleFactor = tileSize / 128.5;
+      const d = 2 ** (z - 2);
+      const re = (x / d) * scaleFactor - 3.75;
+      const im = (y / d) * scaleFactor - 3.25;
+      return { re, im };
+    };
+
+    const { re: re_min, im: im_min } = mapCoordinates(
+      coords.x,
+      coords.y,
+      coords.z,
+      this.tileSize
+    );
+
+    const { re: re_max, im: im_max } = mapCoordinates(
+      coords.x + 1,
+      coords.y + 1,
+      coords.z,
+      this.tileSize
+    );
+
+    const mappedCoords = {
+      re_min,
+      re_max,
+      im_min,
+      im_max,
+    };
+
+    return mappedCoords;
+  }
+
+  createTile(coords: L.Coords, done: Done) {
+    const tile = <HTMLCanvasElement>L.DomUtil.create("canvas", "leaflet-tile");
+    const context = tile.getContext("2d");
+
+    tile.width = this.tileSize;
+    tile.height = this.tileSize;
+
+    const mappedCoords = this.getMappedCoords(coords);
+    const coordsString = stringify(mappedCoords);
+
+    Object.entries({ ...coords, ...mappedCoords }).forEach(([key, value]) => {
+      tile.dataset[key] = String(value);
+    });
+
+    const selectedWorker = workers
+      .filter((w) => w.ready)
+      .reduce(
+        (leastActive, worker) =>
+          worker.activeJobs < leastActive.activeJobs ? worker : leastActive,
+        workers[0]
+      );
+
+    selectedWorker.activeJobs += 1;
+    const tileRetrievedHandler = ({ data }: MessageFromWorker) => {
+      if (data.coords === coordsString) {
+        selectedWorker.worker.removeEventListener(
+          "message",
+          tileRetrievedHandler
+        );
+        selectedWorker.activeJobs = Math.max(selectedWorker.activeJobs - 1, 0);
+        const imageData = new ImageData(
+          Uint8ClampedArray.from(data.image),
+          this.tileSize,
+          this.tileSize
+        );
+        context.putImageData(imageData, 0, 0);
+        done(null, tile);
+      }
+    };
+
+    selectedWorker.worker.addEventListener("message", tileRetrievedHandler);
+    selectedWorker.worker.postMessage({
+      coords: mappedCoords,
+      maxIterations: config.iterations,
+      exponent: config.exponent,
+      tileSize: this.tileSize,
+    });
+
+    return tile;
+  }
+
+  refresh() {
+    let currentMap: MandelbrotMap | null = null;
+    if (this._map) {
+      currentMap = this._map as MandelbrotMap;
+      this.removeFrom(this._map);
+    }
+    this.addTo(currentMap);
+  }
 }
 
-function refreshLayers(map: RefreshableMap) {
-  if (mandelbrotLayer) map.removeLayer(mandelbrotLayer);
-  mandelbrotLayer = new MandelbrotLayer({ tileSize: config.tileSize }).addTo(map);
+class MandelbrotMap extends L.Map {
+  mandelbrotLayer: MandelbrotLayer;
+  mapId: string;
+  defaultPosition: [number, number];
+  defaultZoom: number;
+
+  constructor(mapId: string) {
+    super(mapId, {
+      attributionControl: false,
+      maxZoom: 32,
+      zoomAnimationThreshold: 32,
+    });
+
+    this.mapId = mapId;
+    this.mandelbrotLayer = new MandelbrotLayer().addTo(this);
+    this.defaultPosition = [0, 0];
+    this.defaultZoom = 2;
+    this.setView(this.defaultPosition, this.defaultZoom);
+    this.mandelbrotLayer.refresh();
+  }
+
+  async refresh(resetView = false) {
+    await resetWorkers();
+    if (resetView) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (this as any)._resetView(this.defaultPosition, this.defaultZoom);
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (this as any)._resetView(this.getCenter(), this.getZoom());
+    }
+  }
+
+  async saveImage() {
+    const zoomControl = this.zoomControl;
+    const mapElement = document.getElementById(this.mapId);
+    const width = mapElement.offsetWidth;
+    const height = mapElement.offsetHeight;
+    this.removeControl(zoomControl);
+    const blob = await domToImage.toBlob(mapElement, { width, height });
+    this.addControl(zoomControl);
+    saveAs(blob, `mandelbrot-${Date.now()}.png`);
+  }
 }
 
-function createMap() {
-  const map: RefreshableMap = <RefreshableMap>L.map(mapId, { attributionControl: false, maxZoom: 32, zoomAnimationThreshold: 32 }).setView([0, 0], 2);
-  refreshLayers(map);
+resetWorkers().then(() => {
+  const map = new MandelbrotMap("leaflet-map");
   handleInputs(map);
-}
-
-async function saveImage(map: RefreshableMap) {
-  const zoomControl = map.zoomControl;
-  const mapElement = document.getElementById(mapId);
-  const width = mapElement.offsetWidth, height = mapElement.offsetHeight;
-  map.removeControl(zoomControl);
-  const blob = await domToImage.toBlob(mapElement, { width, height });
-  map.addControl(zoomControl);
-  saveAs(blob, `mandelbrot-${Date.now()}.png`);
-}
-
-function toggleFullScreen() {
-  if (document.fullscreenElement) document.exitFullscreen();
-  else document.body.requestFullscreen();
-}
-
-document.addEventListener('fullscreenchange', () => {
-  const btn = document.getElementById("full-screen");
-  if (document.fullscreenElement) btn.innerText = "Exit Full Screen";
-  else btn.innerText = "Full Screen";
 });
-
-// setInterval(() => console.log(workers.map((w) => w.activeJobs)), 1000);
-resetWorkers().then(createMap);

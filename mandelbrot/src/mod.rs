@@ -1,5 +1,3 @@
-// (mod.rs)
-
 mod lib;
 
 #[cfg(test)]

@@ -1,91 +1,103 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- HTML Meta Tags -->
+    <title>Mandelbrot Set Explorer</title>
+    <meta
+      name="description"
+      content="An interactive application that lets you explore the Mandelbrot set fractal. Built with Rust, compiled to WebAssembly, running on Web Workers. "
+    />
 
-<head>
-  <meta charset="utf-8">
-  <!-- HTML Meta Tags -->
-  <title>Mandelbrot Set Explorer</title>
-  <meta name="description"
-    content="An interactive application that lets you explore the Mandelbrot set fractal. Built with Rust, compiled to WebAssembly, running on Web Workers. ">
+    <!-- Google / Search Engine Tags -->
+    <meta itemprop="name" content="Mandelbrot Set Explorer" />
+    <meta
+      itemprop="description"
+      content="An interactive application that lets you explore the Mandelbrot set fractal. Built with Rust, compiled to WebAssembly, running on Web Workers. "
+    />
+    <meta
+      itemprop="image"
+      content="https://rust-mandelbrot.netlify.app/static/site-image.png"
+    />
 
-  <!-- Google / Search Engine Tags -->
-  <meta itemprop="name" content="Mandelbrot Set Explorer">
-  <meta itemprop="description"
-    content="An interactive application that lets you explore the Mandelbrot set fractal. Built with Rust, compiled to WebAssembly, running on Web Workers. ">
-  <meta itemprop="image" content="https://rust-mandelbrot.netlify.app/static/site-image.png">
+    <!-- Facebook Meta Tags -->
+    <meta property="og:url" content="https://rust-mandelbrot.netlify.app" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Mandelbrot Set Explorer" />
+    <meta
+      property="og:description"
+      content="An interactive application that lets you explore the Mandelbrot set fractal. Built with Rust, compiled to WebAssembly, running on Web Workers. "
+    />
+    <meta
+      property="og:image"
+      content="https://rust-mandelbrot.netlify.app/static/site-image.png"
+    />
 
-  <!-- Facebook Meta Tags -->
-  <meta property="og:url" content="https://rust-mandelbrot.netlify.app">
-  <meta property="og:type" content="website">
-  <meta property="og:title" content="Mandelbrot Set Explorer">
-  <meta property="og:description"
-    content="An interactive application that lets you explore the Mandelbrot set fractal. Built with Rust, compiled to WebAssembly, running on Web Workers. ">
-  <meta property="og:image" content="https://rust-mandelbrot.netlify.app/static/site-image.png">
+    <!-- Twitter Meta Tags -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Mandelbrot Set Explorer" />
+    <meta
+      name="twitter:description"
+      content="An interactive application that lets you explore the Mandelbrot set fractal. Built with Rust, compiled to WebAssembly, running on Web Workers. "
+    />
+    <meta
+      name="twitter:image"
+      content="https://rust-mandelbrot.netlify.app/static/site-image.png"
+    />
 
-  <!-- Twitter Meta Tags -->
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Mandelbrot Set Explorer">
-  <meta name="twitter:description"
-    content="An interactive application that lets you explore the Mandelbrot set fractal. Built with Rust, compiled to WebAssembly, running on Web Workers. ">
-  <meta name="twitter:image" content="https://rust-mandelbrot.netlify.app/static/site-image.png">
+    <link
+      rel="apple-touch-icon"
+      sizes="144x144"
+      href="static/apple-touch-icon.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="32x32"
+      href="static/favicon-32x32.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="16x16"
+      href="static/favicon-16x16.png"
+    />
+    <link rel="manifest" href="site.webmanifest" />
+    <link rel="mask-icon" href="static/safari-pinned-tab.svg" color="#5bbad5" />
+    <meta name="msapplication-TileColor" content="#da532c" />
+    <meta name="theme-color" content="#ffffff" />
 
-  <link rel="apple-touch-icon" sizes="144x144" href="static/apple-touch-icon.png">
-  <link rel="icon" type="image/png" sizes="32x32" href="static/favicon-32x32.png">
-  <link rel="icon" type="image/png" sizes="16x16" href="static/favicon-16x16.png">
-  <link rel="manifest" href="site.webmanifest">
-  <link rel="mask-icon" href="static/safari-pinned-tab.svg" color="#5bbad5">
-  <meta name="msapplication-TileColor" content="#da532c">
-  <meta name="theme-color" content="#ffffff">
+    <meta name="author" content="Ross Hill" />
+    <meta name="viewport" content="width=device-width,minimum-scale=1" />
+  </head>
 
-  <meta name="author" content="Ross Hill">
-  <meta name="viewport" content="width=device-width,minimum-scale=1" />
-</head>
-
-<body>
-  <div id="inputsWrapper" class="overlay">
-    <div class="numberInputWrapper">
-      <label for="iterations">Iterations:</label>
-      <input type="text" id="iterations" name="iterations">
+  <body>
+    <div id="inputsWrapper" class="overlay">
+      <div class="numberInputWrapper">
+        <label for="iterations">Iterations:</label>
+        <input type="text" id="iterations" name="iterations" />
+      </div>
+      <div class="numberInputWrapper">
+        <label for="exponent">Exponent:</label>
+        <input type="text" id="exponent" name="exponent" />
+      </div>
+      <button id="refresh" type="button">↻ Refresh</button>
+      <div class="inputSeparator"></div>
+      <button id="full-screen" type="button">Full Screen</button>
+      <button id="save-image" type="button">Save Image</button>
     </div>
-    <div class="numberInputWrapper">
-      <label for="exponent">Exponent:</label>
-      <input type="text" id="exponent" name="exponent">
+    <div id="attribution" class="overlay">
+      By
+      <a href="https://rosshill.ca" target="_blank" rel="noopener noreferrer"
+        >Ross Hill</a
+      >.
+      <a
+        href="https://github.com/rosslh/rust-mandelbrot-set"
+        target="_blank"
+        rel="noopener noreferrer"
+        >Source code on GitHub</a
+      >.
     </div>
-    <div class="numberInputWrapper">
-      <label for="workers">Workers:</label>
-      <input type="text" id="workers" name="workers">
-    </div>
-    <div class="numberInputWrapper">
-      <label for="tileSize">Tile Size:</label>
-      <input type="text" id="tileSize" name="tileSize">
-    </div>
-    <button id="refresh" type="button">
-      ↻ Refresh
-    </button>
-    <div class="inputSeparator"></div>
-    <button id="full-screen" type="button">
-      Full Screen
-    </button>
-    <button id="save-image" type="button">
-      Save Image
-    </button>
-  </div>
-  <div id="ref" class="overlay">
-    <a
-      href="https://uptimerobot.com/website-monitoring/?rid=48af749155d00d"
-      target="_blank"
-      rel="noopener"
-    >
-      UptimeRobot
-    </a>
-    helps keep this site online
-  </div>
-  <div id="attribution" class="overlay">
-    By <a href="https://rosshill.ca" target="_blank" rel="noopener noreferrer">Ross Hill</a>
-    and <a href="https://github.com/rosslh/rust-mandelbrot-set/graphs/contributors" target="_blank" rel="noopener noreferrer">contributors</a>.
-    <a href="https://github.com/rosslh/rust-mandelbrot-set" target="_blank" rel="noopener noreferrer">Source code on GitHub</a>.
-  </div>
-  <div id="leaflet-map"></div>
-</body>
-
+    <div id="leaflet-map"></div>
+  </body>
 </html>

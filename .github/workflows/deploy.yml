@@ -1,19 +1,21 @@
-on: push
-name: publish web app
+name: Deploy
+on:
+  push:
+    branches: [master]
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@master
+      - uses: actions/checkout@v2
       - name: Install
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-      - uses: actions/setup-node@v2.1.2
+      - uses: actions/setup-node@v2
         with:
-          node-version: "10"
+          node-version: "18"
       - name: Install dependencies
         working-directory: ./client
         run: |
-          npm ci --no-optional
+          npm i
       - name: Build project
         working-directory: ./client
         run: |

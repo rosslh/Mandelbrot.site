@@ -1,4 +1,5 @@
 mod utils;
+use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
 #[path = "lib_test.rs"]
@@ -61,9 +62,9 @@ fn rect_in_set(
     let left = re_range.clone().next().unwrap();
     let right = re_range.last().unwrap();
     for im in im_range.clone() {
-        let left_in_set =
-            get_escape_iterations(left, im, max_iterations, escape_radius, exponent).0
-                == max_iterations;
+        let left_in_set = get_escape_iterations(left, im, max_iterations, escape_radius, exponent)
+            .0
+            == max_iterations;
         let right_in_set =
             get_escape_iterations(right, im, max_iterations, escape_radius, exponent).0
                 == max_iterations;
@@ -75,27 +76,26 @@ fn rect_in_set(
     true
 }
 
-// map leaflet coordinates to complex plane
-fn map_coordinates(x: f64, y: f64, z: f64, tile_size: usize) -> (f64, f64) {
-    let scale_factor = tile_size as f64 / 128.5;
-    let d: f64 = 2.0f64.powf(z - 2.0);
-    let re = x / d * scale_factor - 4.0;
-    let im = y / d * scale_factor - 4.0;
-
-    (re, im)
-}
-
 const NUM_COLOR_CHANNELS: usize = 4;
 
-#[wasm_bindgen]
-pub fn get_tile(
-    center_x: f64,
-    center_y: f64,
-    z: f64,
+#[derive(Serialize, Deserialize)]
+pub struct TileResponse {
+    pub image: Vec<u8>,
+    pub re_min: f64,
+    pub im_min: f64,
+    pub re_max: f64,
+    pub im_max: f64,
+}
+
+fn get_tile(
+    re_min: f64,
+    re_max: f64,
+    im_min: f64,
+    im_max: f64,
     max_iterations: u32,
     exponent: u32,
     image_side_length: usize,
-) -> Vec<u8> {
+) -> TileResponse {
     let min_channel_value = 0;
     let max_channel_value = 255;
     let palette = colorous::TURBO;
@@ -103,9 +103,6 @@ pub fn get_tile(
 
     // Canvas API expects UInt8ClampedArray
     let mut img: Vec<u8> = vec![0; output_size]; // [ r, g, b, a, r, g, b, a, r, g, b, a... ]
-
-    let (re_min, im_min) = map_coordinates(center_x, center_y, z, image_side_length);
-    let (re_max, im_max) = map_coordinates(center_x + 1.0, center_y + 1.0, z, image_side_length);
 
     let re_range = linspace(re_min, re_max, image_side_length);
     let im_range = linspace(im_min, im_max, image_side_length);
@@ -115,24 +112,31 @@ pub fn get_tile(
     let palette_scale_factor = 20.0;
     let scaled_max_iterations = (max_iterations * palette_scale_factor as u32) as usize;
     let rgb_black = [min_channel_value; 3];
-    let rgba_black = [min_channel_value, min_channel_value, min_channel_value, max_channel_value];
+    let rgba_black = [
+        min_channel_value,
+        min_channel_value,
+        min_channel_value,
+        max_channel_value,
+    ];
 
     // radius has to be >=3 for color smoothing
     let escape_radius = 3.0;
 
-    if rect_in_set(
-        re_range,
-        im_range,
-        max_iterations,
-        escape_radius,
-        exponent,
-    ) {
-        return rgba_black
+    if rect_in_set(re_range, im_range, max_iterations, escape_radius, exponent) {
+        let black_pixels = rgba_black
             .iter()
-            .cycle() // repeat black pixel
+            .cycle()
             .take(output_size)
             .cloned()
-            .collect(); // output expected image size
+            .collect();
+
+        TileResponse {
+            image: black_pixels,
+            re_min,
+            im_min,
+            re_max,
+            im_max,
+        };
     }
 
     for (x, im) in enumerated_im_range {
@@ -162,7 +166,36 @@ pub fn get_tile(
         }
     }
 
-    img
+    TileResponse {
+        image: img,
+        re_min,
+        im_min,
+        re_max,
+        im_max,
+    }
+}
+
+#[wasm_bindgen]
+pub fn get_tile_js(
+    re_min: f64,
+    re_max: f64,
+    im_min: f64,
+    im_max: f64,
+    max_iterations: u32,
+    exponent: u32,
+    image_side_length: usize,
+) -> JsValue {
+    let response = get_tile(
+        re_min,
+        re_max,
+        im_min,
+        im_max,
+        max_iterations,
+        exponent,
+        image_side_length,
+    );
+
+    serde_wasm_bindgen::to_value(&response).unwrap()
 }
 
 #[wasm_bindgen]
