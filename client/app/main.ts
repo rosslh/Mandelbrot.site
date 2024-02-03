@@ -10,10 +10,12 @@ interface WorkerContainer {
   activeJobs: number;
   ready: boolean;
 }
+
 interface MandelbrotConfig {
   iterations: number;
   exponent: number;
 }
+
 interface Input {
   id: "iterations" | "exponent";
   map: MandelbrotMap;
@@ -22,46 +24,65 @@ interface Input {
   maxValue: number;
   resetView?: boolean;
 }
+
 interface MessageFromWorker {
   data: {
     image: Uint8ClampedArray;
     coords: string;
   };
 }
+
 interface Done {
   (error: null, tile: HTMLCanvasElement): void;
 }
 
-let workers: Array<WorkerContainer> = [];
 const config: MandelbrotConfig = {
   iterations: 200,
   exponent: 2,
 };
 
-function createWorker() {
-  const w: WorkerContainer = {
-    worker: new Worker("./worker.js"),
-    activeJobs: 0,
-    ready: false,
-  };
-  const workerReadyHandler = (e: MessageEvent) => {
-    if (e.data.ready) {
-      w.ready = true;
-      w.worker.removeEventListener("message", workerReadyHandler);
-    }
-  };
-  w.worker.addEventListener("message", workerReadyHandler);
-  return w;
-}
+class WorkerManager {
+  workers: Array<WorkerContainer> = [];
 
-async function resetWorkers() {
-  for (const { worker } of workers) {
-    worker.terminate();
+  constructor() {
+    this.resetWorkers();
   }
-  const numWorkers = Math.min(navigator.hardwareConcurrency || 4, 64);
-  workers = [...new Array(numWorkers)].map(createWorker);
-  while (!workers.every((w) => w.ready)) {
-    await new Promise((resolve) => setTimeout(resolve, 300));
+
+  createWorker() {
+    const w: WorkerContainer = {
+      worker: new Worker("./worker.js"),
+      activeJobs: 0,
+      ready: false,
+    };
+    const workerReadyHandler = (e: MessageEvent) => {
+      if (e.data.ready) {
+        w.ready = true;
+        w.worker.removeEventListener("message", workerReadyHandler);
+      }
+    };
+    w.worker.addEventListener("message", workerReadyHandler);
+    return w;
+  }
+
+  async resetWorkers() {
+    for (const { worker } of this.workers) {
+      worker.terminate();
+    }
+    const numWorkers = Math.min(navigator.hardwareConcurrency || 4, 64);
+    this.workers = [...new Array(numWorkers)].map(() => this.createWorker());
+    while (!this.workers.every((w) => w.ready)) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  }
+
+  getLeastActiveWorker() {
+    return this.workers
+      .filter((w) => w.ready)
+      .reduce(
+        (leastActive, worker) =>
+          worker.activeJobs < leastActive.activeJobs ? worker : leastActive,
+        this.workers[0]
+      );
   }
 }
 
@@ -148,10 +169,17 @@ function handleInputs(map: MandelbrotMap) {
 
 class MandelbrotLayer extends L.GridLayer {
   tileSize: number;
+  taskQueue: Array<{
+    coords: L.Coords;
+    canvas: HTMLCanvasElement;
+    done: Done;
+  }> = [];
 
-  constructor(options?: L.GridLayerOptions) {
-    super(options);
-    this.tileSize = 200;
+  constructor() {
+    super({
+      noWrap: true,
+      tileSize: 200,
+    });
   }
 
   private getMappedCoords(coords: L.Coords) {
@@ -163,8 +191,8 @@ class MandelbrotLayer extends L.GridLayer {
     ): { re: number; im: number } => {
       const scaleFactor = tileSize / 128.5;
       const d = 2 ** (z - 2);
-      const re = (x / d) * scaleFactor - 3.75;
-      const im = (y / d) * scaleFactor - 3.25;
+      const re = (x / d) * scaleFactor - 4;
+      const im = (y / d) * scaleFactor - 4;
       return { re, im };
     };
 
@@ -172,14 +200,14 @@ class MandelbrotLayer extends L.GridLayer {
       coords.x,
       coords.y,
       coords.z,
-      this.tileSize
+      this.getTileSize().x
     );
 
     const { re: re_max, im: im_max } = mapCoordinates(
       coords.x + 1,
       coords.y + 1,
       coords.z,
-      this.tileSize
+      this.getTileSize().x
     );
 
     const mappedCoords = {
@@ -192,27 +220,20 @@ class MandelbrotLayer extends L.GridLayer {
     return mappedCoords;
   }
 
-  createTile(coords: L.Coords, done: Done) {
-    const tile = <HTMLCanvasElement>L.DomUtil.create("canvas", "leaflet-tile");
-    const context = tile.getContext("2d");
+  actualCreateTile(coords: L.Coords, canvas: HTMLCanvasElement, done: Done) {
+    const context = canvas.getContext("2d");
 
-    tile.width = this.tileSize;
-    tile.height = this.tileSize;
+    canvas.width = this.getTileSize().x;
+    canvas.height = this.getTileSize().y;
 
     const mappedCoords = this.getMappedCoords(coords);
     const coordsString = stringify(mappedCoords);
 
     Object.entries({ ...coords, ...mappedCoords }).forEach(([key, value]) => {
-      tile.dataset[key] = String(value);
+      canvas.dataset[key] = String(value);
     });
 
-    const selectedWorker = workers
-      .filter((w) => w.ready)
-      .reduce(
-        (leastActive, worker) =>
-          worker.activeJobs < leastActive.activeJobs ? worker : leastActive,
-        workers[0]
-      );
+    const selectedWorker = workerManager.getLeastActiveWorker();
 
     selectedWorker.activeJobs += 1;
     const tileRetrievedHandler = ({ data }: MessageFromWorker) => {
@@ -224,11 +245,11 @@ class MandelbrotLayer extends L.GridLayer {
         selectedWorker.activeJobs = Math.max(selectedWorker.activeJobs - 1, 0);
         const imageData = new ImageData(
           Uint8ClampedArray.from(data.image),
-          this.tileSize,
-          this.tileSize
+          this.getTileSize().x,
+          this.getTileSize().y
         );
         context.putImageData(imageData, 0, 0);
-        done(null, tile);
+        done(null, canvas);
       }
     };
 
@@ -237,10 +258,35 @@ class MandelbrotLayer extends L.GridLayer {
       coords: mappedCoords,
       maxIterations: config.iterations,
       exponent: config.exponent,
-      tileSize: this.tileSize,
+      tileSize: this.getTileSize().x,
     });
+  }
 
-    return tile;
+  processTileGenerationQueue() {
+    const mapZoom = this._map.getZoom();
+
+    const relevantTasks = this.taskQueue.filter((task) => {
+      return task.coords.z === mapZoom;
+    });
+    this.taskQueue = [];
+
+    relevantTasks.forEach((task) => {
+      this.actualCreateTile(task.coords, task.canvas, task.done);
+    });
+  }
+
+  debounceTileGeneration = debounce(() => {
+    this.processTileGenerationQueue();
+  }, 500);
+
+  createTile(coords: L.Coords, done: Done) {
+    const canvas = L.DomUtil.create(
+      "canvas",
+      "leaflet-tile"
+    ) as HTMLCanvasElement;
+    this.taskQueue.push({ coords, canvas, done });
+    this.debounceTileGeneration();
+    return canvas;
   }
 
   refresh() {
@@ -275,7 +321,7 @@ class MandelbrotMap extends L.Map {
   }
 
   async refresh(resetView = false) {
-    await resetWorkers();
+    await workerManager.resetWorkers();
     if (resetView) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (this as any)._resetView(this.defaultPosition, this.defaultZoom);
@@ -297,7 +343,8 @@ class MandelbrotMap extends L.Map {
   }
 }
 
-resetWorkers().then(() => {
+const workerManager = new WorkerManager();
+workerManager.resetWorkers().then(() => {
   const map = new MandelbrotMap("leaflet-map");
   handleInputs(map);
 });
