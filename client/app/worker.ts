@@ -1,5 +1,5 @@
 import { exposeApi } from "threads-es/worker";
-import("../../mandelbrot/pkg/index").then((wasm) => {
+import("../../mandelbrot/pkg").then((wasm) => {
   wasm.init();
 
   const workerApi = {

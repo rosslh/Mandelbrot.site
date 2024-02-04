@@ -9,7 +9,8 @@
     "build": "webpack --mode production",
     "preview": "npx http-server dist -p 9090",
     "lint": "eslint . --ignore-path ../.gitignore && cargo clippy",
-    "test": "cargo test"
+    "test": "cargo test",
+    "clean": "cd .. && rm -rf Cargo.lock mandelbrot/pkg target/* client/package-lock.json client/node_modules client/dist client/pkg"
   },
   "bin": {
     "create-rust-wasm-worker": ".bin/create-rust-wasm-worker.js"
@@ -42,5 +43,8 @@
     "long": "^5.2.3",
     "threads-es": "^1.0.0",
     "util": "^0.12.5"
+  },
+  "engines": {
+    "node": ">=18.14.0"
   }
 }

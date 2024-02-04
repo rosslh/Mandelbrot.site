@@ -11,7 +11,7 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - uses: actions/setup-node@v2
         with:
-          node-version: "18"
+          node-version: "18.14"
       - name: Install dependencies
         working-directory: ./client
         run: |
@@ -19,7 +19,7 @@ jobs:
       - name: Build project
         working-directory: ./client
         run: |
-          npm run build
+          npm run build || npm run build
       - name: Publish
         uses: netlify/actions/cli@master
         with:

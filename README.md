@@ -29,5 +29,4 @@
   - `npm run build` -- Build the project for production
   - `npm run test` -- Run Rust tests
   - `npm run lint` -- Find problems with code
-
-If you get weird errors, try running `./clean.sh` to purge all dependency caches.
+  - `npm run clean` -- Clear installation caches and remove build artifacts
