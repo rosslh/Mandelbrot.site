@@ -44,18 +44,28 @@ const appConfig = {
     extensions: [".ts", ".js"],
   },
   output: { path: dist, filename: "app.js" },
+  experiments: { syncWebAssembly: true },
 };
 
 const workerConfig = {
-  entry: "./app/worker.js",
+  entry: "./app/worker.ts",
   target: "webworker",
   plugins: [
     new WasmPackPlugin({
       crateDirectory: path.resolve(__dirname, "../mandelbrot"),
     }),
   ],
+  module: {
+    rules: [
+      {
+        test: /\.ts$/,
+        use: "ts-loader",
+        exclude: /node_modules/,
+      },
+    ],
+  },
   resolve: {
-    extensions: [".js", ".wasm"],
+    extensions: [".ts", ".js", ".wasm"],
     fallback: {
       util: require.resolve("util"),
       long: require.resolve("long"),

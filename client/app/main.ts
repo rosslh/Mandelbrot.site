@@ -1,15 +1,9 @@
 import "./static";
-import { stringify } from "./utils";
 import * as debounce from "debounce";
 import * as L from "leaflet";
 import { saveAs } from "file-saver";
 import domToImage from "dom-to-image";
-
-interface WorkerContainer {
-  worker: Worker;
-  activeJobs: number;
-  ready: boolean;
-}
+import { EsThreadPool, EsThread } from "threads-es/controller";
 
 interface MandelbrotConfig {
   [key: string]: number | string | boolean;
@@ -34,13 +28,6 @@ interface CheckboxInput {
   map: MandelbrotMap;
 }
 
-interface MessageFromWorker {
-  data: {
-    image: Uint8ClampedArray;
-    coords: string;
-  };
-}
-
 interface Done {
   (error: null, tile: HTMLCanvasElement): void;
 }
@@ -51,54 +38,9 @@ const config: MandelbrotConfig = {
   colorScheme: "turbo",
   reverseColors: false,
 };
-
-class WorkerManager {
-  workers: Array<WorkerContainer> = [];
-
-  constructor() {
-    this.resetWorkers();
-  }
-
-  createWorker() {
-    const w: WorkerContainer = {
-      worker: new Worker("./worker.js"),
-      activeJobs: 0,
-      ready: false,
-    };
-    const workerReadyHandler = (e: MessageEvent) => {
-      if (e.data.ready) {
-        w.ready = true;
-        w.worker.removeEventListener("message", workerReadyHandler);
-      }
-    };
-    w.worker.addEventListener("message", workerReadyHandler);
-    return w;
-  }
-
-  async resetWorkers() {
-    for (const { worker } of this.workers) {
-      worker.terminate();
-    }
-    const numWorkers = Math.min(navigator.hardwareConcurrency || 4, 64);
-    this.workers = [...new Array(numWorkers)].map(() => this.createWorker());
-    while (!this.workers.every((w) => w.ready)) {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-    }
-  }
-
-  getLeastActiveWorker() {
-    return this.workers
-      .filter((w) => w.ready)
-      .reduce(
-        (leastActive, worker) =>
-          worker.activeJobs < leastActive.activeJobs ? worker : leastActive,
-        this.workers[0]
-      );
-  }
-}
-
 class MandelbrotLayer extends L.GridLayer {
   tileSize: number;
+  _map: MandelbrotMap;
 
   constructor() {
     super({
@@ -157,41 +99,31 @@ class MandelbrotLayer extends L.GridLayer {
     canvas.height = this.getTileSize().y;
 
     const mappedCoords = this.getMappedCoords(coords);
-    const coordsString = stringify(mappedCoords);
 
     Object.entries({ ...coords, ...mappedCoords }).forEach(([key, value]) => {
       canvas.dataset[key] = String(value);
     });
 
-    const selectedWorker = workerManager.getLeastActiveWorker();
-
-    selectedWorker.activeJobs += 1;
-    const tileRetrievedHandler = ({ data }: MessageFromWorker) => {
-      if (data.coords === coordsString) {
-        selectedWorker.worker.removeEventListener(
-          "message",
-          tileRetrievedHandler
-        );
-        selectedWorker.activeJobs = Math.max(selectedWorker.activeJobs - 1, 0);
+    this._map.pool
+      ?.queue((thread) =>
+        thread.methods.getTile({
+          coords: mappedCoords,
+          maxIterations: config.iterations,
+          exponent: config.exponent,
+          tileSize: this.getTileSize().x,
+          colorScheme: config.colorScheme,
+          reverseColors: config.reverseColors,
+        })
+      )
+      .then((result) => {
         const imageData = new ImageData(
-          Uint8ClampedArray.from(data.image),
+          Uint8ClampedArray.from(result),
           this.getTileSize().x,
           this.getTileSize().y
         );
         context.putImageData(imageData, 0, 0);
         done(null, canvas);
-      }
-    };
-
-    selectedWorker.worker.addEventListener("message", tileRetrievedHandler);
-    selectedWorker.worker.postMessage({
-      coords: mappedCoords,
-      maxIterations: config.iterations,
-      exponent: config.exponent,
-      tileSize: this.getTileSize().x,
-      colorScheme: config.colorScheme,
-      reverseColors: config.reverseColors,
-    });
+      });
 
     return canvas;
   }
@@ -211,14 +143,20 @@ class MandelbrotMap extends L.Map {
   mapId: string;
   defaultPosition: [number, number];
   defaultZoom: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  pool: EsThreadPool<any>;
 
-  constructor(mapId: string) {
+  constructor({ htmlId: mapId }: { htmlId: string }) {
     super(mapId, {
       attributionControl: false,
       maxZoom: 32,
       zoomAnimationThreshold: 32,
     });
 
+    this.createPool().then(() => {
+      this.refresh(false);
+      this.mandelbrotLayer.refresh();
+    });
     this.mapId = mapId;
     this.mandelbrotLayer = new MandelbrotLayer().addTo(this);
     this.defaultPosition = [0, 0];
@@ -227,8 +165,27 @@ class MandelbrotMap extends L.Map {
     this.mandelbrotLayer.refresh();
   }
 
+  async createPool() {
+    if (this.pool) {
+      await this.pool.terminate();
+    }
+
+    this.pool = await EsThreadPool.Spawn(
+      () =>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        EsThread.Spawn<any>(
+          new Worker(new URL("./worker.ts", import.meta.url), {
+            type: "module",
+          })
+        ),
+      {
+        size: navigator.hardwareConcurrency || 4,
+      }
+    );
+  }
+
   async refresh(resetView = false) {
-    await workerManager.resetWorkers();
+    await this.createPool();
     if (resetView) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (this as any)._resetView(this.defaultPosition, this.defaultZoom);
@@ -351,8 +308,7 @@ function handleInputs(map: MandelbrotMap) {
   });
 }
 
-const workerManager = new WorkerManager();
-workerManager.resetWorkers().then(() => {
-  const map = new MandelbrotMap("leaflet-map");
-  handleInputs(map);
+const map = new MandelbrotMap({
+  htmlId: "leaflet-map",
 });
+handleInputs(map);

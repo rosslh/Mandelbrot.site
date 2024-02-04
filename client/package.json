@@ -37,10 +37,10 @@
   "dependencies": {
     "debounce": "^2.0.0",
     "dom-to-image": "^2.6.0",
-    "fast-json-stringify": "^2.4.2",
     "file-saver": "^2.0.5",
     "leaflet": "1.7.1",
     "long": "^5.2.3",
+    "threads-es": "^1.0.0",
     "util": "^0.12.5"
   }
 }
