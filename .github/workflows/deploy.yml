@@ -19,7 +19,7 @@ jobs:
       - name: Build project
         working-directory: ./client
         run: |
-          npm run build || npm run build
+          npm run build
       - name: Publish
         uses: netlify/actions/cli@master
         with:

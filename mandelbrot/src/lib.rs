@@ -29,9 +29,16 @@ fn get_escape_iterations(
 
     let mut iter: u32 = 0;
 
-    while z.norm() < escape_radius && iter < max_iterations {
-        iter += 1;
-        z = z.powu(exponent) + c;
+    if exponent == 2 {
+        while z.norm_sqr() < escape_radius.powi(2) && iter < max_iterations {
+            iter += 1;
+            z = z * z + c;
+        }
+    } else {
+        while z.norm() < escape_radius && iter < max_iterations {
+            iter += 1;
+            z = z.powu(exponent) + c;
+        }
     }
 
     (iter, z)

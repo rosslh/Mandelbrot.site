@@ -6,7 +6,7 @@
   "license": "MIT",
   "scripts": {
     "start": "webpack-dev-server --mode development --open --port 9090",
-    "build": "webpack --mode production",
+    "build": "webpack --mode production || webpack --mode production",
     "preview": "npx http-server dist -p 9090",
     "lint": "eslint . --ignore-path ../.gitignore && cargo clippy",
     "test": "cargo test",

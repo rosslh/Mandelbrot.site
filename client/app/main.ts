@@ -24,8 +24,9 @@ interface SelectInput {
 }
 
 interface CheckboxInput {
-  id: "reverseColors";
+  id: "reverseColors" | "highDpiTiles";
   map: MandelbrotMap;
+  hidden?: boolean;
 }
 
 interface Done {
@@ -37,10 +38,16 @@ const config: MandelbrotConfig = {
   exponent: 2,
   colorScheme: "turbo",
   reverseColors: false,
+  highDpiTiles: false,
 };
 class MandelbrotLayer extends L.GridLayer {
   tileSize: number;
   _map: MandelbrotMap;
+  taskQueue: Array<{
+    coords: L.Coords;
+    canvas: HTMLCanvasElement;
+    done: Done;
+  }> = [];
 
   constructor() {
     super({
@@ -87,16 +94,15 @@ class MandelbrotLayer extends L.GridLayer {
     return mappedCoords;
   }
 
-  createTile(coords: L.Coords, done: Done) {
-    const canvas = L.DomUtil.create(
-      "canvas",
-      "leaflet-tile"
-    ) as HTMLCanvasElement;
-
+  actualCreateTile(canvas: HTMLCanvasElement, coords: L.Coords, done: Done) {
     const context = canvas.getContext("2d");
 
-    canvas.width = this.getTileSize().x;
-    canvas.height = this.getTileSize().y;
+    const scaledTileSize = config.highDpiTiles
+      ? this.getTileSize().x * (window.devicePixelRatio || 1)
+      : this.getTileSize().x;
+
+    canvas.width = scaledTileSize;
+    canvas.height = scaledTileSize;
 
     const mappedCoords = this.getMappedCoords(coords);
 
@@ -110,7 +116,7 @@ class MandelbrotLayer extends L.GridLayer {
           coords: mappedCoords,
           maxIterations: config.iterations,
           exponent: config.exponent,
-          tileSize: this.getTileSize().x,
+          tileSize: scaledTileSize,
           colorScheme: config.colorScheme,
           reverseColors: config.reverseColors,
         })
@@ -118,13 +124,40 @@ class MandelbrotLayer extends L.GridLayer {
       .then((result) => {
         const imageData = new ImageData(
           Uint8ClampedArray.from(result),
-          this.getTileSize().x,
-          this.getTileSize().y
+          scaledTileSize,
+          scaledTileSize
         );
         context.putImageData(imageData, 0, 0);
         done(null, canvas);
       });
 
+    return canvas;
+  }
+
+  processTileGenerationQueue() {
+    const mapZoom = this._map.getZoom();
+
+    const relevantTasks = this.taskQueue.filter((task) => {
+      return task.coords.z === mapZoom;
+    });
+    this.taskQueue = [];
+
+    relevantTasks.forEach((task) => {
+      this.actualCreateTile(task.canvas, task.coords, task.done);
+    });
+  }
+
+  debounceTileGeneration = debounce(() => {
+    this.processTileGenerationQueue();
+  }, 400);
+
+  createTile(coords: L.Coords, done: Done) {
+    const canvas = L.DomUtil.create(
+      "canvas",
+      "leaflet-tile"
+    ) as HTMLCanvasElement;
+    this.taskQueue.push({ coords, canvas, done });
+    this.debounceTileGeneration();
     return canvas;
   }
 
@@ -163,11 +196,15 @@ class MandelbrotMap extends L.Map {
     this.defaultZoom = 3;
     this.setView(this.defaultPosition, this.defaultZoom);
     this.mandelbrotLayer.refresh();
+
+    this.on("drag", function () {
+      this.mandelbrotLayer.processTileGenerationQueue();
+    });
   }
 
   async createPool() {
     if (this.pool) {
-      await this.pool.terminate();
+      this.pool.terminate();
     }
 
     this.pool = await EsThreadPool.Spawn(
@@ -241,13 +278,17 @@ function handleSelectInput({ id, map }: SelectInput) {
   };
 }
 
-function handleCheckboxInput({ id, map }: CheckboxInput) {
+function handleCheckboxInput({ id, map, hidden }: CheckboxInput) {
   const checkbox = <HTMLInputElement>document.getElementById(id);
-  checkbox.checked = Boolean(config[id]);
-  checkbox.onchange = ({ target }) => {
-    config[id] = (<HTMLInputElement>target).checked;
-    map.refresh();
-  };
+  if (hidden) {
+    checkbox.style.display = "none";
+  } else {
+    checkbox.checked = Boolean(config[id]);
+    checkbox.onchange = ({ target }) => {
+      config[id] = (<HTMLInputElement>target).checked;
+      map.refresh();
+    };
+  }
 }
 
 function handleInputs(map: MandelbrotMap) {
@@ -268,6 +309,11 @@ function handleInputs(map: MandelbrotMap) {
   });
   handleSelectInput({ id: "colorScheme", map });
   handleCheckboxInput({ id: "reverseColors", map });
+  handleCheckboxInput({
+    id: "highDpiTiles",
+    map,
+    hidden: (window.devicePixelRatio || 1) < 2,
+  });
 
   const refreshButton: HTMLButtonElement = document.querySelector("#refresh");
   refreshButton.onclick = () => map.refresh();
