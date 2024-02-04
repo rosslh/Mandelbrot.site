@@ -1,5 +1,7 @@
 mod utils;
-use serde::{Deserialize, Serialize};
+
+use once_cell::sync::Lazy;
+use std::collections::HashMap;
 
 #[cfg(test)]
 #[path = "lib_test.rs"]
@@ -44,9 +46,10 @@ fn rect_in_set(
     escape_radius: f64,
     exponent: u32,
 ) -> bool {
-    // horizontal
-    let top = im_range.clone().next().unwrap();
-    let bottom = im_range.clone().last().unwrap();
+    let (top, bottom) = (
+        im_range.clone().next().unwrap(),
+        im_range.clone().last().unwrap(),
+    );
     for re in re_range.clone() {
         let top_in_set = get_escape_iterations(re, top, max_iterations, escape_radius, exponent).0
             == max_iterations;
@@ -58,10 +61,11 @@ fn rect_in_set(
         }
     }
 
-    // vertical
-    let left = re_range.clone().next().unwrap();
-    let right = re_range.last().unwrap();
-    for im in im_range.clone() {
+    let (left, right) = (
+        re_range.clone().next().unwrap(),
+        re_range.clone().last().unwrap(),
+    );
+    for im in im_range {
         let left_in_set = get_escape_iterations(left, im, max_iterations, escape_radius, exponent)
             .0
             == max_iterations;
@@ -78,16 +82,54 @@ fn rect_in_set(
 
 const NUM_COLOR_CHANNELS: usize = 4;
 
-#[derive(Serialize, Deserialize)]
-pub struct TileResponse {
-    pub image: Vec<u8>,
-    pub re_min: f64,
-    pub im_min: f64,
-    pub re_max: f64,
-    pub im_max: f64,
-}
+static COLOROUS_PALETTES: Lazy<HashMap<String, colorous::Gradient>> = Lazy::new(|| {
+    let mut map = HashMap::new();
+    map.insert("blueGreen".to_string(), colorous::BLUE_GREEN);
+    map.insert("bluePurple".to_string(), colorous::BLUE_PURPLE);
+    map.insert("blues".to_string(), colorous::BLUES);
+    map.insert("brownGreen".to_string(), colorous::BROWN_GREEN);
+    map.insert("cividis".to_string(), colorous::CIVIDIS);
+    map.insert("cool".to_string(), colorous::COOL);
+    map.insert("cubehelix".to_string(), colorous::CUBEHELIX);
+    map.insert("greenBlue".to_string(), colorous::GREEN_BLUE);
+    map.insert("greens".to_string(), colorous::GREENS);
+    map.insert("greys".to_string(), colorous::GREYS);
+    map.insert("inferno".to_string(), colorous::INFERNO);
+    map.insert("magma".to_string(), colorous::MAGMA);
+    map.insert("orangeRed".to_string(), colorous::ORANGE_RED);
+    map.insert("oranges".to_string(), colorous::ORANGES);
+    map.insert("pinkGreen".to_string(), colorous::PINK_GREEN);
+    map.insert("plasma".to_string(), colorous::PLASMA);
+    map.insert("purpleBlue".to_string(), colorous::PURPLE_BLUE);
+    map.insert("purpleBlueGreen".to_string(), colorous::PURPLE_BLUE_GREEN);
+    map.insert("purpleGreen".to_string(), colorous::PURPLE_GREEN);
+    map.insert("purpleOrange".to_string(), colorous::PURPLE_ORANGE);
+    map.insert("purpleRed".to_string(), colorous::PURPLE_RED);
+    map.insert("purples".to_string(), colorous::PURPLES);
+    map.insert("rainbow".to_string(), colorous::RAINBOW);
+    map.insert("redBlue".to_string(), colorous::RED_BLUE);
+    map.insert("redGrey".to_string(), colorous::RED_GREY);
+    map.insert("redPurple".to_string(), colorous::RED_PURPLE);
+    map.insert("reds".to_string(), colorous::REDS);
+    map.insert("redYellowBlue".to_string(), colorous::RED_YELLOW_BLUE);
+    map.insert("redYellowGreen".to_string(), colorous::RED_YELLOW_GREEN);
+    map.insert("sinebow".to_string(), colorous::SINEBOW);
+    map.insert("spectral".to_string(), colorous::SPECTRAL);
+    map.insert("turbo".to_string(), colorous::TURBO);
+    map.insert("viridis".to_string(), colorous::VIRIDIS);
+    map.insert("warm".to_string(), colorous::WARM);
+    map.insert("yellowGreen".to_string(), colorous::YELLOW_GREEN);
+    map.insert("yellowGreenBlue".to_string(), colorous::YELLOW_GREEN_BLUE);
+    map.insert(
+        "yellowOrangeBrown".to_string(),
+        colorous::YELLOW_ORANGE_BROWN,
+    );
+    map.insert("yellowOrangeRed".to_string(), colorous::YELLOW_ORANGE_RED);
+    map
+});
 
-fn get_tile(
+#[wasm_bindgen]
+pub fn get_tile(
     re_min: f64,
     re_max: f64,
     im_min: f64,
@@ -95,14 +137,18 @@ fn get_tile(
     max_iterations: u32,
     exponent: u32,
     image_side_length: usize,
-) -> TileResponse {
+    color_scheme: String,
+    reverse_colors: bool,
+) -> Vec<u8> {
     let min_channel_value = 0;
     let max_channel_value = 255;
-    let palette = colorous::TURBO;
-    let output_size: usize = image_side_length * image_side_length * NUM_COLOR_CHANNELS;
+    let palette = if color_scheme != "turbo" && COLOROUS_PALETTES.contains_key(&color_scheme) {
+        COLOROUS_PALETTES.get(&color_scheme).unwrap()
+    } else {
+        &colorous::TURBO
+    };
 
-    // Canvas API expects UInt8ClampedArray
-    let mut img: Vec<u8> = vec![0; output_size]; // [ r, g, b, a, r, g, b, a, r, g, b, a... ]
+    let output_size: usize = image_side_length * image_side_length * NUM_COLOR_CHANNELS;
 
     let re_range = linspace(re_min, re_max, image_side_length);
     let im_range = linspace(im_min, im_max, image_side_length);
@@ -130,14 +176,11 @@ fn get_tile(
             .cloned()
             .collect();
 
-        TileResponse {
-            image: black_pixels,
-            re_min,
-            im_min,
-            re_max,
-            im_max,
-        };
+        return black_pixels;
     }
+
+    // Canvas API expects UInt8ClampedArray
+    let mut img: Vec<u8> = vec![0; output_size]; // [ r, g, b, a, r, g, b, a, r, g, b, a... ]
 
     for (x, im) in enumerated_im_range {
         for (y, re) in enumerated_re_range.clone() {
@@ -151,7 +194,10 @@ fn get_tile(
                 let smoothed_value = f64::from(escape_iterations)
                     - ((z.norm().ln() / escape_radius.ln()).ln() / f64::from(exponent).ln());
                 // more colors to reduce banding
-                let scaled_value = (smoothed_value * palette_scale_factor) as usize;
+                let mut scaled_value = (smoothed_value * palette_scale_factor) as usize;
+                if reverse_colors {
+                    scaled_value = scaled_max_iterations - scaled_value;
+                }
                 let color = palette.eval_rational(scaled_value, scaled_max_iterations);
 
                 color.as_array()
@@ -166,36 +212,7 @@ fn get_tile(
         }
     }
 
-    TileResponse {
-        image: img,
-        re_min,
-        im_min,
-        re_max,
-        im_max,
-    }
-}
-
-#[wasm_bindgen]
-pub fn get_tile_js(
-    re_min: f64,
-    re_max: f64,
-    im_min: f64,
-    im_max: f64,
-    max_iterations: u32,
-    exponent: u32,
-    image_side_length: usize,
-) -> JsValue {
-    let response = get_tile(
-        re_min,
-        re_max,
-        im_min,
-        im_max,
-        max_iterations,
-        exponent,
-        image_side_length,
-    );
-
-    serde_wasm_bindgen::to_value(&response).unwrap()
+    img
 }
 
 #[wasm_bindgen]

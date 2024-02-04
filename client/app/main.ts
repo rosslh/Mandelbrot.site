@@ -12,17 +12,26 @@ interface WorkerContainer {
 }
 
 interface MandelbrotConfig {
-  iterations: number;
-  exponent: number;
+  [key: string]: number | string | boolean;
 }
 
-interface Input {
+interface NumberInput {
   id: "iterations" | "exponent";
   map: MandelbrotMap;
   minValue: number;
   defaultValue: number;
   maxValue: number;
   resetView?: boolean;
+}
+
+interface SelectInput {
+  id: "colorScheme";
+  map: MandelbrotMap;
+}
+
+interface CheckboxInput {
+  id: "reverseColors";
+  map: MandelbrotMap;
 }
 
 interface MessageFromWorker {
@@ -39,6 +48,8 @@ interface Done {
 const config: MandelbrotConfig = {
   iterations: 200,
   exponent: 2,
+  colorScheme: "turbo",
+  reverseColors: false,
 };
 
 class WorkerManager {
@@ -86,94 +97,8 @@ class WorkerManager {
   }
 }
 
-function handleInput({
-  id,
-  map,
-  defaultValue,
-  minValue,
-  maxValue,
-  resetView,
-}: Input) {
-  const input = <HTMLInputElement>document.getElementById(id);
-  input.value = String(config[id]);
-  input.oninput = debounce(({ target }) => {
-    let parsedValue = Number.parseInt((<HTMLInputElement>target).value, 10);
-    if (
-      isNaN(parsedValue) ||
-      parsedValue < minValue ||
-      parsedValue > maxValue
-    ) {
-      parsedValue = defaultValue;
-    }
-    input.value = String(parsedValue);
-    config[id] = parsedValue;
-    map.refresh(resetView);
-  }, 1000);
-}
-
-function handleInputs(map: MandelbrotMap) {
-  handleInput({
-    id: "iterations",
-    map,
-    minValue: 1,
-    defaultValue: 200,
-    maxValue: 10 ** 9,
-  });
-  handleInput({
-    id: "exponent",
-    map,
-    minValue: 2,
-    defaultValue: config.exponent,
-    maxValue: 10 ** 9,
-    resetView: true,
-  });
-
-  const refreshButton: HTMLButtonElement = document.querySelector("#refresh");
-  refreshButton.onclick = () => map.refresh();
-
-  const fullScreenButton: HTMLButtonElement =
-    document.querySelector("#full-screen");
-  if (document.fullscreenEnabled) {
-    fullScreenButton.onclick = toggleFullScreen;
-  } else {
-    fullScreenButton.style.display = "none";
-  }
-
-  const saveButton: HTMLButtonElement = document.querySelector("#save-image");
-  try {
-    // eslint-disable-next-line no-constant-condition
-    if (new Blob()) {
-      saveButton.onclick = () => map.saveImage();
-    } else {
-      throw "FileSaver not supported";
-    }
-  } catch {
-    saveButton.style.display = "none";
-  }
-
-  function toggleFullScreen() {
-    if (document.fullscreenElement) {
-      document.exitFullscreen();
-    } else {
-      document.body.requestFullscreen();
-    }
-  }
-
-  document.addEventListener("fullscreenchange", () => {
-    const button: HTMLButtonElement = document.querySelector("#full-screen");
-    button.innerText = document.fullscreenElement
-      ? "Exit Full Screen"
-      : "Full Screen";
-  });
-}
-
 class MandelbrotLayer extends L.GridLayer {
   tileSize: number;
-  taskQueue: Array<{
-    coords: L.Coords;
-    canvas: HTMLCanvasElement;
-    done: Done;
-  }> = [];
 
   constructor() {
     super({
@@ -220,7 +145,12 @@ class MandelbrotLayer extends L.GridLayer {
     return mappedCoords;
   }
 
-  actualCreateTile(coords: L.Coords, canvas: HTMLCanvasElement, done: Done) {
+  createTile(coords: L.Coords, done: Done) {
+    const canvas = L.DomUtil.create(
+      "canvas",
+      "leaflet-tile"
+    ) as HTMLCanvasElement;
+
     const context = canvas.getContext("2d");
 
     canvas.width = this.getTileSize().x;
@@ -259,33 +189,10 @@ class MandelbrotLayer extends L.GridLayer {
       maxIterations: config.iterations,
       exponent: config.exponent,
       tileSize: this.getTileSize().x,
+      colorScheme: config.colorScheme,
+      reverseColors: config.reverseColors,
     });
-  }
 
-  processTileGenerationQueue() {
-    const mapZoom = this._map.getZoom();
-
-    const relevantTasks = this.taskQueue.filter((task) => {
-      return task.coords.z === mapZoom;
-    });
-    this.taskQueue = [];
-
-    relevantTasks.forEach((task) => {
-      this.actualCreateTile(task.coords, task.canvas, task.done);
-    });
-  }
-
-  debounceTileGeneration = debounce(() => {
-    this.processTileGenerationQueue();
-  }, 500);
-
-  createTile(coords: L.Coords, done: Done) {
-    const canvas = L.DomUtil.create(
-      "canvas",
-      "leaflet-tile"
-    ) as HTMLCanvasElement;
-    this.taskQueue.push({ coords, canvas, done });
-    this.debounceTileGeneration();
     return canvas;
   }
 
@@ -315,7 +222,7 @@ class MandelbrotMap extends L.Map {
     this.mapId = mapId;
     this.mandelbrotLayer = new MandelbrotLayer().addTo(this);
     this.defaultPosition = [0, 0];
-    this.defaultZoom = 2;
+    this.defaultZoom = 3;
     this.setView(this.defaultPosition, this.defaultZoom);
     this.mandelbrotLayer.refresh();
   }
@@ -341,6 +248,107 @@ class MandelbrotMap extends L.Map {
     this.addControl(zoomControl);
     saveAs(blob, `mandelbrot-${Date.now()}.png`);
   }
+}
+
+function handleNumberInput({
+  id,
+  map,
+  defaultValue,
+  minValue,
+  maxValue,
+  resetView,
+}: NumberInput) {
+  const input = <HTMLInputElement>document.getElementById(id);
+  input.value = String(config[id]);
+  input.oninput = debounce(({ target }) => {
+    let parsedValue = Number.parseInt((<HTMLInputElement>target).value, 10);
+    if (
+      isNaN(parsedValue) ||
+      parsedValue < minValue ||
+      parsedValue > maxValue
+    ) {
+      parsedValue = defaultValue;
+    }
+    input.value = String(parsedValue);
+    config[id] = parsedValue;
+    map.refresh(resetView);
+  }, 1000);
+}
+
+function handleSelectInput({ id, map }: SelectInput) {
+  const select = <HTMLSelectElement>document.getElementById(id);
+  select.value = String(config[id]);
+  select.onchange = ({ target }) => {
+    config[id] = (<HTMLSelectElement>target).value;
+    map.refresh();
+  };
+}
+
+function handleCheckboxInput({ id, map }: CheckboxInput) {
+  const checkbox = <HTMLInputElement>document.getElementById(id);
+  checkbox.checked = Boolean(config[id]);
+  checkbox.onchange = ({ target }) => {
+    config[id] = (<HTMLInputElement>target).checked;
+    map.refresh();
+  };
+}
+
+function handleInputs(map: MandelbrotMap) {
+  handleNumberInput({
+    id: "iterations",
+    map,
+    minValue: 1,
+    defaultValue: 200,
+    maxValue: 10 ** 9,
+  });
+  handleNumberInput({
+    id: "exponent",
+    map,
+    minValue: 2,
+    defaultValue: Number(config.exponent),
+    maxValue: 10 ** 9,
+    resetView: true,
+  });
+  handleSelectInput({ id: "colorScheme", map });
+  handleCheckboxInput({ id: "reverseColors", map });
+
+  const refreshButton: HTMLButtonElement = document.querySelector("#refresh");
+  refreshButton.onclick = () => map.refresh();
+
+  const fullScreenButton: HTMLButtonElement =
+    document.querySelector("#full-screen");
+  if (document.fullscreenEnabled) {
+    fullScreenButton.onclick = toggleFullScreen;
+  } else {
+    fullScreenButton.style.display = "none";
+  }
+
+  const saveButton: HTMLButtonElement = document.querySelector("#save-image");
+  try {
+    // eslint-disable-next-line no-constant-condition
+    if (new Blob()) {
+      saveButton.onclick = () => map.saveImage();
+    } else {
+      throw "FileSaver not supported";
+    }
+  } catch {
+    saveButton.style.display = "none";
+  }
+
+  function toggleFullScreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      document.body.requestFullscreen();
+    }
+  }
+
+  document.addEventListener("fullscreenchange", () => {
+    const button: HTMLButtonElement = document.querySelector("#full-screen");
+    button.innerText = document.fullscreenElement
+      ? "Exit Full Screen"
+      : "Full Screen";
+  });
 }
 
 const workerManager = new WorkerManager();

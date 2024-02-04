@@ -73,13 +73,67 @@
 
   <body>
     <div id="inputsWrapper" class="overlay">
-      <div class="numberInputWrapper">
+      <div class="inputWrapper">
         <label for="iterations">Iterations:</label>
         <input type="text" id="iterations" name="iterations" />
       </div>
-      <div class="numberInputWrapper">
+      <div class="inputWrapper">
         <label for="exponent">Exponent:</label>
         <input type="text" id="exponent" name="exponent" />
+      </div>
+      <div class="inputWrapper">
+        <label for="colorScheme">Color Scheme:</label>
+        <select id="colorScheme" name="colorScheme">
+          <optgroup label="Sequential (Multi-Hue)">
+            <option value="cividis">Cividis</option>
+            <option value="cool">Cool</option>
+            <option value="cubehelix">Cubehelix</option>
+            <option value="inferno">Inferno</option>
+            <option value="magma">Magma</option>
+            <option value="plasma">Plasma</option>
+            <option value="turbo">Turbo</option>
+            <option value="viridis">Viridis</option>
+            <option value="warm">Warm</option>
+            <option value="blueGreen">Blue Green</option>
+            <option value="bluePurple">Blue Purple</option>
+            <option value="greenBlue">Green Blue</option>
+            <option value="orangeRed">Orange Red</option>
+            <option value="purpleBlue">Purple Blue</option>
+            <option value="purpleBlueGreen">Purple Blue Green</option>
+            <option value="purpleRed">Purple Red</option>
+            <option value="redPurple">Red Purple</option>
+            <option value="yellowGreen">Yellow Green</option>
+            <option value="yellowGreenBlue">Yellow Green Blue</option>
+            <option value="yellowOrangeRed">Yellow Orange Red</option>
+          </optgroup>
+          <optgroup label="Sequential (Single-Hue)">
+            <option value="blues">Blues</option>
+            <option value="greens">Greens</option>
+            <option value="greys">Greys</option>
+            <option value="oranges">Oranges</option>
+            <option value="purples">Purples</option>
+            <option value="reds">Reds</option>
+          </optgroup>
+          <optgroup label="Diverging">
+            <option value="spectral">Spectral</option>
+            <option value="brownGreen">Brown Green</option>
+            <option value="pinkGreen">Pink Green</option>
+            <option value="purpleGreen">Purple Green</option>
+            <option value="purpleOrange">Purple Orange</option>
+            <option value="redBlue">Red Blue</option>
+            <option value="redGrey">Red Grey</option>
+            <option value="redYellowBlue">Red Yellow Blue</option>
+            <option value="redYellowGreen">Red Yellow Green</option>
+          </optgroup>
+          <optgroup label="Cyclical">
+            <option value="rainbow">Rainbow</option>
+            <option value="sinebow">Sinebow</option>
+          </optgroup>
+        </select>
+      </div>
+      <div class="checkboxWrapper">
+        <input type="checkbox" id="reverseColors" name="reverseColors" />
+        <label for="reverseColors">Reverse colors</label>
       </div>
       <button id="refresh" type="button">↻ Refresh</button>
       <div class="inputSeparator"></div>

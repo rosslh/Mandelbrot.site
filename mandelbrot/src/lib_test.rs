@@ -71,9 +71,19 @@ mod lib_test {
     #[test]
     fn get_tile_outputs_correct_length() {
         for &(x_min, x_max, y_min, y_max) in SQUARES.iter() {
-            let response = super::get_tile(x_min, x_max, y_min, y_max, MAX_ITERATIONS, 2, 256);
+            let response = super::get_tile(
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                MAX_ITERATIONS,
+                2,
+                256,
+                "turbo".to_string(),
+                false,
+            );
             assert_eq!(
-                response.image.len(),
+                response.len(),
                 256 * 256 * 4,
                 "Failed at tile: ({}, {}, {}, {})",
                 x_min,
@@ -87,8 +97,18 @@ mod lib_test {
     #[test]
     fn get_tile_outputs_valid_colors() {
         for &(x_min, x_max, y_min, y_max) in SQUARES.iter() {
-            let response = super::get_tile(x_min, x_max, y_min, y_max, MAX_ITERATIONS, 2, 256);
-            for n in response.image.iter() {
+            let response = super::get_tile(
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                MAX_ITERATIONS,
+                2,
+                256,
+                "turbo".to_string(),
+                false,
+            );
+            for n in response.iter() {
                 assert!(
                     *n <= u8::MAX,
                     "Invalid color value: {} at tile: ({}, {}, {}, {})",
@@ -105,15 +125,22 @@ mod lib_test {
     #[test]
     fn test_get_tile_snapshot() {
         for (index, &(x_min, x_max, y_min, y_max)) in SQUARES.iter().enumerate() {
-            let response = super::get_tile(x_min, x_max, y_min, y_max, MAX_ITERATIONS, 2, 100);
-            insta::assert_snapshot!(
-                format!("snapshot{}", index),
-                format!("{:?}", response.image)
+            let response = super::get_tile(
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                MAX_ITERATIONS,
+                2,
+                100,
+                "turbo".to_string(),
+                false,
             );
+            insta::assert_snapshot!(format!("snapshot{}", index), format!("{:?}", response));
 
             if let Err(err) = image::save_buffer(
                 format!("./src/snapshots/snapshot{}.png", index),
-                &(response.image),
+                &response,
                 100,
                 100,
                 image::ColorType::Rgba8,

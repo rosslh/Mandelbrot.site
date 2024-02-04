@@ -67,26 +67,39 @@ div#inputsWrapper > * {
   margin: 5px 0;
 }
 
-div.numberInputWrapper {
+div.inputWrapper {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 5px;
 }
-div.numberInputWrapper > * {
+div.inputWrapper > * {
   display: block;
 }
 
-div.numberInputWrapper > input {
+div.inputWrapper > input {
   width: 80px;
-  margin-left: 10px;
+}
+
+div.checkboxWrapper {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+button#refresh {
+  margin-top: 10px !important;
 }
 
 button,
-input {
+input,
+select {
   border: none;
   border-radius: 2px;
   padding: 2px;
   background-color: white;
+  color: black;
 }
 
 button {
