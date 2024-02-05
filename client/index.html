@@ -73,6 +73,20 @@
 
   <body>
     <div id="inputsWrapper" class="overlay">
+      <div class="shortcutWrapper">
+        <code>H</code>
+        <div>Hide/show controls</div>
+      </div>
+      <div class="shortcutWrapper">
+        <code>shift + drag</code>
+        <div>Zoom in on a region</div>
+      </div>
+      <div class="shortcutWrapper">
+        <code class="windowsShortcut">alt + click</code
+        ><code class="macShortcut">option + click</code>
+        <div>Center a point</div>
+      </div>
+      <div class="inputSeparator"></div>
       <div class="inputWrapper">
         <label for="iterations">Iterations:</label>
         <input type="text" id="iterations" name="iterations" />
@@ -81,6 +95,11 @@
         <label for="exponent">Exponent:</label>
         <input type="text" id="exponent" name="exponent" />
       </div>
+      <div class="checkboxWrapper" id="highDpiTilesWrapper">
+        <input type="checkbox" id="highDpiTiles" name="highDpiTiles" />
+        <label for="highDpiTiles">High resolution</label>
+      </div>
+      <div class="inputSeparator"></div>
       <div class="inputWrapper">
         <label for="colorScheme">Color Scheme:</label>
         <select id="colorScheme" name="colorScheme">
@@ -135,12 +154,8 @@
         <input type="checkbox" id="reverseColors" name="reverseColors" />
         <label for="reverseColors">Reverse colors</label>
       </div>
-      <div class="checkboxWrapper">
-        <input type="checkbox" id="highDpiTiles" name="highDpiTiles" />
-        <label for="highDpiTiles">High resolution</label>
-      </div>
-      <button id="refresh" type="button">↻ Refresh</button>
       <div class="inputSeparator"></div>
+      <button id="refresh" type="button">↻ Refresh</button>
       <button id="full-screen" type="button">Full Screen</button>
       <button id="save-image" type="button">Save Image</button>
     </div>

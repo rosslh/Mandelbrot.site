@@ -1,4 +1,4 @@
-import "../css/styles.css";
+import "../css/styles.scss";
 import "../css/normalize.css";
 import "../static/site-image.png";
 import "../static/apple-touch-icon.png";

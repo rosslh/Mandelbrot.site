@@ -21,13 +21,14 @@ const appConfig = {
         exclude: /node_modules/,
       },
       {
-        test: /\.css$/i,
+        test: /\.(css|scss)$/i,
         use: [
           {
             loader: MiniCssExtractPlugin.loader,
             options: { publicPath: "css/" },
           },
           "css-loader",
+          "sass-loader",
         ],
       },
       {
@@ -61,6 +62,17 @@ const workerConfig = {
         test: /\.ts$/,
         use: "ts-loader",
         exclude: /node_modules/,
+      },
+      {
+        test: /\.(css|scss)$/i,
+        use: [
+          {
+            loader: MiniCssExtractPlugin.loader,
+            options: { publicPath: "css/" },
+          },
+          "css-loader",
+          "sass-loader",
+        ],
       },
     ],
   },

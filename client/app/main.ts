@@ -1,12 +1,16 @@
 import "./static";
-import * as debounce from "debounce";
+import debounce from "lodash/debounce";
 import * as L from "leaflet";
 import { saveAs } from "file-saver";
 import domToImage from "dom-to-image";
 import { EsThreadPool, EsThread } from "threads-es/controller";
 
 interface MandelbrotConfig {
-  [key: string]: number | string | boolean;
+  iterations: number;
+  exponent: number;
+  colorScheme: string;
+  reverseColors: boolean;
+  highDpiTiles: boolean;
 }
 
 interface NumberInput {
@@ -56,32 +60,29 @@ class MandelbrotLayer extends L.GridLayer {
     });
   }
 
-  private getMappedCoords(coords: L.Coords) {
-    const mapCoordinates = (
-      x: number,
-      y: number,
-      z: number,
-      tileSize: number
-    ): { re: number; im: number } => {
-      const scaleFactor = tileSize / 128.5;
-      const d = 2 ** (z - 2);
-      const re = (x / d) * scaleFactor - 4;
-      const im = (y / d) * scaleFactor - 4;
-      return { re, im };
-    };
+  private mapCoordsToComplex(
+    x: number,
+    y: number,
+    z: number
+  ): { re: number; im: number } {
+    const scaleFactor = this.getTileSize().x / 128.5;
+    const d = 2 ** (z - 2);
+    const re = (x / d) * scaleFactor - 4;
+    const im = (y / d) * scaleFactor - 4;
+    return { re, im };
+  }
 
-    const { re: re_min, im: im_min } = mapCoordinates(
+  private getMappedCoords(coords: L.Coords) {
+    const { re: re_min, im: im_min } = this.mapCoordsToComplex(
       coords.x,
       coords.y,
-      coords.z,
-      this.getTileSize().x
+      coords.z
     );
 
-    const { re: re_max, im: im_max } = mapCoordinates(
+    const { re: re_max, im: im_max } = this.mapCoordsToComplex(
       coords.x + 1,
       coords.y + 1,
-      coords.z,
-      this.getTileSize().x
+      coords.z
     );
 
     const mappedCoords = {
@@ -94,21 +95,21 @@ class MandelbrotLayer extends L.GridLayer {
     return mappedCoords;
   }
 
-  actualCreateTile(canvas: HTMLCanvasElement, coords: L.Coords, done: Done) {
+  private actualCreateTile(
+    canvas: HTMLCanvasElement,
+    coords: L.Coords,
+    done: Done
+  ) {
     const context = canvas.getContext("2d");
 
     const scaledTileSize = config.highDpiTiles
-      ? this.getTileSize().x * (window.devicePixelRatio || 1)
+      ? this.getTileSize().x * Math.max(window.devicePixelRatio || 2, 2)
       : this.getTileSize().x;
 
     canvas.width = scaledTileSize;
     canvas.height = scaledTileSize;
 
     const mappedCoords = this.getMappedCoords(coords);
-
-    Object.entries({ ...coords, ...mappedCoords }).forEach(([key, value]) => {
-      canvas.dataset[key] = String(value);
-    });
 
     this._map.pool
       ?.queue((thread) =>
@@ -127,20 +128,24 @@ class MandelbrotLayer extends L.GridLayer {
           scaledTileSize,
           scaledTileSize
         );
-        context.putImageData(imageData, 0, 0);
-        done(null, canvas);
+        if (canvas.dataset.z !== String(coords.z)) {
+          canvas.dataset.z = JSON.stringify(coords.z);
+          context.putImageData(imageData, 0, 0);
+          done(null, canvas);
+        }
       });
 
     return canvas;
   }
 
-  processTileGenerationQueue() {
+  private processTileGenerationQueue() {
+    const taskQueue = this.taskQueue.splice(0, this.taskQueue.length);
+
     const mapZoom = this._map.getZoom();
 
-    const relevantTasks = this.taskQueue.filter((task) => {
+    const relevantTasks = taskQueue.filter((task) => {
       return task.coords.z === mapZoom;
     });
-    this.taskQueue = [];
 
     relevantTasks.forEach((task) => {
       this.actualCreateTile(task.canvas, task.coords, task.done);
@@ -149,7 +154,7 @@ class MandelbrotLayer extends L.GridLayer {
 
   debounceTileGeneration = debounce(() => {
     this.processTileGenerationQueue();
-  }, 400);
+  }, 300);
 
   createTile(coords: L.Coords, done: Done) {
     const canvas = L.DomUtil.create(
@@ -198,9 +203,16 @@ class MandelbrotMap extends L.Map {
     this.mandelbrotLayer.refresh();
 
     this.on("drag", function () {
-      this.mandelbrotLayer.processTileGenerationQueue();
+      this.mandelbrotLayer.debounceTileGeneration.flush();
     });
+    this.on("click", this.handleMapClick);
   }
+
+  handleMapClick = (e: L.LeafletMouseEvent) => {
+    if (e.originalEvent.altKey) {
+      this.setView(e.latlng, this.getZoom());
+    }
+  };
 
   async createPool() {
     if (this.pool) {
@@ -278,20 +290,16 @@ function handleSelectInput({ id, map }: SelectInput) {
   };
 }
 
-function handleCheckboxInput({ id, map, hidden }: CheckboxInput) {
+function handleCheckboxInput({ id, map }: CheckboxInput) {
   const checkbox = <HTMLInputElement>document.getElementById(id);
-  if (hidden) {
-    checkbox.style.display = "none";
-  } else {
-    checkbox.checked = Boolean(config[id]);
-    checkbox.onchange = ({ target }) => {
-      config[id] = (<HTMLInputElement>target).checked;
-      map.refresh();
-    };
-  }
+  checkbox.checked = Boolean(config[id]);
+  checkbox.onchange = ({ target }) => {
+    config[id] = (<HTMLInputElement>target).checked;
+    map.refresh();
+  };
 }
 
-function handleInputs(map: MandelbrotMap) {
+function handleDom(map: MandelbrotMap) {
   handleNumberInput({
     id: "iterations",
     map,
@@ -312,7 +320,6 @@ function handleInputs(map: MandelbrotMap) {
   handleCheckboxInput({
     id: "highDpiTiles",
     map,
-    hidden: (window.devicePixelRatio || 1) < 2,
   });
 
   const refreshButton: HTMLButtonElement = document.querySelector("#refresh");
@@ -352,9 +359,25 @@ function handleInputs(map: MandelbrotMap) {
       ? "Exit Full Screen"
       : "Full Screen";
   });
+
+  const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+  const windowsShortcut =
+    document.querySelector<HTMLSpanElement>(".windowsShortcut");
+  const macShortcut = document.querySelector<HTMLSpanElement>(".macShortcut");
+
+  if (isMac && windowsShortcut && macShortcut) {
+    windowsShortcut.style.display = "none";
+    macShortcut.style.display = "inline-block";
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "h") {
+      document.body.classList.toggle("hideOverlays");
+    }
+  });
 }
 
 const map = new MandelbrotMap({
   htmlId: "leaflet-map",
 });
-handleInputs(map);
+handleDom(map);
