@@ -44,7 +44,7 @@
     "leaflet": "1.7.1",
     "lodash": "^4.17.21",
     "long": "^5.2.3",
-    "threads-es": "^1.0.0",
+    "threads": "^1.7.0",
     "util": "^0.12.5"
   },
   "engines": {

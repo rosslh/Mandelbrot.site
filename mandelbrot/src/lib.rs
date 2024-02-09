@@ -89,35 +89,20 @@ fn rect_in_set(
 
 const NUM_COLOR_CHANNELS: usize = 4;
 
-static COLOROUS_PALETTES: Lazy<HashMap<String, colorous::Gradient>> = Lazy::new(|| {
+static COLOR_PALETTES: Lazy<HashMap<String, colorous::Gradient>> = Lazy::new(|| {
     let mut map = HashMap::new();
-    map.insert("blueGreen".to_string(), colorous::BLUE_GREEN);
-    map.insert("bluePurple".to_string(), colorous::BLUE_PURPLE);
-    map.insert("blues".to_string(), colorous::BLUES);
     map.insert("brownGreen".to_string(), colorous::BROWN_GREEN);
     map.insert("cividis".to_string(), colorous::CIVIDIS);
     map.insert("cool".to_string(), colorous::COOL);
     map.insert("cubehelix".to_string(), colorous::CUBEHELIX);
-    map.insert("greenBlue".to_string(), colorous::GREEN_BLUE);
-    map.insert("greens".to_string(), colorous::GREENS);
-    map.insert("greys".to_string(), colorous::GREYS);
     map.insert("inferno".to_string(), colorous::INFERNO);
     map.insert("magma".to_string(), colorous::MAGMA);
-    map.insert("orangeRed".to_string(), colorous::ORANGE_RED);
-    map.insert("oranges".to_string(), colorous::ORANGES);
-    map.insert("pinkGreen".to_string(), colorous::PINK_GREEN);
     map.insert("plasma".to_string(), colorous::PLASMA);
-    map.insert("purpleBlue".to_string(), colorous::PURPLE_BLUE);
-    map.insert("purpleBlueGreen".to_string(), colorous::PURPLE_BLUE_GREEN);
     map.insert("purpleGreen".to_string(), colorous::PURPLE_GREEN);
     map.insert("purpleOrange".to_string(), colorous::PURPLE_ORANGE);
-    map.insert("purpleRed".to_string(), colorous::PURPLE_RED);
-    map.insert("purples".to_string(), colorous::PURPLES);
     map.insert("rainbow".to_string(), colorous::RAINBOW);
     map.insert("redBlue".to_string(), colorous::RED_BLUE);
     map.insert("redGrey".to_string(), colorous::RED_GREY);
-    map.insert("redPurple".to_string(), colorous::RED_PURPLE);
-    map.insert("reds".to_string(), colorous::REDS);
     map.insert("redYellowBlue".to_string(), colorous::RED_YELLOW_BLUE);
     map.insert("redYellowGreen".to_string(), colorous::RED_YELLOW_GREEN);
     map.insert("sinebow".to_string(), colorous::SINEBOW);
@@ -125,13 +110,31 @@ static COLOROUS_PALETTES: Lazy<HashMap<String, colorous::Gradient>> = Lazy::new(
     map.insert("turbo".to_string(), colorous::TURBO);
     map.insert("viridis".to_string(), colorous::VIRIDIS);
     map.insert("warm".to_string(), colorous::WARM);
-    map.insert("yellowGreen".to_string(), colorous::YELLOW_GREEN);
-    map.insert("yellowGreenBlue".to_string(), colorous::YELLOW_GREEN_BLUE);
     map.insert(
         "yellowOrangeBrown".to_string(),
         colorous::YELLOW_ORANGE_BROWN,
     );
+    map
+});
+
+static REVERSE_COLOR_PALETTES: Lazy<HashMap<String, colorous::Gradient>> = Lazy::new(|| {
+    let mut map = HashMap::new();
+    map.insert("blues".to_string(), colorous::BLUES);
+    map.insert("greenBlue".to_string(), colorous::GREEN_BLUE);
+    map.insert("greens".to_string(), colorous::GREENS);
+    map.insert("greys".to_string(), colorous::GREYS);
+    map.insert("orangeRed".to_string(), colorous::ORANGE_RED);
+    map.insert("oranges".to_string(), colorous::ORANGES);
+    map.insert("pinkGreen".to_string(), colorous::PINK_GREEN);
+    map.insert("purpleBlueGreen".to_string(), colorous::PURPLE_BLUE_GREEN);
+    map.insert("purpleRed".to_string(), colorous::PURPLE_RED);
+    map.insert("purples".to_string(), colorous::PURPLES);
+    map.insert("redPurple".to_string(), colorous::RED_PURPLE);
+    map.insert("reds".to_string(), colorous::REDS);
+    map.insert("yellowGreen".to_string(), colorous::YELLOW_GREEN);
+    map.insert("yellowGreenBlue".to_string(), colorous::YELLOW_GREEN_BLUE);
     map.insert("yellowOrangeRed".to_string(), colorous::YELLOW_ORANGE_RED);
+
     map
 });
 
@@ -145,15 +148,22 @@ pub fn get_tile(
     exponent: u32,
     image_side_length: usize,
     color_scheme: String,
-    reverse_colors: bool,
+    _reverse_colors: bool,
 ) -> Vec<u8> {
+    let mut reverse_colors = _reverse_colors;
+
     let min_channel_value = 0;
     let max_channel_value = 255;
-    let palette = if color_scheme != "turbo" && COLOROUS_PALETTES.contains_key(&color_scheme) {
-        COLOROUS_PALETTES.get(&color_scheme).unwrap()
-    } else {
-        &colorous::TURBO
-    };
+    let mut palette = &colorous::TURBO;
+
+    if COLOR_PALETTES.contains_key(&color_scheme) {
+        palette = COLOR_PALETTES.get(&color_scheme).unwrap();
+    }
+
+    if REVERSE_COLOR_PALETTES.contains_key(&color_scheme) {
+        palette = REVERSE_COLOR_PALETTES.get(&color_scheme).unwrap();
+        reverse_colors = !reverse_colors;
+    }
 
     let output_size: usize = image_side_length * image_side_length * NUM_COLOR_CHANNELS;
 

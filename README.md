@@ -10,7 +10,7 @@
 
 - [Mandelbrot set code - <code>mandelbrot/src/lib.rs</code>](mandelbrot/src/lib.rs)
 - [Rust tests - <code>mandelbrot/src/lib_test.rs</code>](mandelbrot/src/lib_test.rs)
-- [Web Worker - <code>client/app/worker.ts</code>](client/app/worker.ts)
+- [Web Worker - <code>client/app/worker.js</code>](client/app/worker.js)
 - [Leaflet tile generation - <code>client/app/main.ts</code>](client/app/main.ts)
 
 ## Features

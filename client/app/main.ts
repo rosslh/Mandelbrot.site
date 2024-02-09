@@ -1,260 +1,52 @@
 import "./static";
 import debounce from "lodash/debounce";
 import * as L from "leaflet";
-import { saveAs } from "file-saver";
-import domToImage from "dom-to-image";
-import { EsThreadPool, EsThread } from "threads-es/controller";
+import MandelbrotMap from "./MandelbrotMap";
 
-interface MandelbrotConfig {
+type MandelbrotConfig = {
   iterations: number;
   exponent: number;
   colorScheme: string;
   reverseColors: boolean;
   highDpiTiles: boolean;
-}
 
-interface NumberInput {
-  id: "iterations" | "exponent";
+  re: number;
+  im: number;
+  zoom: number;
+};
+
+type NumberInput = {
+  id: "iterations" | "exponent" | "re" | "im" | "zoom";
   map: MandelbrotMap;
   minValue: number;
   defaultValue: number;
   maxValue: number;
+  allowFraction?: boolean;
   resetView?: boolean;
-}
+};
 
-interface SelectInput {
+type SelectInput = {
   id: "colorScheme";
   map: MandelbrotMap;
-}
+};
 
-interface CheckboxInput {
+type CheckboxInput = {
   id: "reverseColors" | "highDpiTiles";
   map: MandelbrotMap;
   hidden?: boolean;
-}
+};
 
-interface Done {
-  (error: null, tile: HTMLCanvasElement): void;
-}
-
-const config: MandelbrotConfig = {
+export const config: MandelbrotConfig = {
   iterations: 200,
   exponent: 2,
   colorScheme: "turbo",
   reverseColors: false,
   highDpiTiles: false,
+
+  re: 0,
+  im: 0,
+  zoom: 3,
 };
-class MandelbrotLayer extends L.GridLayer {
-  tileSize: number;
-  _map: MandelbrotMap;
-  taskQueue: Array<{
-    coords: L.Coords;
-    canvas: HTMLCanvasElement;
-    done: Done;
-  }> = [];
-
-  constructor() {
-    super({
-      noWrap: true,
-      tileSize: 200,
-    });
-  }
-
-  private mapCoordsToComplex(
-    x: number,
-    y: number,
-    z: number
-  ): { re: number; im: number } {
-    const scaleFactor = this.getTileSize().x / 128.5;
-    const d = 2 ** (z - 2);
-    const re = (x / d) * scaleFactor - 4;
-    const im = (y / d) * scaleFactor - 4;
-    return { re, im };
-  }
-
-  private getMappedCoords(coords: L.Coords) {
-    const { re: re_min, im: im_min } = this.mapCoordsToComplex(
-      coords.x,
-      coords.y,
-      coords.z
-    );
-
-    const { re: re_max, im: im_max } = this.mapCoordsToComplex(
-      coords.x + 1,
-      coords.y + 1,
-      coords.z
-    );
-
-    const mappedCoords = {
-      re_min,
-      re_max,
-      im_min,
-      im_max,
-    };
-
-    return mappedCoords;
-  }
-
-  private actualCreateTile(
-    canvas: HTMLCanvasElement,
-    coords: L.Coords,
-    done: Done
-  ) {
-    const context = canvas.getContext("2d");
-
-    const scaledTileSize = config.highDpiTiles
-      ? this.getTileSize().x * Math.max(window.devicePixelRatio || 2, 2)
-      : this.getTileSize().x;
-
-    canvas.width = scaledTileSize;
-    canvas.height = scaledTileSize;
-
-    const mappedCoords = this.getMappedCoords(coords);
-
-    this._map.pool
-      ?.queue((thread) =>
-        thread.methods.getTile({
-          coords: mappedCoords,
-          maxIterations: config.iterations,
-          exponent: config.exponent,
-          tileSize: scaledTileSize,
-          colorScheme: config.colorScheme,
-          reverseColors: config.reverseColors,
-        })
-      )
-      .then((result) => {
-        const imageData = new ImageData(
-          Uint8ClampedArray.from(result),
-          scaledTileSize,
-          scaledTileSize
-        );
-        if (canvas.dataset.z !== String(coords.z)) {
-          canvas.dataset.z = JSON.stringify(coords.z);
-          context.putImageData(imageData, 0, 0);
-          done(null, canvas);
-        }
-      });
-
-    return canvas;
-  }
-
-  private processTileGenerationQueue() {
-    const taskQueue = this.taskQueue.splice(0, this.taskQueue.length);
-
-    const mapZoom = this._map.getZoom();
-
-    const relevantTasks = taskQueue.filter((task) => {
-      return task.coords.z === mapZoom;
-    });
-
-    relevantTasks.forEach((task) => {
-      this.actualCreateTile(task.canvas, task.coords, task.done);
-    });
-  }
-
-  debounceTileGeneration = debounce(() => {
-    this.processTileGenerationQueue();
-  }, 300);
-
-  createTile(coords: L.Coords, done: Done) {
-    const canvas = L.DomUtil.create(
-      "canvas",
-      "leaflet-tile"
-    ) as HTMLCanvasElement;
-    this.taskQueue.push({ coords, canvas, done });
-    this.debounceTileGeneration();
-    return canvas;
-  }
-
-  refresh() {
-    let currentMap: MandelbrotMap | null = null;
-    if (this._map) {
-      currentMap = this._map as MandelbrotMap;
-      this.removeFrom(this._map);
-    }
-    this.addTo(currentMap);
-  }
-}
-
-class MandelbrotMap extends L.Map {
-  mandelbrotLayer: MandelbrotLayer;
-  mapId: string;
-  defaultPosition: [number, number];
-  defaultZoom: number;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  pool: EsThreadPool<any>;
-
-  constructor({ htmlId: mapId }: { htmlId: string }) {
-    super(mapId, {
-      attributionControl: false,
-      maxZoom: 32,
-      zoomAnimationThreshold: 32,
-    });
-
-    this.createPool().then(() => {
-      this.refresh(false);
-      this.mandelbrotLayer.refresh();
-    });
-    this.mapId = mapId;
-    this.mandelbrotLayer = new MandelbrotLayer().addTo(this);
-    this.defaultPosition = [0, 0];
-    this.defaultZoom = 3;
-    this.setView(this.defaultPosition, this.defaultZoom);
-    this.mandelbrotLayer.refresh();
-
-    this.on("drag", function () {
-      this.mandelbrotLayer.debounceTileGeneration.flush();
-    });
-    this.on("click", this.handleMapClick);
-  }
-
-  handleMapClick = (e: L.LeafletMouseEvent) => {
-    if (e.originalEvent.altKey) {
-      this.setView(e.latlng, this.getZoom());
-    }
-  };
-
-  async createPool() {
-    if (this.pool) {
-      this.pool.terminate();
-    }
-
-    this.pool = await EsThreadPool.Spawn(
-      () =>
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        EsThread.Spawn<any>(
-          new Worker(new URL("./worker.ts", import.meta.url), {
-            type: "module",
-          })
-        ),
-      {
-        size: navigator.hardwareConcurrency || 4,
-      }
-    );
-  }
-
-  async refresh(resetView = false) {
-    await this.createPool();
-    if (resetView) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (this as any)._resetView(this.defaultPosition, this.defaultZoom);
-    } else {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (this as any)._resetView(this.getCenter(), this.getZoom());
-    }
-  }
-
-  async saveImage() {
-    const zoomControl = this.zoomControl;
-    const mapElement = document.getElementById(this.mapId);
-    const width = mapElement.offsetWidth;
-    const height = mapElement.offsetHeight;
-    this.removeControl(zoomControl);
-    const blob = await domToImage.toBlob(mapElement, { width, height });
-    this.addControl(zoomControl);
-    saveAs(blob, `mandelbrot-${Date.now()}.png`);
-  }
-}
 
 function handleNumberInput({
   id,
@@ -263,11 +55,14 @@ function handleNumberInput({
   minValue,
   maxValue,
   resetView,
+  allowFraction,
 }: NumberInput) {
   const input = <HTMLInputElement>document.getElementById(id);
   input.value = String(config[id]);
   input.oninput = debounce(({ target }) => {
-    let parsedValue = Number.parseInt((<HTMLInputElement>target).value, 10);
+    let parsedValue = allowFraction
+      ? Number.parseFloat((<HTMLInputElement>target).value)
+      : Number.parseInt((<HTMLInputElement>target).value, 10);
     if (
       isNaN(parsedValue) ||
       parsedValue < minValue ||
@@ -315,6 +110,29 @@ function handleDom(map: MandelbrotMap) {
     maxValue: 10 ** 9,
     resetView: true,
   });
+  handleNumberInput({
+    id: "re",
+    map,
+    minValue: -2,
+    defaultValue: 0,
+    maxValue: 2,
+    allowFraction: true,
+  });
+  handleNumberInput({
+    id: "im",
+    map,
+    minValue: -2,
+    defaultValue: 0,
+    maxValue: 2,
+    allowFraction: true,
+  });
+  handleNumberInput({
+    id: "zoom",
+    map,
+    minValue: 0,
+    defaultValue: 3,
+    maxValue: 32,
+  });
   handleSelectInput({ id: "colorScheme", map });
   handleCheckboxInput({ id: "reverseColors", map });
   handleCheckboxInput({
@@ -327,11 +145,20 @@ function handleDom(map: MandelbrotMap) {
 
   const fullScreenButton: HTMLButtonElement =
     document.querySelector("#full-screen");
-  if (document.fullscreenEnabled) {
-    fullScreenButton.onclick = toggleFullScreen;
-  } else {
-    fullScreenButton.style.display = "none";
-  }
+  const exitFullScreenButton: HTMLButtonElement =
+    document.querySelector("#exit-full-screen");
+  fullScreenButton.onclick = toggleFullScreen;
+  exitFullScreenButton.onclick = toggleFullScreen;
+
+  const resetButton: HTMLButtonElement = document.querySelector("#reset");
+  resetButton.onclick = () => map.refresh(true);
+
+  const hideShowControlsButton: HTMLButtonElement = document.querySelector(
+    "#hide-show-controls"
+  );
+  hideShowControlsButton.onclick = () => {
+    document.body.classList.toggle("hideOverlays");
+  };
 
   const saveButton: HTMLButtonElement = document.querySelector("#save-image");
   try {
@@ -354,10 +181,17 @@ function handleDom(map: MandelbrotMap) {
   }
 
   document.addEventListener("fullscreenchange", () => {
-    const button: HTMLButtonElement = document.querySelector("#full-screen");
-    button.innerText = document.fullscreenElement
-      ? "Exit Full Screen"
-      : "Full Screen";
+    const fullScreenButton: HTMLButtonElement =
+      document.querySelector("#full-screen");
+    const exitFullScreenButton: HTMLButtonElement =
+      document.querySelector("#exit-full-screen");
+    if (document.fullscreenElement) {
+      fullScreenButton.style.display = "none";
+      exitFullScreenButton.style.display = "inline-block";
+    } else {
+      fullScreenButton.style.display = "inline-block";
+      exitFullScreenButton.style.display = "none";
+    }
   });
 
   const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
@@ -374,10 +208,81 @@ function handleDom(map: MandelbrotMap) {
     if (event.key === "h") {
       document.body.classList.toggle("hideOverlays");
     }
+    if (event.key === "s") {
+      map.saveImage();
+    }
+    if (event.key === "r") {
+      map.refresh();
+    }
+    if (event.key === "f") {
+      toggleFullScreen();
+    }
+    if (event.key === "b") {
+      map.refresh(true);
+    }
   });
+
+  if (L.Browser.mobile || L.Browser.android || L.Browser.ie) {
+    const banner = <HTMLDivElement>(
+      document.querySelector("#mobile-not-supported")
+    );
+    banner.style.display = "flex";
+  }
 }
 
 const map = new MandelbrotMap({
   htmlId: "leaflet-map",
 });
 handleDom(map);
+
+window.addEventListener("load", function () {
+  const queryParams = new URLSearchParams(window.location.search);
+  const re = queryParams.get("re");
+  const im = queryParams.get("im");
+  const zoom = queryParams.get("z");
+  const iterations = queryParams.get("i");
+  const exponent = queryParams.get("e");
+  const colorScheme = queryParams.get("c");
+  const reverseColors = queryParams.get("r");
+  const sharing = queryParams.get("sharing");
+
+  if (re && im && zoom) {
+    config.re = Number(re);
+    config.im = Number(im);
+    config.zoom = Number(zoom);
+
+    if (iterations) {
+      config.iterations = Number(iterations);
+      (<HTMLInputElement>document.querySelector("#iterations")).value =
+        iterations;
+    }
+    if (exponent) {
+      config.exponent = Number(exponent);
+      (<HTMLInputElement>document.querySelector("#exponent")).value = exponent;
+    }
+    if (colorScheme) {
+      config.colorScheme = colorScheme;
+      (<HTMLSelectElement>document.querySelector("#colorScheme")).value =
+        colorScheme;
+    }
+    if (reverseColors) {
+      config.reverseColors = reverseColors === "true";
+      (<HTMLInputElement>document.querySelector("#reverseColors")).checked =
+        config.reverseColors;
+    }
+
+    if (sharing) {
+      window.history.replaceState(
+        {},
+        document.title,
+        window.location.href.replace("&sharing=true", "")
+      );
+    } else {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    if (config.re !== 0 && config.im !== 0 && config.zoom !== 3) {
+      map.refresh();
+    }
+  }
+});

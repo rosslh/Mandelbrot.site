@@ -72,11 +72,12 @@
   </head>
 
   <body>
+    <div id="mobile-not-supported">
+      <p>
+        This application is not designed for mobile devices or small screens.
+      </p>
+    </div>
     <div id="inputsWrapper" class="overlay">
-      <div class="shortcutWrapper">
-        <code>H</code>
-        <div>Hide/show controls</div>
-      </div>
       <div class="shortcutWrapper">
         <code>shift + drag</code>
         <div>Zoom in on a region</div>
@@ -97,7 +98,7 @@
       </div>
       <div class="checkboxWrapper" id="highDpiTilesWrapper">
         <input type="checkbox" id="highDpiTiles" name="highDpiTiles" />
-        <label for="highDpiTiles">High resolution</label>
+        <label for="highDpiTiles">High resolution (slow)</label>
       </div>
       <div class="inputSeparator"></div>
       <div class="inputWrapper">
@@ -113,17 +114,14 @@
             <option value="turbo">Turbo</option>
             <option value="viridis">Viridis</option>
             <option value="warm">Warm</option>
-            <option value="blueGreen">Blue Green</option>
-            <option value="bluePurple">Blue Purple</option>
-            <option value="greenBlue">Green Blue</option>
-            <option value="orangeRed">Orange Red</option>
-            <option value="purpleBlue">Purple Blue</option>
-            <option value="purpleBlueGreen">Purple Blue Green</option>
-            <option value="purpleRed">Purple Red</option>
-            <option value="redPurple">Red Purple</option>
-            <option value="yellowGreen">Yellow Green</option>
-            <option value="yellowGreenBlue">Yellow Green Blue</option>
-            <option value="yellowOrangeRed">Yellow Orange Red</option>
+            <option value="yellowGreenBlue">Blue Green Yellow</option>
+            <option value="greenBlue">Blue Green</option>
+            <option value="purpleBlueGreen">Green Blue Purple</option>
+            <option value="yellowGreen">Green Yellow</option>
+            <option value="redPurple">Purple Red</option>
+            <option value="yellowOrangeRed">Red Orange Yellow</option>
+            <option value="orangeRed">Red Orange</option>
+            <option value="purpleRed">Red Purple</option>
           </optgroup>
           <optgroup label="Sequential (Single-Hue)">
             <option value="blues">Blues</option>
@@ -136,7 +134,7 @@
           <optgroup label="Diverging">
             <option value="spectral">Spectral</option>
             <option value="brownGreen">Brown Green</option>
-            <option value="pinkGreen">Pink Green</option>
+            <option value="pinkGreen">Green Pink</option>
             <option value="purpleGreen">Purple Green</option>
             <option value="purpleOrange">Purple Orange</option>
             <option value="redBlue">Red Blue</option>
@@ -155,9 +153,48 @@
         <label for="reverseColors">Reverse colors</label>
       </div>
       <div class="inputSeparator"></div>
-      <button id="refresh" type="button">↻ Refresh</button>
-      <button id="full-screen" type="button">Full Screen</button>
-      <button id="save-image" type="button">Save Image</button>
+      <strong>Coordinates</strong>
+      <div class="inputWrapper">
+        <label for="re">Real:</label>
+        <input type="text" id="re" name="re" />
+      </div>
+      <div class="inputWrapper">
+        <label for="im">Imaginary:</label>
+        <input type="text" id="im" name="im" />
+      </div>
+      <div class="inputWrapper">
+        <label for="zoom">Zoom:</label>
+        <input type="text" id="zoom" name="zoom" />
+      </div>
+      <div class="inputSeparator"></div>
+      <button id="refresh" type="button">
+        <span class="shortcutHint">R</span>efresh
+      </button>
+      <button id="reset" type="button">
+        <span class="shortcutHint">B</span>ack to Start
+      </button>
+      <div class="inputSeparator"></div>
+      <button id="full-screen" type="button">
+        <span class="shortcutHint">F</span>ull Screen
+      </button>
+      <button id="exit-full-screen" type="button">
+        Exit <span class="shortcutHint">F</span>ull Screen
+      </button>
+      <button id="save-image" type="button">
+        <span class="shortcutHint">S</span>ave Image
+      </button>
+      <button id="hide-show-controls" type="button">
+        <span class="shortcutHint">H</span>ide Controls
+      </button>
+      <div class="inputSeparator"></div>
+      <a
+        id="shareLink"
+        href="/?re=0&im=0&z=3&i=200&sharing=true"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        Share this view
+      </a>
     </div>
     <div id="attribution" class="overlay">
       By

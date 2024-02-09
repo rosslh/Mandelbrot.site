@@ -49,7 +49,7 @@ const appConfig = {
 };
 
 const workerConfig = {
-  entry: "./app/worker.ts",
+  entry: "./app/worker.js",
   target: "webworker",
   plugins: [
     new WasmPackPlugin({
