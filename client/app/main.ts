@@ -221,13 +221,6 @@ function handleDom(map: MandelbrotMap) {
       map.refresh(true);
     }
   });
-
-  if (L.Browser.mobile || L.Browser.android || L.Browser.ie) {
-    const banner = <HTMLDivElement>(
-      document.querySelector("#mobile-not-supported")
-    );
-    banner.style.display = "flex";
-  }
 }
 
 const map = new MandelbrotMap({

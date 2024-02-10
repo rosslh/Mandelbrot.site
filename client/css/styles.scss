@@ -169,31 +169,14 @@ button#exit-full-screen {
   display: none;
 }
 
-#mobile-not-supported {
-  display: none;
-  background: black;
-  color: white;
-  z-index: 3000;
-  position: absolute;
-  inset: 0;
-  align-items: center;
-  justify-content: center;
-
-  p {
-    max-width: 300px;
-    text-align: center;
-    line-height: 1.5;
-  }
-}
-
 @media (hover: none) {
-  #mobile-not-supported {
-    display: flex;
+  .mobileHidden {
+    display: none !important;
   }
 }
 
-@media (max-width: 500px) {
-  #mobile-not-supported {
-    display: flex;
+@media (max-width: 800px) {
+  .mobileHidden {
+    display: none !important;
   }
 }

@@ -1,8 +1,8 @@
 {
   "author": "Ross Hill <ross@rosshill.ca>",
-  "name": "rust-mandelbrot-set",
+  "name": "mandelbrot.site",
   "version": "1.0.1",
-  "repository": "https://github.com/rosslh/rust-mandelbrot-set",
+  "repository": "https://github.com/rosslh/mandelbrot.site",
   "license": "MIT",
   "scripts": {
     "start": "webpack-dev-server --mode development --open --port 9090",

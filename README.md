@@ -25,9 +25,9 @@ _Formerly known as Rust Mandelbrot Set Explorer_
 
 View some of the stunning images generated with mandelbrot.site:
 
-[![Mandelbrot Set Image](https://raw.githubusercontent.com/rosslh/rust-mandelbrot-set/master/example-images/mandelbrot-4.png)](https://mandelbrot.site)
+[![Mandelbrot Set Image](https://raw.githubusercontent.com/rosslh/mandelbrot.site/master/example-images/mandelbrot-4.png)](https://mandelbrot.site)
 
-[![Mandelbrot Set Image](https://raw.githubusercontent.com/rosslh/rust-mandelbrot-set/master/example-images/mandelbrot-2.png)](https://mandelbrot.site)
+[![Mandelbrot Set Image](https://raw.githubusercontent.com/rosslh/mandelbrot.site/master/example-images/mandelbrot-2.png)](https://mandelbrot.site)
 
 [Explore more images](/example-images)
 

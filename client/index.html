@@ -73,22 +73,17 @@
   </head>
 
   <body>
-    <div id="mobile-not-supported">
-      <p>
-        This application is not designed for mobile devices or small screens.
-      </p>
-    </div>
     <div id="inputsWrapper" class="overlay">
-      <div class="shortcutWrapper">
+      <div class="shortcutWrapper mobileHidden">
         <code>shift + drag</code>
         <div>Zoom in on a region</div>
       </div>
-      <div class="shortcutWrapper">
+      <div class="shortcutWrapper mobileHidden">
         <code class="windowsShortcut">alt + click</code
         ><code class="macShortcut">option + click</code>
         <div>Center a point</div>
       </div>
-      <div class="inputSeparator"></div>
+      <div class="inputSeparator mobileHidden"></div>
       <div class="inputWrapper">
         <label for="iterations">Iterations:</label>
         <input type="text" id="iterations" name="iterations" />
@@ -101,8 +96,8 @@
         <input type="checkbox" id="highDpiTiles" name="highDpiTiles" />
         <label for="highDpiTiles">High resolution (slow)</label>
       </div>
-      <div class="inputSeparator"></div>
-      <div class="inputWrapper">
+      <div class="inputSeparator mobileHidden"></div>
+      <div class="inputWrapper mobileHidden">
         <label for="colorScheme">Color Scheme:</label>
         <select id="colorScheme" name="colorScheme">
           <optgroup label="Sequential (Multi-Hue)">
@@ -149,7 +144,7 @@
           </optgroup>
         </select>
       </div>
-      <div class="checkboxWrapper">
+      <div class="checkboxWrapper mobileHidden">
         <input type="checkbox" id="reverseColors" name="reverseColors" />
         <label for="reverseColors">Reverse colors</label>
       </div>
@@ -174,22 +169,23 @@
       <button id="reset" type="button">
         <span class="shortcutHint">B</span>ack to Start
       </button>
-      <div class="inputSeparator"></div>
-      <button id="full-screen" type="button">
+      <div class="inputSeparator mobileHidden"></div>
+      <button id="full-screen" class="mobileHidden" type="button">
         <span class="shortcutHint">F</span>ull Screen
       </button>
-      <button id="exit-full-screen" type="button">
+      <button id="exit-full-screen" class="mobileHidden" type="button">
         Exit <span class="shortcutHint">F</span>ull Screen
       </button>
-      <button id="save-image" type="button">
+      <button id="save-image" class="mobileHidden" type="button">
         <span class="shortcutHint">S</span>ave Image
       </button>
-      <button id="hide-show-controls" type="button">
+      <button id="hide-show-controls" class="mobileHidden" type="button">
         <span class="shortcutHint">H</span>ide Controls
       </button>
-      <div class="inputSeparator"></div>
+      <div class="inputSeparator mobileHidden"></div>
       <a
         id="shareLink"
+        class="mobileHidden"
         href="/?re=0&im=0&z=3&i=200&sharing=true"
         target="_blank"
         rel="noopener noreferrer"
@@ -203,7 +199,7 @@
         >Ross Hill</a
       >.
       <a
-        href="https://github.com/rosslh/rust-mandelbrot-set"
+        href="https://github.com/rosslh/mandelbrot.site"
         target="_blank"
         rel="noopener noreferrer"
         >Source code on GitHub</a
