@@ -91,15 +91,9 @@ class MandelbrotLayer extends L.GridLayer {
 
     const mapZoom = this._map.getZoom();
 
-    const seenTasks = new Set<string>();
-    const relevantTasks = tilesToGenerate.filter((task) => {
-      const positionString = JSON.stringify(task.position);
-      if (task.position.z === mapZoom && !seenTasks.has(positionString)) {
-        seenTasks.add(positionString);
-        return true;
-      }
-      return false;
-    });
+    const relevantTasks = tilesToGenerate.filter(
+      (task) => task.position.z === mapZoom
+    );
 
     relevantTasks.forEach((task) => {
       this.generateTile(task.canvas, task.position, task.done);

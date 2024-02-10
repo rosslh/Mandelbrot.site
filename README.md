@@ -1,32 +1,43 @@
-# Rust Mandelbrot Set Explorer
+# mandelbrot.site
 
-[Rust Mandelbrot Set Explorer](https://rust-mandelbrot.netlify.app) is a web app that lets you explore the Mandelbrot set fractal. Built with Rust, compiled to WebAssembly, running on Web Workers.
+_Formerly known as Rust Mandelbrot Set Explorer_
 
-[![img](https://raw.githubusercontent.com/rosslh/rust-mandelbrot-set/master/readme-images/site-image.png)](https://rust-mandelbrot.netlify.app)
+[mandelbrot.site](https://mandelbrot.site) is a web app that lets you explore the Mandelbrot set fractal. Built with Rust (compiled to WASM) and TypeScript.
 
-[![img](https://raw.githubusercontent.com/rosslh/rust-mandelbrot-set/master/readme-images/example-output.png)](https://rust-mandelbrot.netlify.app)
+## Project Structure
 
-## Code directory
+- **Mandelbrot Set Implementation**: [`mandelbrot/src/lib.rs`](mandelbrot/src/lib.rs)
+- **Rust Unit Tests**: [`mandelbrot/src/lib_test.rs`](mandelbrot/src/lib_test.rs)
+- **TypeScript Entry Point**: [`client/app/main.ts`](client/app/main.ts)
 
-- [Mandelbrot set code - <code>mandelbrot/src/lib.rs</code>](mandelbrot/src/lib.rs)
-- [Rust tests - <code>mandelbrot/src/lib_test.rs</code>](mandelbrot/src/lib_test.rs)
-- [Web Worker - <code>client/app/worker.js</code>](client/app/worker.js)
-- [Leaflet tile generation - <code>client/app/main.ts</code>](client/app/main.ts)
+## Key Features
 
-## Features
+- **Dynamic Zoom**: Use your mouse to scroll or select a region, diving deeper into the fractal.
+- **Iteration Adjustment**: Control the detail level with iteration count.
+- **Multibrot Sets**: Explore "multibrot" sets by changing the exponent.
+- **High-Resolution Rendering**: Enjoy crystal clear fractal images.
+- **Customizable Color Schemes**: Personalize your fractal exploration.
+- **Viewport Coordinates**: View and update the viewport's coordinates.
+- **Image Export**: Save your discoveries as PNG images.
+- **Shareable Views**: Generate URLs to share your current view with others.
 
-- Set max iterations to adjust speed vs render quality
-- "Multibrot" sets can be rendered by increasing the exponent parameter
-- Adjust the size of map tiles
-- Enter fullscreen mode
-- Save the visible portion of the fractal as an image
+## Gallery
 
-## Local development
+View some of the stunning images generated with mandelbrot.site:
 
-- Build scripts are available in [<code>client/package.json</code>](client/package.json). You can use the following commands from within `client/`:
-  - `npm install` -- Install npm dependencies
-  - `npm run start` -- Serve the project locally for development at `http://localhost:9090`
-  - `npm run build` -- Build the project for production
-  - `npm run test` -- Run Rust tests
-  - `npm run lint` -- Find problems with code
-  - `npm run clean` -- Clear installation caches and remove build artifacts
+[![Mandelbrot Set Image](https://raw.githubusercontent.com/rosslh/rust-mandelbrot-set/master/example-images/mandelbrot-4.png)](https://mandelbrot.site)
+
+[![Mandelbrot Set Image](https://raw.githubusercontent.com/rosslh/rust-mandelbrot-set/master/example-images/mandelbrot-2.png)](https://mandelbrot.site)
+
+[Explore more images](/example-images)
+
+## Getting Started Locally
+
+To set up and run the project on your local environment, navigate to the `client/` directory and use the following commands:
+
+- **Install Dependencies**: `npm install`
+- **Start Development Server**: `npm run start` - serves the project at `http://localhost:9090`
+- **Build for Production**: `npm run build`
+- **Run Rust Tests**: `npm run test`
+- **Lint**: `npm run lint` - identifies potential code issues
+- **Cleanup**: `npm run clean` - removes caches and build artifacts
