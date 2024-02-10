@@ -11,3 +11,4 @@ import "../static/browserconfig.xml";
 import "../static/favicon.ico";
 import "../static/mstile-150x150.png";
 import "../node_modules/leaflet/dist/leaflet.css";
+import "../netlify.toml";

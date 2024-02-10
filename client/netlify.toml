@@ -1,0 +1,5 @@
+[[redirects]]
+from = "https://rust-mandelbrot.netlify.app"
+to = "https://mandelbrot.site"
+status = 301
+force = true
