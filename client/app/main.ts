@@ -1,6 +1,5 @@
 import "./static";
 import debounce from "lodash/debounce";
-import * as L from "leaflet";
 import MandelbrotMap from "./MandelbrotMap";
 
 type MandelbrotConfig = {
@@ -228,7 +227,7 @@ const map = new MandelbrotMap({
 });
 handleDom(map);
 
-window.addEventListener("load", function () {
+const setConfigFromUrl = () => {
   const queryParams = new URLSearchParams(window.location.search);
   const re = queryParams.get("re");
   const im = queryParams.get("im");
@@ -278,4 +277,6 @@ window.addEventListener("load", function () {
       map.refresh();
     }
   }
-});
+};
+
+window.addEventListener("load", setConfigFromUrl);

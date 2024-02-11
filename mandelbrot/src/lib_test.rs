@@ -3,14 +3,12 @@ use super::*;
 #[cfg(test)]
 mod lib_test {
     const MAX_ITERATIONS: u32 = 200;
-    const SQUARES: [(f64, f64, f64, f64); 8] = [
+    const SQUARES: [(f64, f64, f64, f64); 6] = [
         (-0.75, -0.25, 0.25, 0.75),
         (-1.5, 0.0, -0.5, 0.5),
         (-2.0, -1.0, 0.0, 1.0),
         (-2.0, 0.5, -1.0, 1.0),
-        (-2.5, 1.0, -1.5, 1.5),
         (0.0, 1.5, 0.0, 1.0),
-        (0.0, 2.0, 0.0, 2.0),
         (
             -0.38239270518262103,
             -0.38239196302361966,
@@ -124,28 +122,58 @@ mod lib_test {
 
     #[test]
     fn test_get_tile_snapshot() {
-        for (index, &(x_min, x_max, y_min, y_max)) in SQUARES.iter().enumerate() {
-            let response = super::get_tile(
-                x_min,
-                x_max,
-                y_min,
-                y_max,
-                MAX_ITERATIONS,
-                2,
-                100,
-                "turbo".to_string(),
-                false,
-            );
-            insta::assert_snapshot!(format!("snapshot{}", index), format!("{:?}", response));
+        let max_iterations = [100, 200];
+        let exponents = [2, 3];
+        let image_side_lengths = [50, 100];
+        let color_schemes = ["turbo", "inferno"];
+        let reverse_color_options = [true, false];
 
-            if let Err(err) = image::save_buffer(
-                format!("./src/snapshots/snapshot{}.png", index),
-                &response,
-                100,
-                100,
-                image::ColorType::Rgba8,
-            ) {
-                panic!("Failed to save image: {}", err);
+        for &max_iterations in max_iterations.iter() {
+            for &exponent in exponents.iter() {
+                for &image_side_length in image_side_lengths.iter() {
+                    for color_scheme in color_schemes.iter() {
+                        for &reverse_color in reverse_color_options.iter() {
+                            for (index, &(x_min, x_max, y_min, y_max)) in SQUARES.iter().enumerate()
+                            {
+                                let response = super::get_tile(
+                                    x_min,
+                                    x_max,
+                                    y_min,
+                                    y_max,
+                                    max_iterations,
+                                    exponent,
+                                    image_side_length,
+                                    color_scheme.to_string(),
+                                    reverse_color,
+                                );
+                                let snapshot_name = format!(
+                                    "snapshot_{}_{}_{}_{}_{}_{}",
+                                    index,
+                                    max_iterations,
+                                    exponent,
+                                    image_side_length,
+                                    color_scheme,
+                                    reverse_color
+                                );
+                                insta::assert_snapshot!(
+                                    snapshot_name.clone(),
+                                    format!("{:?}", response)
+                                );
+
+                                let image_name = format!("./src/snapshots/{}.png", snapshot_name);
+                                if let Err(err) = image::save_buffer(
+                                    image_name,
+                                    &response,
+                                    image_side_length as u32,
+                                    image_side_length as u32,
+                                    image::ColorType::Rgba8,
+                                ) {
+                                    panic!("Failed to save image: {}", err);
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

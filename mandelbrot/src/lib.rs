@@ -16,7 +16,18 @@ use wasm_bindgen::prelude::*;
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-// how many iterations does it take to escape?
+/// Calculates the number of iterations it takes for a complex number to escape the set,
+/// based on the given coordinates, maximum iterations, escape radius, and exponent.
+///
+/// # Parameters
+/// - `x`: The real part of the complex number.
+/// - `y`: The imaginary part of the complex number.
+/// - `max_iterations`: The maximum number of iterations to perform.
+/// - `escape_radius`: The escape radius beyond which the function considers the number to have escaped.
+/// - `exponent`: The exponent used in the escape time algorithm.
+///
+/// # Returns
+/// A tuple containing the number of iterations it took to escape and the final value of the complex number.
 fn get_escape_iterations(
     x: f64,
     y: f64,
@@ -44,8 +55,20 @@ fn get_escape_iterations(
     (iter, z)
 }
 
-// Mandelbrot set is simply connected.
-// So if the border of the rectangle is in the set, we know the rest of it is too.
+/// Checks if a rectangle, defined by ranges of real and imaginary values, is completely within the Mandelbrot set.
+/// This is determined using a specified maximum number of iterations, escape radius, and exponent for the escape time
+/// algorithm. The Mandelbrot set is simply connected, meaning if the rectangle's border is in the set, the entire
+/// rectangle is guaranteed to be in the set as well.
+///
+/// # Parameters
+/// - `re_range`: A range of real values to check.
+/// - `im_range`: A range of imaginary values to check.
+/// - `max_iterations`: The maximum number of iterations to perform.
+/// - `escape_radius`: The escape radius beyond which the function considers a point to have escaped the set.
+/// - `exponent`: The exponent used in the escape time algorithm.
+///
+/// # Returns
+/// `true` if the entire rectangle is within the Mandelbrot set, `false` otherwise.
 fn rect_in_set(
     re_range: itertools_num::Linspace<f64>,
     im_range: itertools_num::Linspace<f64>,
@@ -138,6 +161,22 @@ static REVERSE_COLOR_PALETTES: Lazy<HashMap<String, colorous::Gradient>> = Lazy:
     map
 });
 
+/// Generates a tile of the Mandelbrot set given the bounds, number of iterations,
+/// exponent for escape time algorithm, image side length, and color scheme.
+///
+/// # Parameters
+/// - `re_min`: The minimum real value (left side of the image).
+/// - `re_max`: The maximum real value (right side of the image).
+/// - `im_min`: The minimum imaginary value (bottom of the image).
+/// - `im_max`: The maximum imaginary value (top of the image).
+/// - `max_iterations`: The maximum number of iterations to perform.
+/// - `exponent`: The exponent used in the escape time algorithm.
+/// - `image_side_length`: The length of one side of the square image, in pixels.
+/// - `color_scheme`: The name of the color scheme to use.
+/// - `_reverse_colors`: Whether to reverse the colors of the color scheme.
+///
+/// # Returns
+/// A vector of bytes representing the RGBA color values of the image.
 #[wasm_bindgen]
 pub fn get_tile(
     re_min: f64,
@@ -232,6 +271,8 @@ pub fn get_tile(
     img
 }
 
+/// Initializes the module. This function is specifically designed to be called
+/// from WebAssembly to perform necessary initializations.
 #[wasm_bindgen]
 pub fn init() {
     utils::init();
