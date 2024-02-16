@@ -12,7 +12,7 @@ import("../../mandelbrot/pkg").then((wasm) => {
       colorScheme,
       reverseColors,
     }) => {
-      return wasm.get_tile(
+      return wasm.get_mandelbrot_image(
         bounds.re_min,
         bounds.re_max,
         bounds.im_min,

@@ -161,7 +161,7 @@ static REVERSE_COLOR_PALETTES: Lazy<HashMap<String, colorous::Gradient>> = Lazy:
     map
 });
 
-/// Generates a tile of the Mandelbrot set given the bounds, number of iterations,
+/// Generates a image of the Mandelbrot set given the bounds, number of iterations,
 /// exponent for escape time algorithm, image side length, and color scheme.
 ///
 /// # Parameters
@@ -178,7 +178,7 @@ static REVERSE_COLOR_PALETTES: Lazy<HashMap<String, colorous::Gradient>> = Lazy:
 /// # Returns
 /// A vector of bytes representing the RGBA color values of the image.
 #[wasm_bindgen]
-pub fn get_tile(
+pub fn get_mandelbrot_image(
     re_min: f64,
     re_max: f64,
     im_min: f64,
@@ -246,7 +246,7 @@ pub fn get_tile(
             let pixel: [u8; 3] = if escape_iterations == max_iterations {
                 rgb_black
             } else {
-                // See: https://www.iquilezles.org/www/articles/mset_smooth/mset_smooth.htm
+                // See: https://iquilezles.org/articles/msetsmooth/
                 let smoothed_value = f64::from(escape_iterations)
                     - ((z.norm().ln() / escape_radius.ln()).ln() / f64::from(exponent).ln());
                 // more colors to reduce banding

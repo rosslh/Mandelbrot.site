@@ -67,9 +67,9 @@ mod lib_test {
     }
 
     #[test]
-    fn get_tile_outputs_correct_length() {
+    fn get_mandelbrot_image_outputs_correct_length() {
         for &(x_min, x_max, y_min, y_max) in SQUARES.iter() {
-            let response = super::get_tile(
+            let response = super::get_mandelbrot_image(
                 x_min,
                 x_max,
                 y_min,
@@ -93,9 +93,9 @@ mod lib_test {
     }
 
     #[test]
-    fn get_tile_outputs_valid_colors() {
+    fn get_mandelbrot_image_outputs_valid_colors() {
         for &(x_min, x_max, y_min, y_max) in SQUARES.iter() {
-            let response = super::get_tile(
+            let response = super::get_mandelbrot_image(
                 x_min,
                 x_max,
                 y_min,
@@ -121,7 +121,7 @@ mod lib_test {
     }
 
     #[test]
-    fn test_get_tile_snapshot() {
+    fn test_get_mandelbrot_image_snapshot() {
         let max_iterations = [100, 200];
         let exponents = [2, 3];
         let image_side_lengths = [50, 100];
@@ -135,7 +135,7 @@ mod lib_test {
                         for &reverse_color in reverse_color_options.iter() {
                             for (index, &(x_min, x_max, y_min, y_max)) in SQUARES.iter().enumerate()
                             {
-                                let response = super::get_tile(
+                                let response = super::get_mandelbrot_image(
                                     x_min,
                                     x_max,
                                     y_min,
