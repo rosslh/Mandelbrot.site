@@ -17,8 +17,8 @@ class MandelbrotMap extends L.Map {
   constructor({ htmlId: mapId }: { htmlId: string }) {
     super(mapId, {
       attributionControl: false,
-      maxZoom: 32,
-      zoomAnimationThreshold: 32,
+      maxZoom: 48,
+      zoomAnimationThreshold: 48,
     });
 
     this.createPool();
@@ -85,18 +85,18 @@ class MandelbrotMap extends L.Map {
     );
 
     config.re = re;
-    (<HTMLInputElement>document.querySelector("#re")).value = String(re);
+    (<HTMLInputElement>document.getElementById("re")).value = String(re);
 
     config.im = im;
-    (<HTMLInputElement>document.querySelector("#im")).value = String(im);
+    (<HTMLInputElement>document.getElementById("im")).value = String(im);
 
     config.zoom = position.z;
-    (<HTMLInputElement>document.querySelector("#zoom")).value = String(
+    (<HTMLInputElement>document.getElementById("zoom")).value = String(
       position.z
     );
 
     (<HTMLAnchorElement>(
-      document.querySelector("#shareLink")
+      document.getElementById("shareLink")
     )).href = `?re=${re}&im=${im}&z=${position.z}&i=${config.iterations}&e=${config.exponent}&c=${config.colorScheme}&r=${config.reverseColors}&sharing=true`;
   };
 

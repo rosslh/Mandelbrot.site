@@ -88,11 +88,11 @@
         <label for="iterations">Iterations:</label>
         <input type="text" id="iterations" name="iterations" />
       </div>
-      <div class="inputWrapper">
+      <div class="inputWrapper mobileHidden">
         <label for="exponent">Exponent:</label>
         <input type="text" id="exponent" name="exponent" />
       </div>
-      <div class="checkboxWrapper" id="highDpiTilesWrapper">
+      <div class="checkboxWrapper mobileHidden">
         <input type="checkbox" id="highDpiTiles" name="highDpiTiles" />
         <label for="highDpiTiles">High resolution (slow)</label>
       </div>
@@ -149,7 +149,7 @@
         <label for="reverseColors">Reverse colors</label>
       </div>
       <div class="inputSeparator"></div>
-      <strong>Coordinates</strong>
+      <strong class="mobileHidden">Coordinates</strong>
       <div class="inputWrapper">
         <label for="re">Real:</label>
         <input type="text" id="re" name="re" />
@@ -162,13 +162,6 @@
         <label for="zoom">Zoom:</label>
         <input type="text" id="zoom" name="zoom" />
       </div>
-      <div class="inputSeparator"></div>
-      <button id="refresh" type="button">
-        <span class="shortcutHint">R</span>efresh
-      </button>
-      <button id="reset" type="button">
-        <span class="shortcutHint">B</span>ack to Start
-      </button>
       <div class="inputSeparator mobileHidden"></div>
       <button id="full-screen" class="mobileHidden" type="button">
         <span class="shortcutHint">F</span>ull Screen
@@ -180,7 +173,10 @@
         <span class="shortcutHint">S</span>ave Image
       </button>
       <button id="hide-show-controls" class="mobileHidden" type="button">
-        <span class="shortcutHint">H</span>ide Controls
+        <span class="shortcutHint">H</span>ide/Show Controls
+      </button>
+      <button id="refresh" class="mobileHidden" type="button">
+        <span class="shortcutHint">R</span>efresh
       </button>
       <div class="inputSeparator mobileHidden"></div>
       <a

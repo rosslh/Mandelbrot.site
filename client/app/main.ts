@@ -35,7 +35,7 @@ type CheckboxInput = {
   hidden?: boolean;
 };
 
-export const config: MandelbrotConfig = {
+const configDefaults: MandelbrotConfig = {
   iterations: 200,
   exponent: 2,
   colorScheme: "turbo",
@@ -45,6 +45,10 @@ export const config: MandelbrotConfig = {
   re: 0,
   im: 0,
   zoom: 3,
+};
+
+export const config: MandelbrotConfig = {
+  ...configDefaults,
 };
 
 function handleNumberInput({
@@ -71,6 +75,11 @@ function handleNumberInput({
     }
     input.value = String(parsedValue);
     config[id] = parsedValue;
+    if (resetView) {
+      config.iterations = configDefaults.iterations;
+      (document.getElementById("iterations") as HTMLInputElement).value =
+        String(configDefaults.iterations);
+    }
     map.refresh(resetView);
   }, 1000);
 }
@@ -130,7 +139,7 @@ function handleDom(map: MandelbrotMap) {
     map,
     minValue: 0,
     defaultValue: 3,
-    maxValue: 32,
+    maxValue: 48,
   });
   handleSelectInput({ id: "colorScheme", map });
   handleCheckboxInput({ id: "reverseColors", map });
@@ -139,27 +148,20 @@ function handleDom(map: MandelbrotMap) {
     map,
   });
 
-  const refreshButton: HTMLButtonElement = document.querySelector("#refresh");
+  const refreshButton = document.getElementById("refresh");
   refreshButton.onclick = () => map.refresh();
 
-  const fullScreenButton: HTMLButtonElement =
-    document.querySelector("#full-screen");
-  const exitFullScreenButton: HTMLButtonElement =
-    document.querySelector("#exit-full-screen");
+  const fullScreenButton = document.getElementById("full-screen");
+  const exitFullScreenButton = document.getElementById("exit-full-screen");
   fullScreenButton.onclick = toggleFullScreen;
   exitFullScreenButton.onclick = toggleFullScreen;
 
-  const resetButton: HTMLButtonElement = document.querySelector("#reset");
-  resetButton.onclick = () => map.refresh(true);
-
-  const hideShowControlsButton: HTMLButtonElement = document.querySelector(
-    "#hide-show-controls"
-  );
+  const hideShowControlsButton = document.getElementById("hide-show-controls");
   hideShowControlsButton.onclick = () => {
     document.body.classList.toggle("hideOverlays");
   };
 
-  const saveButton: HTMLButtonElement = document.querySelector("#save-image");
+  const saveButton = document.getElementById("save-image");
   try {
     // eslint-disable-next-line no-constant-condition
     if (new Blob()) {
@@ -180,10 +182,8 @@ function handleDom(map: MandelbrotMap) {
   }
 
   document.addEventListener("fullscreenchange", () => {
-    const fullScreenButton: HTMLButtonElement =
-      document.querySelector("#full-screen");
-    const exitFullScreenButton: HTMLButtonElement =
-      document.querySelector("#exit-full-screen");
+    const fullScreenButton = document.getElementById("full-screen");
+    const exitFullScreenButton = document.getElementById("exit-full-screen");
     if (document.fullscreenElement) {
       fullScreenButton.style.display = "none";
       exitFullScreenButton.style.display = "inline-block";
@@ -216,9 +216,6 @@ function handleDom(map: MandelbrotMap) {
     if (event.key === "f") {
       toggleFullScreen();
     }
-    if (event.key === "b") {
-      map.refresh(true);
-    }
   });
 }
 
@@ -245,21 +242,21 @@ const setConfigFromUrl = () => {
 
     if (iterations) {
       config.iterations = Number(iterations);
-      (<HTMLInputElement>document.querySelector("#iterations")).value =
+      (<HTMLInputElement>document.getElementById("iterations")).value =
         iterations;
     }
     if (exponent) {
       config.exponent = Number(exponent);
-      (<HTMLInputElement>document.querySelector("#exponent")).value = exponent;
+      (<HTMLInputElement>document.getElementById("exponent")).value = exponent;
     }
     if (colorScheme) {
       config.colorScheme = colorScheme;
-      (<HTMLSelectElement>document.querySelector("#colorScheme")).value =
+      (<HTMLSelectElement>document.getElementById("colorScheme")).value =
         colorScheme;
     }
     if (reverseColors) {
       config.reverseColors = reverseColors === "true";
-      (<HTMLInputElement>document.querySelector("#reverseColors")).checked =
+      (<HTMLInputElement>document.getElementById("reverseColors")).checked =
         config.reverseColors;
     }
 

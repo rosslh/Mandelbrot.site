@@ -25,7 +25,17 @@ html {
 }
 
 body.hideOverlays {
-  #inputsWrapper,
+  #inputsWrapper > *:not(#hide-show-controls) {
+    display: none;
+  }
+
+  #hide-show-controls {
+    opacity: 0.5;
+    &:hover {
+      opacity: 1;
+    }
+  }
+
   #attribution {
     display: none;
   }
@@ -80,7 +90,7 @@ body.hideOverlays {
     align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 6px;
 
     > * {
       display: block;
@@ -133,7 +143,6 @@ body.hideOverlays {
 
 code {
   color: #eee;
-  font-size: 14px;
   background-color: #00000060;
   padding: 4px 4px;
   border-radius: 4px;
@@ -178,5 +187,8 @@ button#exit-full-screen {
 @media (max-width: 800px) {
   .mobileHidden {
     display: none !important;
+  }
+  .overlay {
+    font-size: 12px;
   }
 }
