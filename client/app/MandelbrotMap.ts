@@ -67,6 +67,33 @@ class MandelbrotMap extends L.Map {
     return { x, y };
   }
 
+  latLngToTilePosition(latLng: L.LatLng, z: number) {
+    const point = this.project(latLng, z).unscaleBy(
+      this.mandelbrotLayer.getTileSize()
+    );
+
+    return { x: point.x, y: point.y };
+  }
+
+  get mapBoundsAsComplexParts() {
+    const bounds = this.getBounds();
+    const sw = this.latLngToTilePosition(bounds.getSouthWest(), this.getZoom());
+    const ne = this.latLngToTilePosition(bounds.getNorthEast(), this.getZoom());
+
+    const { re: re_min, im: im_min } = this.tilePositionToComplexParts(
+      sw.x,
+      sw.y,
+      this.getZoom()
+    );
+    const { re: re_max, im: im_max } = this.tilePositionToComplexParts(
+      ne.x,
+      ne.y,
+      this.getZoom()
+    );
+
+    return { re_min, re_max, im_min, im_max };
+  }
+
   private setDomElementValues = () => {
     const tileSize = [
       this.mandelbrotLayer.getTileSize().x,
@@ -154,6 +181,38 @@ class MandelbrotMap extends L.Map {
       blob,
       `mandelbrot${Date.now()}r${config.re}im${config.im}z${config.zoom}.png`
     );
+  }
+
+  saveLargeImage() {
+    const sideLength = Number(
+      prompt("Enter the side length of the image in pixels")
+    );
+    if (!sideLength || Number.isNaN(sideLength)) {
+      return;
+    }
+
+    const bounds = this.mapBoundsAsComplexParts;
+
+    const diffRe = bounds.re_max - bounds.re_min;
+    const diffIm = bounds.im_max - bounds.im_min;
+    if (diffRe > diffIm) {
+      bounds.im_min -= (diffRe - diffIm) / 2;
+      bounds.im_max += (diffRe - diffIm) / 2;
+    } else {
+      bounds.re_min -= (diffIm - diffRe) / 2;
+      bounds.re_max += (diffIm - diffRe) / 2;
+    }
+
+    this.mandelbrotLayer.getSingleImage(bounds, sideLength, (imageCanvas) => {
+      imageCanvas.toBlob((blob) => {
+        saveAs(
+          blob,
+          `mandelbrot${Date.now()}r${config.re}im${config.im}z${
+            config.zoom
+          }.png`
+        );
+      });
+    });
   }
 }
 

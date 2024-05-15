@@ -44,6 +44,38 @@ class MandelbrotLayer extends L.GridLayer {
     return bounds;
   }
 
+  getSingleImage(
+    bounds: { re_min: number; re_max: number; im_min: number; im_max: number },
+    imageSideLength: number,
+    callback: (canvas: HTMLCanvasElement) => void
+  ) {
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+
+    canvas.width = imageSideLength;
+    canvas.height = imageSideLength;
+
+    this._map.pool.queue(async ({ getTile }) => {
+      getTile({
+        bounds,
+        maxIterations: config.iterations,
+        exponent: config.exponent,
+        tileSize: imageSideLength,
+        colorScheme: config.colorScheme,
+        reverseColors: config.reverseColors,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      }).then((data: any) => {
+        const imageData = new ImageData(
+          Uint8ClampedArray.from(data),
+          imageSideLength,
+          imageSideLength
+        );
+        context.putImageData(imageData, 0, 0);
+        callback(canvas);
+      });
+    });
+  }
+
   private generateTile(
     canvas: HTMLCanvasElement,
     tilePosition: L.Coords,

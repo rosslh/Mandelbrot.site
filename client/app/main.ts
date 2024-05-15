@@ -173,6 +173,18 @@ function handleDom(map: MandelbrotMap) {
     saveButton.style.display = "none";
   }
 
+  const saveLargeImageButton = document.getElementById("save-large-image");
+  try {
+    // eslint-disable-next-line no-constant-condition
+    if (new Blob()) {
+      saveLargeImageButton.onclick = () => map.saveLargeImage();
+    } else {
+      throw "FileSaver not supported";
+    }
+  } catch {
+    saveLargeImageButton.style.display = "none";
+  }
+
   function toggleFullScreen() {
     if (document.fullscreenElement) {
       document.exitFullscreen();
