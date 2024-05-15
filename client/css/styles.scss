@@ -159,8 +159,12 @@ select {
   background-color: white;
   color: black;
 
-  &:hover {
+  &:not(:disabled)hover {
     opacity: 0.9;
+  }
+
+  &:disabled {
+    opacity: 0.7;
   }
 }
 

@@ -179,18 +179,20 @@ class MandelbrotMap extends L.Map {
     this.addControl(zoomControl);
     saveAs(
       blob,
-      `mandelbrot${Date.now()}r${config.re}im${config.im}z${config.zoom}.png`
+      `mandelbrot${Date.now()}_r${config.re}_im${config.im}_z${config.zoom}.png`
     );
   }
 
-  saveLargeImage() {
-    const sideLength = Number(
-      prompt("Enter the side length of the image in pixels")
-    );
-    if (!sideLength || Number.isNaN(sideLength)) {
+  async saveLargeImage() {
+    let totalSideLength = Number(prompt("Image side length (pixels)", "3000"));
+    if (!totalSideLength || Number.isNaN(totalSideLength)) {
       return;
     }
 
+    // Make sure the total side length is a multiple of 3
+    totalSideLength = Math.ceil(totalSideLength / 3) * 3;
+
+    const sideLength = Math.ceil(totalSideLength / 3);
     const bounds = this.mapBoundsAsComplexParts;
 
     const diffRe = bounds.re_max - bounds.re_min;
@@ -203,16 +205,49 @@ class MandelbrotMap extends L.Map {
       bounds.re_max += (diffIm - diffRe) / 2;
     }
 
-    this.mandelbrotLayer.getSingleImage(bounds, sideLength, (imageCanvas) => {
-      imageCanvas.toBlob((blob) => {
+    const maxDiff = diffRe > diffIm ? diffRe : diffIm;
+    const thirdOfDiff = maxDiff / 3;
+
+    const imagePromises = [];
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 3; j++) {
+        const subBounds = {
+          re_min: bounds.re_min + thirdOfDiff * j,
+          re_max: bounds.re_min + thirdOfDiff * (j + 1),
+          im_min: bounds.im_min + thirdOfDiff * i,
+          im_max: bounds.im_min + thirdOfDiff * (i + 1),
+        };
+        imagePromises.push(
+          this.mandelbrotLayer.getSingleImage(subBounds, sideLength)
+        );
+      }
+    }
+
+    try {
+      const imageCanvases = await Promise.all(imagePromises);
+
+      const finalCanvas = document.createElement("canvas");
+      finalCanvas.width = totalSideLength;
+      finalCanvas.height = totalSideLength;
+      const ctx = finalCanvas.getContext("2d");
+
+      imageCanvases.forEach((canvas, index) => {
+        const x = (index % 3) * sideLength;
+        const y = Math.floor(index / 3) * sideLength;
+        ctx.drawImage(canvas, x, y);
+      });
+
+      finalCanvas.toBlob((blob) => {
         saveAs(
           blob,
-          `mandelbrot${Date.now()}r${config.re}im${config.im}z${
+          `mandelbrot${Date.now()}_r${config.re}_im${config.im}_z${
             config.zoom
           }.png`
         );
       });
-    });
+    } catch (error) {
+      console.error("Failed to generate the large image:", error);
+    }
   }
 }
 

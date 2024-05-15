@@ -177,7 +177,14 @@ function handleDom(map: MandelbrotMap) {
   try {
     // eslint-disable-next-line no-constant-condition
     if (new Blob()) {
-      saveLargeImageButton.onclick = () => map.saveLargeImage();
+      saveLargeImageButton.onclick = () => {
+        saveLargeImageButton.innerHTML = "Saving...";
+        saveLargeImageButton.setAttribute("disabled", "true");
+        map.saveLargeImage().then(() => {
+          saveLargeImageButton.innerHTML = "Save large image";
+          saveLargeImageButton.removeAttribute("disabled");
+        });
+      };
     } else {
       throw "FileSaver not supported";
     }
