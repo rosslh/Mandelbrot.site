@@ -17,7 +17,6 @@
   },
   "devDependencies": {
     "@types/debounce": "^1.2.4",
-    "@types/dom-to-image": "^2.6.7",
     "@types/file-saver": "^2.0.7",
     "@types/leaflet": "1.7.1",
     "@types/lodash": "^4.14.202",
@@ -39,7 +38,6 @@
     "webpack-dev-server": "^4.15.1"
   },
   "dependencies": {
-    "dom-to-image": "^2.6.0",
     "file-saver": "^2.0.5",
     "leaflet": "1.7.1",
     "lodash": "^4.17.21",

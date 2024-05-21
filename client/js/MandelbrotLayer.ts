@@ -22,31 +22,32 @@ class MandelbrotLayer extends L.GridLayer {
   }
 
   private getComplexBoundsOfTile(tilePosition: L.Coords) {
-    const { re: re_min, im: im_min } = this._map.tilePositionToComplexParts(
+    const { re: reMin, im: imMin } = this._map.tilePositionToComplexParts(
       tilePosition.x,
       tilePosition.y,
       tilePosition.z
     );
 
-    const { re: re_max, im: im_max } = this._map.tilePositionToComplexParts(
+    const { re: reMax, im: imMax } = this._map.tilePositionToComplexParts(
       tilePosition.x + 1,
       tilePosition.y + 1,
       tilePosition.z
     );
 
     const bounds = {
-      re_min,
-      re_max,
-      im_min,
-      im_max,
+      reMin,
+      reMax,
+      imMin,
+      imMax,
     };
 
     return bounds;
   }
 
   getSingleImage(
-    bounds: { re_min: number; re_max: number; im_min: number; im_max: number },
-    imageSideLength: number
+    bounds: { reMin: number; reMax: number; imMin: number; imMax: number },
+    imageWidth: number,
+    imageHeight: number
   ): Promise<HTMLCanvasElement> {
     return new Promise<HTMLCanvasElement>((resolve, reject) => {
       const canvas = document.createElement("canvas");
@@ -57,8 +58,8 @@ class MandelbrotLayer extends L.GridLayer {
         return;
       }
 
-      canvas.width = imageSideLength;
-      canvas.height = imageSideLength;
+      canvas.width = imageWidth;
+      canvas.height = imageHeight;
 
       this._map.pool.queue(async ({ getTile }) => {
         try {
@@ -66,15 +67,16 @@ class MandelbrotLayer extends L.GridLayer {
             bounds,
             maxIterations: config.iterations,
             exponent: config.exponent,
-            tileSize: imageSideLength,
+            imageWidth,
+            imageHeight,
             colorScheme: config.colorScheme,
             reverseColors: config.reverseColors,
           });
 
           const imageData = new ImageData(
             Uint8ClampedArray.from(data),
-            imageSideLength,
-            imageSideLength
+            imageWidth,
+            imageHeight
           );
           context.putImageData(imageData, 0, 0);
           resolve(canvas);
@@ -106,7 +108,8 @@ class MandelbrotLayer extends L.GridLayer {
         bounds,
         maxIterations: config.iterations,
         exponent: config.exponent,
-        tileSize: scaledTileSize,
+        imageWidth: scaledTileSize,
+        imageHeight: scaledTileSize,
         colorScheme: config.colorScheme,
         reverseColors: config.reverseColors,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

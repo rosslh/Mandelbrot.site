@@ -1,7 +1,6 @@
 import throttle from "lodash/throttle";
 import * as L from "leaflet";
 import { saveAs } from "file-saver";
-import domToImage from "dom-to-image";
 import { Pool, Worker, spawn } from "threads";
 import { MandelbrotLayer } from "./MandelbrotLayer";
 import { config } from "./main";
@@ -80,18 +79,18 @@ class MandelbrotMap extends L.Map {
     const sw = this.latLngToTilePosition(bounds.getSouthWest(), this.getZoom());
     const ne = this.latLngToTilePosition(bounds.getNorthEast(), this.getZoom());
 
-    const { re: re_min, im: im_min } = this.tilePositionToComplexParts(
+    const { re: reMin, im: imMax } = this.tilePositionToComplexParts(
       sw.x,
       sw.y,
       this.getZoom()
     );
-    const { re: re_max, im: im_max } = this.tilePositionToComplexParts(
+    const { re: reMax, im: imMin } = this.tilePositionToComplexParts(
       ne.x,
       ne.y,
       this.getZoom()
     );
 
-    return { re_min, re_max, im_min, im_max };
+    return { reMin, reMax, imMin, imMax };
   }
 
   private setDomElementValues = () => {
@@ -169,72 +168,54 @@ class MandelbrotMap extends L.Map {
     }
   }
 
-  async saveImage() {
-    const zoomControl = this.zoomControl;
-    const mapElement = document.getElementById(this.mapId);
-    const width = mapElement.offsetWidth;
-    const height = mapElement.offsetHeight;
-    this.removeControl(zoomControl);
-    const blob = await domToImage.toBlob(mapElement, { width, height });
-    this.addControl(zoomControl);
-    saveAs(
-      blob,
-      `mandelbrot${Date.now()}_r${config.re}_im${config.im}_z${config.zoom}.png`
-    );
-  }
-
-  async saveLargeImage() {
-    let totalSideLength = Number(prompt("Image side length (pixels)", "3000"));
-    if (!totalSideLength || Number.isNaN(totalSideLength)) {
-      return;
-    }
-
-    // Make sure the total side length is a multiple of 3
-    totalSideLength = Math.ceil(totalSideLength / 3) * 3;
-
-    const sideLength = Math.ceil(totalSideLength / 3);
+  async saveVisibleImage(totalWidth: number, totalHeight: number) {
+    const numColumns = 16;
+    const columnWidth = Math.ceil(totalWidth / numColumns);
     const bounds = this.mapBoundsAsComplexParts;
 
-    const diffRe = bounds.re_max - bounds.re_min;
-    const diffIm = bounds.im_max - bounds.im_min;
-    if (diffRe > diffIm) {
-      bounds.im_min -= (diffRe - diffIm) / 2;
-      bounds.im_max += (diffRe - diffIm) / 2;
-    } else {
-      bounds.re_min -= (diffIm - diffRe) / 2;
-      bounds.re_max += (diffIm - diffRe) / 2;
+    const imageAspectRatio = totalWidth / totalHeight;
+    const complexAspectRatio =
+      (bounds.reMax - bounds.reMin) / (bounds.imMax - bounds.imMin);
+
+    if (imageAspectRatio < complexAspectRatio) {
+      const newImHeight = (bounds.reMax - bounds.reMin) / imageAspectRatio;
+      const imCenter = (bounds.imMin + bounds.imMax) / 2;
+      bounds.imMin = imCenter - newImHeight / 2;
+      bounds.imMax = imCenter + newImHeight / 2;
+    } else if (imageAspectRatio > complexAspectRatio) {
+      const newReWidth = (bounds.imMax - bounds.imMin) * imageAspectRatio;
+      const reCenter = (bounds.reMin + bounds.reMax) / 2;
+      bounds.reMin = reCenter - newReWidth / 2;
+      bounds.reMax = reCenter + newReWidth / 2;
     }
 
-    const maxDiff = diffRe > diffIm ? diffRe : diffIm;
-    const thirdOfDiff = maxDiff / 3;
+    const reDiff = bounds.reMax - bounds.reMin;
+    const reDiffPerColumn = reDiff * (columnWidth / totalWidth);
 
     const imagePromises = [];
-    for (let i = 0; i < 3; i++) {
-      for (let j = 0; j < 3; j++) {
-        const subBounds = {
-          re_min: bounds.re_min + thirdOfDiff * j,
-          re_max: bounds.re_min + thirdOfDiff * (j + 1),
-          im_min: bounds.im_min + thirdOfDiff * i,
-          im_max: bounds.im_min + thirdOfDiff * (i + 1),
-        };
-        imagePromises.push(
-          this.mandelbrotLayer.getSingleImage(subBounds, sideLength)
-        );
-      }
+    for (let i = 0; i < numColumns; i++) {
+      const subBounds = {
+        ...bounds,
+        reMin: bounds.reMin + reDiffPerColumn * i,
+        reMax: bounds.reMin + reDiffPerColumn * (i + 1),
+      };
+      imagePromises.push(
+        this.mandelbrotLayer.getSingleImage(subBounds, columnWidth, totalHeight)
+      );
     }
 
     try {
       const imageCanvases = await Promise.all(imagePromises);
 
       const finalCanvas = document.createElement("canvas");
-      finalCanvas.width = totalSideLength;
-      finalCanvas.height = totalSideLength;
+      finalCanvas.width = totalWidth;
+      finalCanvas.height = totalHeight;
       const ctx = finalCanvas.getContext("2d");
 
-      imageCanvases.forEach((canvas, index) => {
-        const x = (index % 3) * sideLength;
-        const y = Math.floor(index / 3) * sideLength;
-        ctx.drawImage(canvas, x, y);
+      let xOffset = 0;
+      imageCanvases.forEach((canvas) => {
+        ctx.drawImage(canvas, xOffset, 0);
+        xOffset += canvas.width;
       });
 
       finalCanvas.toBlob((blob) => {
@@ -246,7 +227,9 @@ class MandelbrotMap extends L.Map {
         );
       });
     } catch (error) {
-      console.error("Failed to generate the large image:", error);
+      alert(
+        "Something went wrong generating your image. Please try again with a smaller image size."
+      );
     }
   }
 }

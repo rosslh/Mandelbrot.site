@@ -70,9 +70,18 @@
 
     <meta name="author" content="Ross Hill" />
     <meta name="viewport" content="width=device-width,minimum-scale=1" />
+
+    <script async defer src="https://buttons.github.io/buttons.js"></script>
   </head>
 
   <body>
+    <div id="navigation" class="overlay">
+      <a href="https://mandelbrot.site">Mandelbrot.site</a>
+      &middot; By
+      <a href="https://rosshill.ca" target="_blank" rel="noopener noreferrer">
+        Ross Hill
+      </a>
+    </div>
     <div id="inputsWrapper" class="overlay">
       <div class="shortcutWrapper mobileHidden">
         <code>shift + drag</code>
@@ -85,12 +94,12 @@
       </div>
       <div class="inputSeparator mobileHidden"></div>
       <div class="inputWrapper">
-        <label for="iterations">Iterations:</label>
-        <input type="text" id="iterations" name="iterations" />
+        <label for="iterations">Iterations</label>
+        <input type="number" required id="iterations" name="iterations" />
       </div>
       <div class="inputWrapper mobileHidden">
-        <label for="exponent">Exponent:</label>
-        <input type="text" id="exponent" name="exponent" />
+        <label for="exponent">Exponent</label>
+        <input type="number" required id="exponent" name="exponent" />
       </div>
       <div class="checkboxWrapper mobileHidden">
         <input type="checkbox" id="highDpiTiles" name="highDpiTiles" />
@@ -98,8 +107,8 @@
       </div>
       <div class="inputSeparator mobileHidden"></div>
       <div class="inputWrapper mobileHidden">
-        <label for="colorScheme">Color Scheme:</label>
-        <select id="colorScheme" name="colorScheme">
+        <label for="colorScheme">Color Scheme</label>
+        <select id="colorScheme" name="colorScheme" required>
           <optgroup label="Sequential (Multi-Hue)">
             <option value="cividis">Cividis</option>
             <option value="cool">Cool</option>
@@ -151,36 +160,32 @@
       <div class="inputSeparator"></div>
       <strong class="mobileHidden">Coordinates</strong>
       <div class="inputWrapper">
-        <label for="re">Real:</label>
-        <input type="text" id="re" name="re" />
+        <label for="re">Real</label>
+        <input type="number" required id="re" name="re" />
       </div>
       <div class="inputWrapper">
-        <label for="im">Imaginary:</label>
-        <input type="text" id="im" name="im" />
+        <label for="im">Imaginary</label>
+        <input type="number" required id="im" name="im" />
       </div>
       <div class="inputWrapper">
-        <label for="zoom">Zoom:</label>
-        <input type="text" id="zoom" name="zoom" />
+        <label for="zoom">Zoom</label>
+        <input type="number" required id="zoom" name="zoom" />
       </div>
       <div class="inputSeparator mobileHidden"></div>
       <button id="exit-full-screen" class="mobileHidden" type="button">
         Exit <span class="shortcutHint">F</span>ull Screen
       </button>
-      <button id="save-image" class="mobileHidden" type="button">
-        <span class="shortcutHint">S</span>ave visible
-      </button>
-      <button id="save-large-image" class="mobileHidden" type="button">
-        Save large image
-      </button>
-      <div class="inputSeparator mobileHidden"></div>
       <button id="full-screen" class="mobileHidden" type="button">
         <span class="shortcutHint">F</span>ull Screen
+      </button>
+      <button id="save-image" class="mobileHidden" type="button">
+        <span class="shortcutHint">S</span>ave image
       </button>
       <button id="refresh" class="mobileHidden" type="button">
         <span class="shortcutHint">R</span>efresh
       </button>
       <button id="hide-show-controls" class="mobileHidden" type="button">
-        <span class="shortcutHint">H</span>ide/Show Controls
+        <span class="shortcutHint">H</span>ide/Show UI
       </button>
       <div class="inputSeparator mobileHidden"></div>
       <a
@@ -193,17 +198,35 @@
         Share this view
       </a>
     </div>
-    <div id="attribution" class="overlay">
-      By
-      <a href="https://rosshill.ca" target="_blank" rel="noopener noreferrer"
-        >Ross Hill</a
-      >.
+    <div id="attribution" class="mobileHidden">
       <a
+        class="github-button"
         href="https://github.com/rosslh/mandelbrot.site"
-        target="_blank"
-        rel="noopener noreferrer"
-        >Source code on GitHub</a
-      >.
+        data-color-scheme="no-preference: light; light: light; dark: light;"
+        data-icon="octicon-star"
+        data-size="large"
+        data-show-count="true"
+        aria-label="Star rosslh/mandelbrot.site on GitHub"
+      >
+        Star on GitHub
+      </a>
+    </div>
+    <div id="save-image-modal" class="overlay">
+      <form id="save-image-form">
+        <strong>Save image</strong>
+        <div class="inputWrapper">
+          <label for="image-width">Width (px)</label>
+          <input type="number" required id="image-width" name="image-width" />
+        </div>
+        <div class="inputWrapper">
+          <label for="image-height">Height (px)</label>
+          <input type="number" required id="image-height" name="image-height" />
+        </div>
+        <div class="submitOrCancel">
+          <button type="submit" id="save-image-submit">Save</button>
+          <button type="button" id="save-image-cancel">Cancel</button>
+        </div>
+      </form>
     </div>
     <div id="leaflet-map"></div>
   </body>

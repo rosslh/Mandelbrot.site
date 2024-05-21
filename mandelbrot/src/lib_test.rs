@@ -77,6 +77,7 @@ mod lib_test {
                 MAX_ITERATIONS,
                 2,
                 256,
+                256,
                 "turbo".to_string(),
                 false,
             );
@@ -102,6 +103,7 @@ mod lib_test {
                 y_max,
                 MAX_ITERATIONS,
                 2,
+                256,
                 256,
                 "turbo".to_string(),
                 false,
@@ -142,6 +144,7 @@ mod lib_test {
                                     y_max,
                                     max_iterations,
                                     exponent,
+                                    image_side_length,
                                     image_side_length,
                                     color_scheme.to_string(),
                                     reverse_color,

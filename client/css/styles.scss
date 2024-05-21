@@ -29,14 +29,11 @@ body.hideOverlays {
     display: none !important;
   }
 
-  #hide-show-controls {
-    opacity: 0.5;
-    &:hover {
-      opacity: 1;
-    }
+  #attribution {
+    display: none;
   }
 
-  #attribution {
+  #navigation {
     display: none;
   }
 
@@ -45,9 +42,14 @@ body.hideOverlays {
   }
 }
 
+.leaflet-control-zoom {
+  margin-top: 12px !important;
+  margin-left: 12px !important;
+}
+
 .overlay {
   padding: 8px;
-  background-color: #00000055;
+  background-color: #00000066;
   backdrop-filter: blur(3px);
   z-index: 2000;
   text-shadow: 0 0 2px #000;
@@ -55,19 +57,24 @@ body.hideOverlays {
   position: absolute;
   font-size: 14px;
   min-width: 200px;
+  border: 1px solid #888;
 
   a {
     color: white;
   }
 }
 
-#inputsWrapper {
-  @extend .overlay;
+#navigation {
+  min-width: unset;
+  bottom: 0;
+  left: 0;
+  display: inline-block;
+}
 
-  max-height: calc(100% - 40px);
+#inputsWrapper {
+  max-height: calc(100% - 52px);
   overflow-y: auto;
 
-  border-bottom-left-radius: 8px;
   top: 0;
   right: 0;
   width: 170px;
@@ -83,27 +90,6 @@ body.hideOverlays {
     height: 1px;
     border-bottom: 1px solid white;
     opacity: 0.3;
-  }
-
-  .inputWrapper {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 6px;
-
-    > * {
-      display: block;
-    }
-
-    > input {
-      width: 80px;
-    }
-
-    > select,
-    option {
-      width: 100%;
-    }
   }
 
   .checkboxWrapper {
@@ -133,19 +119,76 @@ body.hideOverlays {
   }
 }
 
+.inputWrapper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+
+  > * {
+    display: block;
+  }
+
+  > input {
+    width: 80px;
+  }
+
+  > select,
+  option {
+    width: 100%;
+  }
+}
+
 #attribution {
-  @extend .overlay;
-  border-top-left-radius: 8px;
-  bottom: 0;
-  right: 0;
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  z-index: 2000;
   display: inline-block;
+}
+
+#save-image-modal {
+  display: none;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 12px;
+
+  form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+
+    .submitOrCancel {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: flex-end;
+
+      button[type="submit"] {
+        flex-grow: 1;
+      }
+
+      button[type="button"] {
+        background: none;
+        border: none;
+        color: white;
+        text-decoration: underline;
+      }
+    }
+  }
+
+  &.visible {
+    display: inline-block;
+  }
 }
 
 code {
   color: #eee;
   background-color: #00000060;
   padding: 4px 4px;
-  border-radius: 4px;
   overflow: hidden;
   display: inline-block;
 }
@@ -154,7 +197,6 @@ button,
 input,
 select {
   border: none;
-  border-radius: 4px;
   padding: 2px;
   background-color: white;
   color: black;
@@ -193,6 +235,9 @@ button#exit-full-screen {
     display: none !important;
   }
   .overlay {
-    font-size: 12px;
+    &,
+    * {
+      font-size: 16px;
+    }
   }
 }

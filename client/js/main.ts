@@ -18,7 +18,6 @@ type NumberInput = {
   id: "iterations" | "exponent" | "re" | "im" | "zoom";
   map: MandelbrotMap;
   minValue: number;
-  defaultValue: number;
   maxValue: number;
   allowFraction?: boolean;
   resetView?: boolean;
@@ -54,7 +53,6 @@ export const config: MandelbrotConfig = {
 function handleNumberInput({
   id,
   map,
-  defaultValue,
   minValue,
   maxValue,
   resetView,
@@ -64,14 +62,14 @@ function handleNumberInput({
   input.value = String(config[id]);
   input.oninput = debounce(({ target }) => {
     let parsedValue = allowFraction
-      ? Number.parseFloat((<HTMLInputElement>target).value)
-      : Number.parseInt((<HTMLInputElement>target).value, 10);
+      ? Number.parseFloat(target.value)
+      : Number.parseInt(target.value, 10);
     if (
       isNaN(parsedValue) ||
       parsedValue < minValue ||
       parsedValue > maxValue
     ) {
-      parsedValue = defaultValue;
+      parsedValue = config[id];
     }
     input.value = String(parsedValue);
     config[id] = parsedValue;
@@ -102,103 +100,101 @@ function handleCheckboxInput({ id, map }: CheckboxInput) {
   };
 }
 
-function handleDom(map: MandelbrotMap) {
-  handleNumberInput({
-    id: "iterations",
-    map,
-    minValue: 1,
-    defaultValue: 200,
-    maxValue: 10 ** 9,
-  });
-  handleNumberInput({
-    id: "exponent",
-    map,
-    minValue: 2,
-    defaultValue: Number(config.exponent),
-    maxValue: 10 ** 9,
-    resetView: true,
-  });
-  handleNumberInput({
-    id: "re",
-    map,
-    minValue: -2,
-    defaultValue: 0,
-    maxValue: 2,
-    allowFraction: true,
-  });
-  handleNumberInput({
-    id: "im",
-    map,
-    minValue: -2,
-    defaultValue: 0,
-    maxValue: 2,
-    allowFraction: true,
-  });
-  handleNumberInput({
-    id: "zoom",
-    map,
-    minValue: 0,
-    defaultValue: 3,
-    maxValue: 48,
-  });
-  handleSelectInput({ id: "colorScheme", map });
-  handleCheckboxInput({ id: "reverseColors", map });
-  handleCheckboxInput({
-    id: "highDpiTiles",
-    map,
+function handleSaveImageButton(map: MandelbrotMap) {
+  const saveImageButton = document.getElementById("save-image");
+  const saveImageModal = document.getElementById("save-image-modal");
+  const saveImageForm = document.getElementById(
+    "save-image-form"
+  ) as HTMLFormElement;
+  const widthInput = document.getElementById("image-width") as HTMLInputElement;
+  const heightInput = document.getElementById(
+    "image-height"
+  ) as HTMLInputElement;
+  const saveImageSubmitButton = document.getElementById("save-image-submit");
+  const closeModalButton = document.getElementById("save-image-cancel");
+
+  const toggleSaveImageModalOpen = () => {
+    saveImageSubmitButton.innerText = "Save";
+    saveImageSubmitButton.removeAttribute("disabled");
+    saveImageForm.reset();
+    saveImageModal.classList.toggle("visible");
+  };
+
+  const closeSaveImageModal = () => {
+    saveImageSubmitButton.innerText = "Save";
+    saveImageSubmitButton.removeAttribute("disabled");
+    saveImageForm.reset();
+    saveImageModal.classList.remove("visible");
+  };
+
+  // eslint-disable-next-line no-constant-condition
+  if (new Blob()) {
+    saveImageButton.onclick = (e) => {
+      e.stopPropagation();
+      toggleSaveImageModalOpen();
+    };
+  } else {
+    saveImageButton.style.display = "none";
+  }
+
+  saveImageForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+
+    const width = Number(widthInput.value);
+    const height = Number(heightInput.value);
+
+    if (!width || Number.isNaN(width)) {
+      return;
+    }
+
+    if (!height || Number.isNaN(height)) {
+      return;
+    }
+
+    saveImageSubmitButton.innerText = "Working...";
+    saveImageSubmitButton.setAttribute("disabled", "true");
+
+    map.saveVisibleImage(width, height).then(() => {
+      toggleSaveImageModalOpen();
+    });
   });
 
-  const refreshButton = document.getElementById("refresh");
-  refreshButton.onclick = () => map.refresh();
+  closeModalButton.onclick = () => {
+    toggleSaveImageModalOpen();
+  };
 
-  const fullScreenButton = document.getElementById("full-screen");
-  const exitFullScreenButton = document.getElementById("exit-full-screen");
-  fullScreenButton.onclick = toggleFullScreen;
-  exitFullScreenButton.onclick = toggleFullScreen;
+  window.addEventListener("click", (event) => {
+    if (
+      event.target !== saveImageModal &&
+      !saveImageModal.contains(<Node>event.target)
+    ) {
+      closeSaveImageModal();
+    }
+  });
 
+  return toggleSaveImageModalOpen;
+}
+
+function handleHideShowUiButton() {
   const hideShowControlsButton = document.getElementById("hide-show-controls");
   hideShowControlsButton.onclick = () => {
     document.body.classList.toggle("hideOverlays");
   };
+}
 
-  const saveButton = document.getElementById("save-image");
-  try {
-    // eslint-disable-next-line no-constant-condition
-    if (new Blob()) {
-      saveButton.onclick = () => map.saveImage();
-    } else {
-      throw "FileSaver not supported";
-    }
-  } catch {
-    saveButton.style.display = "none";
-  }
-
-  const saveLargeImageButton = document.getElementById("save-large-image");
-  try {
-    // eslint-disable-next-line no-constant-condition
-    if (new Blob()) {
-      saveLargeImageButton.onclick = () => {
-        saveLargeImageButton.innerHTML = "Saving...";
-        saveLargeImageButton.setAttribute("disabled", "true");
-        map.saveLargeImage().then(() => {
-          saveLargeImageButton.innerHTML = "Save large image";
-          saveLargeImageButton.removeAttribute("disabled");
-        });
-      };
-    } else {
-      throw "FileSaver not supported";
-    }
-  } catch {
-    saveLargeImageButton.style.display = "none";
-  }
-
-  function toggleFullScreen() {
+function handleFullScreen() {
+  const toggleFullScreen = () => {
     if (document.fullscreenElement) {
       document.exitFullscreen();
     } else {
       document.body.requestFullscreen();
     }
-  }
+  };
+
+  const fullScreenButton = document.getElementById("full-screen");
+  const exitFullScreenButton = document.getElementById("exit-full-screen");
+  fullScreenButton.onclick = toggleFullScreen;
+  exitFullScreenButton.onclick = toggleFullScreen;
 
   document.addEventListener("fullscreenchange", () => {
     const fullScreenButton = document.getElementById("full-screen");
@@ -212,6 +208,36 @@ function handleDom(map: MandelbrotMap) {
     }
   });
 
+  return toggleFullScreen;
+}
+
+function handleRefreshButton(map: MandelbrotMap) {
+  const refreshButton = document.getElementById("refresh");
+  refreshButton.onclick = () => map.refresh();
+}
+
+function handleHotKeys(
+  map: MandelbrotMap,
+  toggleSaveImageModalOpen: () => void,
+  toggleFullScreen: () => void
+) {
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "h") {
+      document.body.classList.toggle("hideOverlays");
+    }
+    if (event.key === "s") {
+      toggleSaveImageModalOpen();
+    }
+    if (event.key === "r") {
+      map.refresh();
+    }
+    if (event.key === "f") {
+      toggleFullScreen();
+    }
+  });
+}
+
+function handleShortcutHints() {
   const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
   const windowsShortcut =
     document.querySelector<HTMLSpanElement>(".windowsShortcut");
@@ -221,21 +247,56 @@ function handleDom(map: MandelbrotMap) {
     windowsShortcut.style.display = "none";
     macShortcut.style.display = "inline-block";
   }
+}
 
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "h") {
-      document.body.classList.toggle("hideOverlays");
-    }
-    if (event.key === "s") {
-      map.saveImage();
-    }
-    if (event.key === "r") {
-      map.refresh();
-    }
-    if (event.key === "f") {
-      toggleFullScreen();
-    }
+function handleDom(map: MandelbrotMap) {
+  handleNumberInput({
+    id: "iterations",
+    map,
+    minValue: 1,
+    maxValue: 10 ** 9,
   });
+  handleNumberInput({
+    id: "exponent",
+    map,
+    minValue: 2,
+    maxValue: 10 ** 9,
+    resetView: true,
+  });
+  handleNumberInput({
+    id: "re",
+    map,
+    minValue: -2,
+    maxValue: 2,
+    allowFraction: true,
+  });
+  handleNumberInput({
+    id: "im",
+    map,
+    minValue: -2,
+    maxValue: 2,
+    allowFraction: true,
+  });
+  handleNumberInput({
+    id: "zoom",
+    map,
+    minValue: 0,
+    maxValue: 48,
+  });
+  handleSelectInput({ id: "colorScheme", map });
+  handleCheckboxInput({ id: "reverseColors", map });
+  handleCheckboxInput({
+    id: "highDpiTiles",
+    map,
+  });
+
+  handleRefreshButton(map);
+  handleHideShowUiButton();
+  handleShortcutHints();
+
+  const toggleFullScreen = handleFullScreen();
+  const toggleSaveImageModalOpen = handleSaveImageButton(map);
+  handleHotKeys(map, toggleSaveImageModalOpen, toggleFullScreen);
 }
 
 const map = new MandelbrotMap({

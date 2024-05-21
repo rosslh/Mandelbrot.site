@@ -5,10 +5,10 @@ const dist = path.resolve(__dirname, "dist");
 const WasmPackPlugin = require("@wasm-tool/wasm-pack-plugin");
 
 const appConfig = {
-  entry: "./app/main.ts",
+  entry: "./js/main.ts",
   plugins: [
     new HtmlWebpackPlugin({
-      template: "index.html",
+      template: "html/index.html",
       root: path.resolve(__dirname, "."),
     }),
     new MiniCssExtractPlugin(),
@@ -49,7 +49,7 @@ const appConfig = {
 };
 
 const workerConfig = {
-  entry: "./app/worker.js",
+  entry: "./js/worker.js",
   target: "webworker",
   plugins: [
     new WasmPackPlugin({

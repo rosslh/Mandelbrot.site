@@ -171,7 +171,8 @@ static REVERSE_COLOR_PALETTES: Lazy<HashMap<String, colorous::Gradient>> = Lazy:
 /// - `im_max`: The maximum imaginary value (top of the image).
 /// - `max_iterations`: The maximum number of iterations to perform.
 /// - `exponent`: The exponent used in the escape time algorithm.
-/// - `image_side_length`: The length of one side of the square image, in pixels.
+/// - `image_width`: The width of the image, in pixels.
+/// - `image_height: The height of the image, in pixels.
 /// - `color_scheme`: The name of the color scheme to use.
 /// - `_reverse_colors`: Whether to reverse the colors of the color scheme.
 ///
@@ -185,11 +186,12 @@ pub fn get_mandelbrot_image(
     im_max: f64,
     max_iterations: u32,
     exponent: u32,
-    image_side_length: usize,
+    image_width: usize,
+    image_height: usize,
     color_scheme: String,
-    _reverse_colors: bool,
+    reverse_colors: bool,
 ) -> Vec<u8> {
-    let mut reverse_colors = _reverse_colors;
+    let mut should_reverse_colors = reverse_colors;
 
     let min_channel_value = 0;
     let max_channel_value = 255;
@@ -201,13 +203,13 @@ pub fn get_mandelbrot_image(
 
     if REVERSE_COLOR_PALETTES.contains_key(&color_scheme) {
         palette = REVERSE_COLOR_PALETTES.get(&color_scheme).unwrap();
-        reverse_colors = !reverse_colors;
+        should_reverse_colors = !should_reverse_colors;
     }
 
-    let output_size: usize = image_side_length * image_side_length * NUM_COLOR_CHANNELS;
+    let output_size: usize = image_width * image_height * NUM_COLOR_CHANNELS;
 
-    let re_range = linspace(re_min, re_max, image_side_length);
-    let im_range = linspace(im_min, im_max, image_side_length);
+    let re_range = linspace(re_min, re_max, image_width);
+    let im_range = linspace(im_min, im_max, image_height);
     let enumerated_re_range = re_range.clone().enumerate();
     let enumerated_im_range = im_range.clone().enumerate();
 
@@ -251,7 +253,7 @@ pub fn get_mandelbrot_image(
                     - ((z.norm().ln() / escape_radius.ln()).ln() / f64::from(exponent).ln());
                 // more colors to reduce banding
                 let mut scaled_value = (smoothed_value * palette_scale_factor) as usize;
-                if reverse_colors {
+                if should_reverse_colors {
                     scaled_value = scaled_max_iterations - scaled_value;
                 }
                 let color = palette.eval_rational(scaled_value, scaled_max_iterations);
@@ -260,7 +262,7 @@ pub fn get_mandelbrot_image(
             };
 
             // index = ((current row * row length) + current column) * 4 to fit r,g,b,a values
-            let index = (x * image_side_length + y) * NUM_COLOR_CHANNELS;
+            let index = (x * image_width + y) * NUM_COLOR_CHANNELS;
             img[index] = pixel[0]; // r
             img[index + 1] = pixel[1]; // g
             img[index + 2] = pixel[2]; // b

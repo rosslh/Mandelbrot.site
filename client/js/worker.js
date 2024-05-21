@@ -8,18 +8,20 @@ import("../../mandelbrot/pkg").then((wasm) => {
       bounds,
       maxIterations,
       exponent,
-      tileSize,
+      imageWidth,
+      imageHeight,
       colorScheme,
       reverseColors,
     }) => {
       return wasm.get_mandelbrot_image(
-        bounds.re_min,
-        bounds.re_max,
-        bounds.im_min,
-        bounds.im_max,
+        bounds.reMin,
+        bounds.reMax,
+        bounds.imMin,
+        bounds.imMax,
         maxIterations,
         exponent,
-        tileSize,
+        imageWidth,
+        imageHeight,
         colorScheme,
         reverseColors
       );

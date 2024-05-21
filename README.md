@@ -8,7 +8,7 @@ _Formerly known as Rust Mandelbrot Set Explorer_
 
 - **Mandelbrot Set Implementation**: [`mandelbrot/src/lib.rs`](mandelbrot/src/lib.rs)
 - **Rust Unit Tests**: [`mandelbrot/src/lib_test.rs`](mandelbrot/src/lib_test.rs)
-- **TypeScript Entry Point**: [`client/app/main.ts`](client/app/main.ts)
+- **TypeScript Entry Point**: [`client/js/main.ts`](client/js/main.ts)
 
 ## Key Features
 
@@ -17,7 +17,7 @@ _Formerly known as Rust Mandelbrot Set Explorer_
 - **Multibrot Sets**: Explore "multibrot" sets by changing the exponent.
 - **High-Resolution Rendering**: Enjoy crystal clear fractal images.
 - **Customizable Color Schemes**: Personalize your fractal exploration.
-- **Viewport Coordinates**: View and update the viewport's coordinates.
+- **Viewport Coordinates**: View and update the viewport's coordinates on the complex plane.
 - **Image Export**: Save your discoveries as PNG images.
 - **Shareable Views**: Generate URLs to share your current view with others.
 
