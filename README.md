@@ -1,7 +1,5 @@
 # mandelbrot.site
 
-_Formerly known as Rust Mandelbrot Set Explorer_
-
 [mandelbrot.site](https://mandelbrot.site) is a web app that lets you explore the Mandelbrot set fractal. Built with Rust (compiled to WASM) and TypeScript.
 
 ## Project Structure

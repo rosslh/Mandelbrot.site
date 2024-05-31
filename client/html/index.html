@@ -97,6 +97,14 @@
         <label for="iterations">Iterations</label>
         <input type="number" required id="iterations" name="iterations" />
       </div>
+      <div class="iterationButtons">
+        <button type="button" id="iterations-mul-2" class="underlineButton">
+          &times;2
+        </button>
+        <button type="button" id="iterations-div-2" class="underlineButton">
+          &divide;2
+        </button>
+      </div>
       <div class="inputWrapper mobileHidden">
         <label for="exponent">Exponent</label>
         <input type="number" required id="exponent" name="exponent" />
@@ -211,7 +219,7 @@
         Star on GitHub
       </a>
     </div>
-    <div id="save-image-modal" class="overlay">
+    <dialog id="save-image-modal" class="overlay">
       <form id="save-image-form">
         <strong>Save image</strong>
         <div class="inputWrapper">
@@ -224,10 +232,12 @@
         </div>
         <div class="submitOrCancel">
           <button type="submit" id="save-image-submit">Save</button>
-          <button type="button" id="save-image-cancel">Cancel</button>
+          <button type="button" id="save-image-cancel" class="underlineButton">
+            Cancel
+          </button>
         </div>
       </form>
-    </div>
+    </dialog>
     <div id="leaflet-map"></div>
   </body>
 </html>

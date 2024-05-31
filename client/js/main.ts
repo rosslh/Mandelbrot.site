@@ -82,6 +82,30 @@ function handleNumberInput({
   }, 1000);
 }
 
+function handleIterationButtons(map: MandelbrotMap) {
+  const multiplyButton = <HTMLButtonElement>(
+    document.getElementById("iterations-mul-2")
+  );
+  const divideButton = <HTMLButtonElement>(
+    document.getElementById("iterations-div-2")
+  );
+  const iterationsInput = <HTMLInputElement>(
+    document.getElementById("iterations")
+  );
+
+  multiplyButton.onclick = () => {
+    config.iterations *= 2;
+    iterationsInput.value = String(config.iterations);
+    map.refresh();
+  };
+
+  divideButton.onclick = () => {
+    config.iterations = Math.ceil(config.iterations / 2);
+    iterationsInput.value = String(config.iterations);
+    map.refresh();
+  };
+}
+
 function handleSelectInput({ id, map }: SelectInput) {
   const select = <HTMLSelectElement>document.getElementById(id);
   select.value = String(config[id]);
@@ -102,7 +126,9 @@ function handleCheckboxInput({ id, map }: CheckboxInput) {
 
 function handleSaveImageButton(map: MandelbrotMap) {
   const saveImageButton = document.getElementById("save-image");
-  const saveImageModal = document.getElementById("save-image-modal");
+  const saveImageDialog = document.getElementById(
+    "save-image-modal"
+  ) as HTMLDialogElement;
   const saveImageForm = document.getElementById(
     "save-image-form"
   ) as HTMLFormElement;
@@ -117,14 +143,11 @@ function handleSaveImageButton(map: MandelbrotMap) {
     saveImageSubmitButton.innerText = "Save";
     saveImageSubmitButton.removeAttribute("disabled");
     saveImageForm.reset();
-    saveImageModal.classList.toggle("visible");
-  };
-
-  const closeSaveImageModal = () => {
-    saveImageSubmitButton.innerText = "Save";
-    saveImageSubmitButton.removeAttribute("disabled");
-    saveImageForm.reset();
-    saveImageModal.classList.remove("visible");
+    if (saveImageDialog.open) {
+      saveImageDialog.close();
+    } else {
+      saveImageDialog.showModal();
+    }
   };
 
   // eslint-disable-next-line no-constant-condition
@@ -143,11 +166,11 @@ function handleSaveImageButton(map: MandelbrotMap) {
     const width = Number(widthInput.value);
     const height = Number(heightInput.value);
 
-    if (!width || Number.isNaN(width)) {
+    if (!width || Number.isNaN(width) || width <= 0) {
       return;
     }
 
-    if (!height || Number.isNaN(height)) {
+    if (!height || Number.isNaN(height) || height <= 0) {
       return;
     }
 
@@ -162,15 +185,6 @@ function handleSaveImageButton(map: MandelbrotMap) {
   closeModalButton.onclick = () => {
     toggleSaveImageModalOpen();
   };
-
-  window.addEventListener("click", (event) => {
-    if (
-      event.target !== saveImageModal &&
-      !saveImageModal.contains(<Node>event.target)
-    ) {
-      closeSaveImageModal();
-    }
-  });
 
   return toggleSaveImageModalOpen;
 }
@@ -221,7 +235,11 @@ function handleHotKeys(
   toggleSaveImageModalOpen: () => void,
   toggleFullScreen: () => void
 ) {
-  document.addEventListener("keydown", (event) => {
+  const mobileBreakpoint = 800;
+  document.addEventListener("keypress", (event) => {
+    if (window.innerWidth < mobileBreakpoint) {
+      return;
+    }
     if (event.key === "h") {
       document.body.classList.toggle("hideOverlays");
     }
@@ -256,6 +274,8 @@ function handleDom(map: MandelbrotMap) {
     minValue: 1,
     maxValue: 10 ** 9,
   });
+  handleIterationButtons(map);
+
   handleNumberInput({
     id: "exponent",
     map,

@@ -78,10 +78,6 @@ const workerConfig = {
   },
   resolve: {
     extensions: [".ts", ".js", ".wasm"],
-    fallback: {
-      util: require.resolve("util"),
-      long: require.resolve("long"),
-    },
   },
   output: { path: dist, filename: "worker.js" },
   //[DDR 2020-11-20] asyncWebAssembly is broken by webpack 5. (See https://github.com/rustwasm/wasm-bindgen/issues/2343)

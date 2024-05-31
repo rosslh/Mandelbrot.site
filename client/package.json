@@ -16,7 +16,6 @@
     "create-rust-wasm-worker": ".bin/create-rust-wasm-worker.js"
   },
   "devDependencies": {
-    "@types/debounce": "^1.2.4",
     "@types/file-saver": "^2.0.7",
     "@types/leaflet": "1.7.1",
     "@types/lodash": "^4.14.202",
@@ -41,9 +40,7 @@
     "file-saver": "^2.0.5",
     "leaflet": "1.7.1",
     "lodash": "^4.17.21",
-    "long": "^5.2.3",
-    "threads": "^1.7.0",
-    "util": "^0.12.5"
+    "threads": "^1.7.0"
   },
   "engines": {
     "node": ">=18.14.0"

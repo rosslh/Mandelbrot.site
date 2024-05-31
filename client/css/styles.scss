@@ -24,24 +24,6 @@ html {
   }
 }
 
-body.hideOverlays {
-  #inputsWrapper > *:not(#hide-show-controls) {
-    display: none !important;
-  }
-
-  #attribution {
-    display: none;
-  }
-
-  #navigation {
-    display: none;
-  }
-
-  .leaflet-control-zoom {
-    display: none;
-  }
-}
-
 .leaflet-control-zoom {
   margin-top: 12px !important;
   margin-left: 12px !important;
@@ -112,6 +94,15 @@ body.hideOverlays {
     }
   }
 
+  .iterationButtons {
+    display: inline-flex;
+    gap: 8px;
+    margin-top: -12px;
+    margin-left: auto;
+    margin-right: 80px;
+    transform: translateX(100%);
+  }
+
   #shareLink {
     margin: 0 auto;
     margin-top: -4px;
@@ -140,6 +131,13 @@ body.hideOverlays {
   }
 }
 
+button.underlineButton {
+  background: none;
+  border: none;
+  color: white;
+  text-decoration: underline;
+}
+
 #attribution {
   position: absolute;
   bottom: 8px;
@@ -149,11 +147,6 @@ body.hideOverlays {
 }
 
 #save-image-modal {
-  display: none;
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
   padding: 12px;
 
   form {
@@ -170,18 +163,7 @@ body.hideOverlays {
       button[type="submit"] {
         flex-grow: 1;
       }
-
-      button[type="button"] {
-        background: none;
-        border: none;
-        color: white;
-        text-decoration: underline;
-      }
     }
-  }
-
-  &.visible {
-    display: inline-block;
   }
 }
 
@@ -238,6 +220,26 @@ button#exit-full-screen {
     &,
     * {
       font-size: 16px;
+    }
+  }
+}
+
+@media (min-width: 801px) {
+  body.hideOverlays {
+    #inputsWrapper > *:not(#hide-show-controls) {
+      display: none !important;
+    }
+
+    #attribution {
+      display: none;
+    }
+
+    #navigation {
+      display: none;
+    }
+
+    .leaflet-control-zoom {
+      display: none;
     }
   }
 }
