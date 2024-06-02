@@ -319,12 +319,7 @@ function handleDom(map: MandelbrotMap) {
   handleHotKeys(map, toggleSaveImageModalOpen, toggleFullScreen);
 }
 
-const map = new MandelbrotMap({
-  htmlId: "leaflet-map",
-});
-handleDom(map);
-
-const setConfigFromUrl = () => {
+const setConfigFromUrl = (map: MandelbrotMap) => {
   const queryParams = new URLSearchParams(window.location.search);
   const re = queryParams.get("re");
   const im = queryParams.get("im");
@@ -376,4 +371,10 @@ const setConfigFromUrl = () => {
   }
 };
 
-window.addEventListener("load", setConfigFromUrl);
+window.addEventListener("load", () => {
+  const map = new MandelbrotMap({
+    htmlId: "leaflet-map",
+  });
+  handleDom(map);
+  setConfigFromUrl(map);
+});

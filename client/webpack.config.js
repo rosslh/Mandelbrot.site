@@ -3,6 +3,36 @@ const HtmlWebpackPlugin = require("html-webpack-plugin");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const dist = path.resolve(__dirname, "dist");
 const WasmPackPlugin = require("@wasm-tool/wasm-pack-plugin");
+const { marked } = require("marked");
+const frontMatter = require("front-matter");
+const fs = require("fs");
+const template = require("lodash/template");
+
+const blogDir = "./blog";
+for (const file of fs.readdirSync(blogDir)) {
+  if (file.endsWith(".md")) {
+    const md = fs.readFileSync(path.join(blogDir, file), "utf8");
+    const metadata = frontMatter(md).attributes;
+    const html = marked(md.replace(/^---$.*^---$/ms, ""));
+    const htmlFile = file.replace(".md", ".html");
+    const blogTemplate = fs.readFileSync("./html/blog-template.html", "utf8");
+
+    const result = template(blogTemplate, {
+      interpolate: /{{([\s\S]+?)}}/g,
+    })({
+      title: metadata.title,
+      description: metadata.excerpt,
+      content: html,
+      slug: htmlFile.replace(/\.html$/, ""),
+    });
+
+    if (!fs.existsSync("./dist")) {
+      fs.mkdirSync("./dist");
+    }
+
+    fs.writeFileSync(path.join("./dist", htmlFile), result);
+  }
+}
 
 const appConfig = {
   entry: "./js/main.ts",

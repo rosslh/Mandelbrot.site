@@ -50,7 +50,32 @@ html {
   min-width: unset;
   bottom: 0;
   left: 0;
-  display: inline-block;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  .navLinks {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+
+    .navHeading {
+      font-size: 14px;
+      font-weight: normal;
+      margin: 0;
+      margin-right: 4px;
+    }
+
+    #site-link {
+      text-decoration: none;
+    }
+  }
+
+  #nav-spacer {
+    width: 1px;
+    align-self: stretch;
+    border-right: 1px solid #888;
+  }
 }
 
 #inputsWrapper {
@@ -169,7 +194,7 @@ button.underlineButton {
 
 code {
   color: #eee;
-  background-color: #00000060;
+  background-color: #333;
   padding: 4px 4px;
   overflow: hidden;
   display: inline-block;
@@ -219,7 +244,22 @@ button#exit-full-screen {
   .overlay {
     &,
     * {
-      font-size: 16px;
+      font-size: 16px !important;
+    }
+  }
+
+  .navHeading {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 1000px) {
+  #navigation {
+    flex-direction: column;
+    align-items: flex-start;
+
+    #nav-spacer {
+      display: none;
     }
   }
 }
@@ -240,6 +280,114 @@ button#exit-full-screen {
 
     .leaflet-control-zoom {
       display: none;
+    }
+  }
+}
+
+// Blog styles below
+
+.blogPostRoot {
+  background: #1a022e url("https://mandelbrot.site/static/blog-background.png")
+    center / cover fixed !important;
+
+  .blogPost {
+    display: flex;
+    gap: 12px;
+    text-shadow: 0 0 2px #000;
+    color: white;
+    font-size: 16px;
+
+    a {
+      color: white;
+    }
+
+    nav {
+      border-right: 1px solid #888;
+      background-color: rgba(0, 0, 0, 0.2);
+      padding: 16px 24px;
+
+      ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+
+        li.github {
+          padding-top: 24px;
+          display: flex;
+          justify-content: center;
+
+          > * {
+            text-shadow: none !important;
+          }
+        }
+
+        li.topics {
+          padding-top: 24px;
+        }
+
+        li {
+          line-height: 1.4;
+          padding: 12px 0;
+
+          .siteName {
+            line-height: 1.4;
+            padding: 0;
+            margin: 0;
+          }
+        }
+      }
+    }
+
+    main {
+      padding: 36px 16px 0;
+      flex-grow: 1;
+      max-height: 100vh;
+      overflow-y: auto;
+
+      .blogContent {
+        max-width: 800px;
+        margin: 0 auto;
+
+        h1 {
+          line-height: 2;
+        }
+
+        p,
+        li {
+          line-height: 1.4;
+        }
+
+        li:not(:last-child) {
+          margin-bottom: 8px;
+        }
+
+        code {
+          display: inline;
+          padding: 2px 4px;
+        }
+
+        .bottomSpacer {
+          height: 36px;
+        }
+      }
+    }
+  }
+}
+
+@media (max-width: 800px) {
+  .blogPostRoot {
+    .blogPost {
+      display: block;
+
+      nav {
+        border-right: none;
+        border-bottom: 1px solid #888;
+      }
+
+      main {
+        overflow-y: visible !important;
+        max-height: unset !important;
+      }
     }
   }
 }

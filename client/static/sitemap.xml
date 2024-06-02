@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset
+      xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9
+            http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd">
+
+
+<url>
+  <loc>https://mandelbrot.site/</loc>
+  <priority>1.00</priority>
+</url>
+<url>
+  <loc>https://mandelbrot.site/how-mandelbrot-site-was-built</loc>
+  <priority>0.80</priority>
+</url>
+<url>
+  <loc>https://mandelbrot.site/what-is-mandelbrot-set</loc>
+  <priority>0.80</priority>
+</url>
+<url>
+  <loc>https://mandelbrot.site/history-of-mandelbrot-set</loc>
+  <priority>0.80</priority>
+</url>
+<url>
+  <loc>https://mandelbrot.site/who-was-benoit-mandelbrot</loc>
+  <priority>0.80</priority>
+</url>
+<url>
+  <loc>https://mandelbrot.site/why-mandelbrot-set-important</loc>
+  <priority>0.80</priority>
+</url>
+
+
+</urlset>
