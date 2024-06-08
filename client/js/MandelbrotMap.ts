@@ -204,33 +204,27 @@ class MandelbrotMap extends L.Map {
       );
     }
 
-    try {
-      const imageCanvases = await Promise.all(imagePromises);
+    const imageCanvases = await Promise.all(imagePromises);
 
-      const finalCanvas = document.createElement("canvas");
-      finalCanvas.width = totalWidth;
-      finalCanvas.height = totalHeight;
-      const ctx = finalCanvas.getContext("2d");
+    const finalCanvas = document.createElement("canvas");
+    finalCanvas.width = totalWidth;
+    finalCanvas.height = totalHeight;
+    const ctx = finalCanvas.getContext("2d");
 
-      let xOffset = 0;
-      imageCanvases.forEach((canvas) => {
-        ctx.drawImage(canvas, xOffset, 0);
-        xOffset += canvas.width;
-      });
+    let xOffset = 0;
+    imageCanvases.forEach((canvas) => {
+      ctx.drawImage(canvas, xOffset, 0);
+      xOffset += canvas.width;
+    });
 
-      finalCanvas.toBlob((blob) => {
-        saveAs(
-          blob,
-          `mandelbrot${Date.now()}_r${config.re}_im${config.im}_z${
-            config.zoom
-          }.png`
-        );
-      });
-    } catch (error) {
-      alert(
-        "Something went wrong generating your image. Please try again with a smaller image size."
+    finalCanvas.toBlob((blob) => {
+      saveAs(
+        blob,
+        `mandelbrot${Date.now()}_r${config.re}_im${config.im}_z${
+          config.zoom
+        }.png`
       );
-    }
+    });
   }
 }
 

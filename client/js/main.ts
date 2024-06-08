@@ -125,6 +125,8 @@ function handleCheckboxInput({ id, map }: CheckboxInput) {
 }
 
 function handleSaveImageButton(map: MandelbrotMap) {
+  let isSavingImage = false;
+
   const saveImageButton = document.getElementById("save-image");
   const saveImageDialog = document.getElementById(
     "save-image-modal"
@@ -139,9 +141,19 @@ function handleSaveImageButton(map: MandelbrotMap) {
   const saveImageSubmitButton = document.getElementById("save-image-submit");
   const closeModalButton = document.getElementById("save-image-cancel");
 
+  const ignoreSubmitListener: EventListener = (event) => event.preventDefault();
+
+  const ignoreCancelListener: EventListener = (event) => event.preventDefault();
+
   const toggleSaveImageModalOpen = () => {
+    if (isSavingImage) {
+      return;
+    }
     saveImageSubmitButton.innerText = "Save";
     saveImageSubmitButton.removeAttribute("disabled");
+    saveImageForm.removeEventListener("submit", ignoreSubmitListener);
+    closeModalButton.removeAttribute("disabled");
+    saveImageDialog.removeEventListener("cancel", ignoreCancelListener);
     saveImageForm.reset();
     if (saveImageDialog.open) {
       saveImageDialog.close();
@@ -174,12 +186,23 @@ function handleSaveImageButton(map: MandelbrotMap) {
       return;
     }
 
+    isSavingImage = true;
+    saveImageForm.addEventListener("submit", ignoreSubmitListener);
+    saveImageDialog.addEventListener("cancel", ignoreCancelListener);
     saveImageSubmitButton.innerText = "Working...";
     saveImageSubmitButton.setAttribute("disabled", "true");
+    closeModalButton.setAttribute("disabled", "true");
 
-    map.saveVisibleImage(width, height).then(() => {
-      toggleSaveImageModalOpen();
-    });
+    map
+      .saveVisibleImage(width, height)
+      .catch((error) => {
+        alert("Error saving image\n\n" + error);
+        console.error(error);
+      })
+      .finally(() => {
+        isSavingImage = false;
+        toggleSaveImageModalOpen();
+      });
   });
 
   closeModalButton.onclick = () => {

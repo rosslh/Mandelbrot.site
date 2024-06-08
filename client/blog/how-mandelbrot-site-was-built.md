@@ -11,6 +11,8 @@ The Mandelbrot set viewer is designed to allow users to navigate and explore dif
 
 The computational backend of the viewer is written in Rust, a language chosen for its performance and safety features. Rust code is compiled to WebAssembly using a webpack plugin called `wasm-pack`, which simplifies the integration of Wasm with the frontend technologies. The frontend of the viewer is developed using TypeScript, enhancing code quality and maintainability with its strong typing system.
 
+Integrating high-performance computational code with a web-based interface posed several challenges, particularly in terms of performance optimization and seamless integration of different technologies. The use of WebAssembly and Web Workers helped overcome these by offloading the computational workload and enabling parallel processing.
+
 To prevent the intensive computations from blocking the main browser thread, it utilizes Web Workers through the `threads.js` library, which facilitates creating a pool of workers. These workers handle the generation of Mandelbrot set tiles. When a tile is needed, it is queued, and workers fetch tasks from this queue as they become available.
 
 The Wasm module accepts the bounds of a tile and computes the Mandelbrot set for those bounds. The result is then encoded as a `Uint8ClampedArray` and transferred back to the main thread to be rendered on the map.
@@ -28,10 +30,6 @@ The viewer is equipped with a range of interactive features:
 - **Viewport Coordinates:** Display and update the coordinates of the current viewport on the complex plane.
 - **Image Export:** High-resolution images of the fractal can be saved as PNG files.
 - **Shareable Views:** Users can generate URLs that encapsulate their current view, allowing them to share their fractal explorations with others.
-
-## Challenges and Solutions
-
-Integrating high-performance computational code with a web-based interface posed several challenges, particularly in terms of performance optimization and seamless integration of different technologies. The use of WebAssembly and Web Workers helped overcome these by offloading the computational workload and enabling parallel processing.
 
 ## Conclusion
 
