@@ -93,16 +93,18 @@ function handleIterationButtons(map: MandelbrotMap) {
     document.getElementById("iterations")
   );
 
+  const debouncedRefresh = debounce(() => map.refresh(), 500);
+
   multiplyButton.onclick = () => {
     config.iterations *= 2;
     iterationsInput.value = String(config.iterations);
-    map.refresh();
+    debouncedRefresh();
   };
 
   divideButton.onclick = () => {
     config.iterations = Math.ceil(config.iterations / 2);
     iterationsInput.value = String(config.iterations);
-    map.refresh();
+    debouncedRefresh();
   };
 }
 

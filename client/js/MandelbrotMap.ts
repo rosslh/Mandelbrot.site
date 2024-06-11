@@ -169,7 +169,7 @@ class MandelbrotMap extends L.Map {
   }
 
   async saveVisibleImage(totalWidth: number, totalHeight: number) {
-    const numColumns = 16;
+    const numColumns = 24;
     const columnWidth = Math.ceil(totalWidth / numColumns);
     const bounds = this.mapBoundsAsComplexParts;
 
