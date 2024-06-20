@@ -231,12 +231,6 @@ button#exit-full-screen {
   display: none;
 }
 
-@media (hover: none) {
-  .mobileHidden {
-    display: none !important;
-  }
-}
-
 @media (max-width: 800px) {
   .mobileHidden {
     display: none !important;

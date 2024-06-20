@@ -103,8 +103,13 @@ class MandelbrotLayer extends L.GridLayer {
 
     const bounds = this.getComplexBoundsOfTile(tilePosition);
 
-    this._map.pool.queue(async ({ getTile }) => {
-      getTile({
+    const id =
+      typeof crypto !== "undefined" && crypto
+        ? crypto.randomUUID()
+        : Date.now().toString();
+
+    const tileTask = this._map.pool.queue(async ({ getTile }) => {
+      const data = await getTile({
         bounds,
         maxIterations: config.iterations,
         exponent: config.exponent,
@@ -113,15 +118,24 @@ class MandelbrotLayer extends L.GridLayer {
         colorScheme: config.colorScheme,
         reverseColors: config.reverseColors,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      }).then((data: any) => {
-        const imageData = new ImageData(
-          Uint8ClampedArray.from(data),
-          scaledTileSize,
-          scaledTileSize
-        );
-        context.putImageData(imageData, 0, 0);
-        done(null, canvas);
       });
+
+      const imageData = new ImageData(
+        Uint8ClampedArray.from(data),
+        scaledTileSize,
+        scaledTileSize
+      );
+      context.putImageData(imageData, 0, 0);
+      this._map.queuedTileTasks = this._map.queuedTileTasks.filter(
+        (task) => task.id !== id
+      );
+      done(null, canvas);
+    });
+
+    this._map.queuedTileTasks.push({
+      id,
+      task: tileTask,
+      position: tilePosition,
     });
 
     return canvas;

@@ -4,6 +4,7 @@ import { saveAs } from "file-saver";
 import { Pool, Worker, spawn } from "threads";
 import { MandelbrotLayer } from "./MandelbrotLayer";
 import { config } from "./main";
+import { QueuedTask } from "threads/dist/master/pool-types";
 
 class MandelbrotMap extends L.Map {
   mandelbrotLayer: MandelbrotLayer;
@@ -12,16 +13,22 @@ class MandelbrotMap extends L.Map {
   defaultZoom: number;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   pool: Pool<any>;
+  queuedTileTasks: {
+    id: string;
+    position: L.Coords;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    task: QueuedTask<any, void>;
+  }[] = [];
 
-  constructor({ htmlId: mapId }: { htmlId: string }) {
-    super(mapId, {
+  constructor({ htmlId }: { htmlId: string }) {
+    super(htmlId, {
       attributionControl: false,
       maxZoom: 48,
       zoomAnimationThreshold: 48,
     });
 
     this.createPool();
-    this.mapId = mapId;
+    this.mapId = htmlId;
     this.mandelbrotLayer = new MandelbrotLayer().addTo(this);
     this.defaultPosition = [0, 0];
     this.defaultZoom = 3;
@@ -35,16 +42,13 @@ class MandelbrotMap extends L.Map {
     this.on("load", this.throttleSetDomElementValues);
     this.on("move", this.throttleSetDomElementValues);
     this.on("moveend", this.throttleSetDomElementValues);
-    this.on("zoomend", this.throttleSetDomElementValues);
+    this.on("zoomend", () => {
+      this.cancelTileTasksOnWrongZoom();
+      this.throttleSetDomElementValues();
+    });
     this.on("viewreset", this.throttleSetDomElementValues);
     this.on("resize", this.throttleSetDomElementValues);
   }
-
-  handleMapClick = (e: L.LeafletMouseEvent) => {
-    if (e.originalEvent.altKey) {
-      this.setView(e.latlng, this.getZoom());
-    }
-  };
 
   tilePositionToComplexParts(
     x: number,
@@ -58,7 +62,13 @@ class MandelbrotMap extends L.Map {
     return { re, im };
   }
 
-  complexPartsToTilePosition(re: number, im: number, z: number) {
+  private handleMapClick = (e: L.LeafletMouseEvent) => {
+    if (e.originalEvent.altKey) {
+      this.setView(e.latlng, this.getZoom());
+    }
+  };
+
+  private complexPartsToTilePosition(re: number, im: number, z: number) {
     const scaleFactor = this.mandelbrotLayer.getTileSize().x / 128;
     const d = 2 ** (z - 2);
     const x = ((re + 4) * d) / scaleFactor;
@@ -66,7 +76,7 @@ class MandelbrotMap extends L.Map {
     return { x, y };
   }
 
-  latLngToTilePosition(latLng: L.LatLng, z: number) {
+  private latLngToTilePosition(latLng: L.LatLng, z: number) {
     const point = this.project(latLng, z).unscaleBy(
       this.mandelbrotLayer.getTileSize()
     );
@@ -74,7 +84,7 @@ class MandelbrotMap extends L.Map {
     return { x: point.x, y: point.y };
   }
 
-  get mapBoundsAsComplexParts() {
+  private get mapBoundsAsComplexParts() {
     const bounds = this.getBounds();
     const sw = this.latLngToTilePosition(bounds.getSouthWest(), this.getZoom());
     const ne = this.latLngToTilePosition(bounds.getNorthEast(), this.getZoom());
@@ -142,9 +152,19 @@ class MandelbrotMap extends L.Map {
     return latLng;
   }
 
-  throttleSetDomElementValues = throttle(this.setDomElementValues, 200);
+  private throttleSetDomElementValues = throttle(this.setDomElementValues, 200);
 
-  async createPool() {
+  private async cancelTileTasksOnWrongZoom() {
+    this.queuedTileTasks = this.queuedTileTasks.filter(({ task, position }) => {
+      if (position.z !== this.getZoom()) {
+        task.cancel();
+        return false;
+      }
+      return true;
+    });
+  }
+
+  private async createPool() {
     if (this.pool) {
       this.pool.terminate(true);
     }
