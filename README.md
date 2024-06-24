@@ -1,4 +1,6 @@
-# mandelbrot.site
+# Mandelbrot.site
+
+[![Deploy](https://github.com/rosslh/mandelbrot.site/actions/workflows/deploy.yml/badge.svg)](https://github.com/rosslh/mandelbrot.site/actions/workflows/deploy.yml) ![Uptime Robot status](https://img.shields.io/uptimerobot/status/m792388109-4c544ded2b0e440130ddd401)
 
 [mandelbrot.site](https://mandelbrot.site) is a web app that lets you explore the Mandelbrot set fractal. Built with Rust (compiled to Wasm) and TypeScript.
 

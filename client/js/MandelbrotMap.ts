@@ -121,19 +121,19 @@ class MandelbrotMap extends L.Map {
     );
 
     config.re = re;
-    (<HTMLInputElement>document.getElementById("re")).value = String(re);
+    (document.getElementById("re") as HTMLInputElement).value = String(re);
 
     config.im = im;
-    (<HTMLInputElement>document.getElementById("im")).value = String(im);
+    (document.getElementById("im") as HTMLInputElement).value = String(im);
 
     config.zoom = position.z;
-    (<HTMLInputElement>document.getElementById("zoom")).value = String(
+    (document.getElementById("zoom") as HTMLInputElement).value = String(
       position.z
     );
 
-    (<HTMLAnchorElement>(
-      document.getElementById("shareLink")
-    )).href = `?re=${re}&im=${im}&z=${position.z}&i=${config.iterations}&e=${config.exponent}&c=${config.colorScheme}&r=${config.reverseColors}&sharing=true`;
+    (
+      document.getElementById("shareLink") as HTMLAnchorElement
+    ).href = `?re=${re}&im=${im}&z=${position.z}&i=${config.iterations}&e=${config.exponent}&c=${config.colorScheme}&r=${config.reverseColors}&sharing=true`;
   };
 
   private complexPartsToLatLng(re: number, im: number, z: number) {

@@ -58,7 +58,7 @@ function handleNumberInput({
   resetView,
   allowFraction,
 }: NumberInput) {
-  const input = <HTMLInputElement>document.getElementById(id);
+  const input = document.getElementById(id) as HTMLInputElement;
   input.value = String(config[id]);
   input.oninput = debounce(({ target }) => {
     let parsedValue = allowFraction
@@ -83,15 +83,15 @@ function handleNumberInput({
 }
 
 function handleIterationButtons(map: MandelbrotMap) {
-  const multiplyButton = <HTMLButtonElement>(
-    document.getElementById("iterations-mul-2")
-  );
-  const divideButton = <HTMLButtonElement>(
-    document.getElementById("iterations-div-2")
-  );
-  const iterationsInput = <HTMLInputElement>(
-    document.getElementById("iterations")
-  );
+  const multiplyButton = document.getElementById(
+    "iterations-mul-2"
+  ) as HTMLButtonElement;
+  const divideButton = document.getElementById(
+    "iterations-div-2"
+  ) as HTMLButtonElement;
+  const iterationsInput = document.getElementById(
+    "iterations"
+  ) as HTMLInputElement;
 
   const debouncedRefresh = debounce(() => map.refresh(), 500);
 
@@ -109,19 +109,19 @@ function handleIterationButtons(map: MandelbrotMap) {
 }
 
 function handleSelectInput({ id, map }: SelectInput) {
-  const select = <HTMLSelectElement>document.getElementById(id);
+  const select = document.getElementById(id) as HTMLSelectElement;
   select.value = String(config[id]);
   select.onchange = ({ target }) => {
-    config[id] = (<HTMLSelectElement>target).value;
+    config[id] = (target as HTMLSelectElement).value;
     map.refresh();
   };
 }
 
 function handleCheckboxInput({ id, map }: CheckboxInput) {
-  const checkbox = <HTMLInputElement>document.getElementById(id);
+  const checkbox = document.getElementById(id) as HTMLInputElement;
   checkbox.checked = Boolean(config[id]);
   checkbox.onchange = ({ target }) => {
-    config[id] = (<HTMLInputElement>target).checked;
+    config[id] = (target as HTMLInputElement).checked;
     map.refresh();
   };
 }
@@ -362,21 +362,22 @@ const setConfigFromUrl = (map: MandelbrotMap) => {
 
     if (iterations) {
       config.iterations = Number(iterations);
-      (<HTMLInputElement>document.getElementById("iterations")).value =
+      (document.getElementById("iterations") as HTMLInputElement).value =
         iterations;
     }
     if (exponent) {
       config.exponent = Number(exponent);
-      (<HTMLInputElement>document.getElementById("exponent")).value = exponent;
+      (document.getElementById("exponent") as HTMLInputElement).value =
+        exponent;
     }
     if (colorScheme) {
       config.colorScheme = colorScheme;
-      (<HTMLSelectElement>document.getElementById("colorScheme")).value =
+      (document.getElementById("colorScheme") as HTMLSelectElement).value =
         colorScheme;
     }
     if (reverseColors) {
       config.reverseColors = reverseColors === "true";
-      (<HTMLInputElement>document.getElementById("reverseColors")).checked =
+      (document.getElementById("reverseColors") as HTMLInputElement).checked =
         config.reverseColors;
     }
 
@@ -390,7 +391,11 @@ const setConfigFromUrl = (map: MandelbrotMap) => {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
-    if (config.re !== 0 && config.im !== 0 && config.zoom !== 3) {
+    if (
+      config.re !== configDefaults.re &&
+      config.im !== configDefaults.im &&
+      config.zoom !== configDefaults.zoom
+    ) {
       map.refresh();
     }
   }

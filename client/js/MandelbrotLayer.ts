@@ -117,7 +117,6 @@ class MandelbrotLayer extends L.GridLayer {
         imageHeight: scaledTileSize,
         colorScheme: config.colorScheme,
         reverseColors: config.reverseColors,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       });
 
       const imageData = new ImageData(
