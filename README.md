@@ -1,8 +1,10 @@
 # Mandelbrot.site
 
-[![Deploy](https://github.com/rosslh/mandelbrot.site/actions/workflows/deploy.yml/badge.svg)](https://github.com/rosslh/mandelbrot.site/actions/workflows/deploy.yml) ![Uptime Robot status](https://img.shields.io/uptimerobot/status/m792388109-4c544ded2b0e440130ddd401)
+[![Tests](https://github.com/rosslh/mandelbrot.site/actions/workflows/tests.yml/badge.svg)](https://github.com/rosslh/mandelbrot.site/actions/workflows/tests.yml)
+[![Deploy](https://github.com/rosslh/mandelbrot.site/actions/workflows/deploy.yml/badge.svg)](https://github.com/rosslh/mandelbrot.site/actions/workflows/deploy.yml)
+[![Uptime Robot status](https://img.shields.io/uptimerobot/status/m792388109-4c544ded2b0e440130ddd401)](https://mandelbrot.site)
 
-[mandelbrot.site](https://mandelbrot.site) is a web app that lets you explore the Mandelbrot set fractal. Built with Rust (compiled to Wasm) and TypeScript.
+[Mandelbrot.site](https://mandelbrot.site) is a web-based viewer that allows you to explore the fascinating world of the Mandelbrot set, a mathematical fractal. The project leverages cutting-edge web technologies, including Rust, WebAssembly (Wasm), TypeScript, and Leaflet.js, to create a high-performance, interactive, and visually captivating experience.
 
 ## Project Structure
 
@@ -25,9 +27,9 @@
 
 View some of the stunning images generated with mandelbrot.site:
 
-[![Mandelbrot Set Image](https://raw.githubusercontent.com/rosslh/mandelbrot.site/master/example-images/mandelbrot-4.png)](https://mandelbrot.site)
+![Mandelbrot Set Image](https://raw.githubusercontent.com/rosslh/mandelbrot.site/master/example-images/mandelbrot-4.png)
 
-[![Mandelbrot Set Image](https://raw.githubusercontent.com/rosslh/mandelbrot.site/master/example-images/mandelbrot-2.png)](https://mandelbrot.site)
+![Mandelbrot Set Image](https://raw.githubusercontent.com/rosslh/mandelbrot.site/master/example-images/mandelbrot-2.png)
 
 [Explore more images](/example-images)
 
