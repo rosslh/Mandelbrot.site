@@ -41,7 +41,7 @@ const configDefaults: MandelbrotConfig = {
   reverseColors: false,
   highDpiTiles: false,
 
-  re: 0,
+  re: -0.5,
   im: 0,
   zoom: 3,
 };
@@ -250,11 +250,6 @@ function handleFullScreen() {
   return toggleFullScreen;
 }
 
-function handleRefreshButton(map: MandelbrotMap) {
-  const refreshButton = document.getElementById("refresh");
-  refreshButton.onclick = () => map.refresh();
-}
-
 function handleHotKeys(
   map: MandelbrotMap,
   toggleSaveImageModalOpen: () => void,
@@ -270,9 +265,6 @@ function handleHotKeys(
     }
     if (event.key === "s") {
       toggleSaveImageModalOpen();
-    }
-    if (event.key === "r") {
-      map.refresh();
     }
     if (event.key === "f") {
       toggleFullScreen();
@@ -335,7 +327,6 @@ function handleDom(map: MandelbrotMap) {
     map,
   });
 
-  handleRefreshButton(map);
   handleHideShowUiButton();
   handleShortcutHints();
 
@@ -404,6 +395,7 @@ const setConfigFromUrl = (map: MandelbrotMap) => {
 window.addEventListener("load", () => {
   const map = new MandelbrotMap({
     htmlId: "leaflet-map",
+    defaultPosition: [configDefaults.re, configDefaults.im],
   });
   handleDom(map);
   setConfigFromUrl(map);

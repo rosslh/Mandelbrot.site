@@ -20,17 +20,24 @@ class MandelbrotMap extends L.Map {
     task: QueuedTask<any, void>;
   }[] = [];
 
-  constructor({ htmlId }: { htmlId: string }) {
+  constructor({
+    htmlId,
+    defaultPosition,
+  }: {
+    htmlId: string;
+    defaultPosition: [number, number];
+  }) {
     super(htmlId, {
       attributionControl: false,
       maxZoom: 48,
       zoomAnimationThreshold: 48,
+      center: defaultPosition,
     });
 
     this.createPool();
     this.mapId = htmlId;
     this.mandelbrotLayer = new MandelbrotLayer().addTo(this);
-    this.defaultPosition = [0, 0];
+    this.defaultPosition = defaultPosition;
     this.defaultZoom = 3;
     this.setView(this.defaultPosition, this.defaultZoom);
 
@@ -57,8 +64,8 @@ class MandelbrotMap extends L.Map {
   ): { re: number; im: number } {
     const scaleFactor = this.mandelbrotLayer.getTileSize().x / 128;
     const d = 2 ** (z - 2);
-    const re = (x / d) * scaleFactor - 4;
-    const im = (y / d) * scaleFactor - 4;
+    const re = (x / d) * scaleFactor - 4 + this.defaultPosition[0];
+    const im = (y / d) * scaleFactor - 4 + this.defaultPosition[1];
     return { re, im };
   }
 
@@ -71,8 +78,8 @@ class MandelbrotMap extends L.Map {
   private complexPartsToTilePosition(re: number, im: number, z: number) {
     const scaleFactor = this.mandelbrotLayer.getTileSize().x / 128;
     const d = 2 ** (z - 2);
-    const x = ((re + 4) * d) / scaleFactor;
-    const y = ((im + 4) * d) / scaleFactor;
+    const x = ((re + 4 - this.defaultPosition[0]) * d) / scaleFactor;
+    const y = ((im + 4 - this.defaultPosition[1]) * d) / scaleFactor;
     return { x, y };
   }
 

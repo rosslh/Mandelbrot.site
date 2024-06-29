@@ -231,6 +231,13 @@ button#exit-full-screen {
   display: none;
 }
 
+#inputsWrapper *,
+button,
+input {
+  // this make it not zoom in on double tap on mobile
+  touch-action: manipulation;
+}
+
 @media (max-width: 800px) {
   .mobileHidden {
     display: none !important;
