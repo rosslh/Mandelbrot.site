@@ -87,7 +87,7 @@ html {
   width: 170px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 
   .shortcutHint {
     text-decoration: underline;
@@ -122,7 +122,7 @@ html {
   .iterationButtons {
     display: inline-flex;
     gap: 8px;
-    margin-top: -12px;
+    margin-top: -26px;
     margin-left: auto;
     margin-right: 80px;
     transform: translateX(100%);
@@ -153,6 +153,21 @@ html {
   > select,
   option {
     width: 100%;
+  }
+
+  &.alignStart {
+    align-items: flex-start;
+  }
+
+  label.labelWithSubtitle {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    .labelSubtitle {
+      opacity: 0.75;
+      font-size: 13px;
+    }
   }
 }
 
@@ -231,7 +246,8 @@ button#exit-full-screen {
   display: none;
 }
 
-#inputsWrapper *,
+.overlay,
+.overlay *,
 button,
 input {
   // this make it not zoom in on double tap on mobile
@@ -251,6 +267,10 @@ input {
 
   .navHeading {
     font-size: 16px;
+  }
+
+  .labelSubtitle {
+    font-size: 15px !important;
   }
 }
 

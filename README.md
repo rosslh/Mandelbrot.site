@@ -1,10 +1,10 @@
 # Mandelbrot.site
 
-[![Tests](https://github.com/rosslh/mandelbrot.site/actions/workflows/tests.yml/badge.svg)](https://github.com/rosslh/mandelbrot.site/actions/workflows/tests.yml)
-[![Deploy](https://github.com/rosslh/mandelbrot.site/actions/workflows/deploy.yml/badge.svg)](https://github.com/rosslh/mandelbrot.site/actions/workflows/deploy.yml)
-[![Uptime Robot status](https://img.shields.io/uptimerobot/status/m792388109-4c544ded2b0e440130ddd401)](https://mandelbrot.site)
-
 [Mandelbrot.site](https://mandelbrot.site) is a web-based viewer that allows you to explore the fascinating world of the Mandelbrot set, a mathematical fractal. The project leverages cutting-edge web technologies, including Rust, WebAssembly (Wasm), TypeScript, and Leaflet.js, to create a high-performance, interactive, and visually captivating experience.
+
+![GitHub branch check runs](https://img.shields.io/github/check-runs/rosslh/mandelbrot.site/master?style=flat-square&label=Checks)
+![Uptime Robot status](https://img.shields.io/uptimerobot/status/m792388109-4c544ded2b0e440130ddd401?up_message=online&style=flat-square&label=Status)
+![Uptime Robot ratio (30 days)](<https://img.shields.io/uptimerobot/ratio/m792388109-4c544ded2b0e440130ddd401?style=flat-square&label=Uptime%20(1mo)>)
 
 ## Project Structure
 
