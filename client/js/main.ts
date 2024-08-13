@@ -344,7 +344,6 @@ const setConfigFromUrl = (map: MandelbrotMap) => {
   const exponent = queryParams.get("e");
   const colorScheme = queryParams.get("c");
   const reverseColors = queryParams.get("r");
-  const sharing = queryParams.get("sharing");
 
   if (re && im && zoom) {
     config.re = Number(re);
@@ -371,16 +370,7 @@ const setConfigFromUrl = (map: MandelbrotMap) => {
       (document.getElementById("reverseColors") as HTMLInputElement).checked =
         config.reverseColors;
     }
-
-    if (sharing) {
-      window.history.replaceState(
-        {},
-        document.title,
-        window.location.href.replace("&sharing=true", "")
-      );
-    } else {
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
+    window.history.replaceState({}, document.title, window.location.pathname);
 
     if (
       config.re !== configDefaults.re &&
@@ -390,6 +380,19 @@ const setConfigFromUrl = (map: MandelbrotMap) => {
       map.refresh();
     }
   }
+};
+const shareButton = document.getElementById(
+  "share-button"
+) as HTMLButtonElement;
+const updateShareButtonText = (text: string) => {
+  shareButton.innerText = text;
+};
+shareButton.onclick = () => {
+  const url = new URL(window.location.href);
+  navigator.clipboard.writeText(url.toString()).then(() => {
+    updateShareButtonText("Copied link!");
+    setTimeout(() => updateShareButtonText("Share this view"), 5000);
+  });
 };
 
 window.addEventListener("load", () => {
