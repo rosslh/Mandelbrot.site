@@ -43,3 +43,10 @@ To set up and run the project on your local environment, navigate to the `client
 - **Run Rust Tests**: `npm run test`
 - **Lint**: `npm run lint` - identifies potential code issues
 - **Cleanup**: `npm run clean` - removes caches and build artifacts
+
+## Contributors
+
+Many thanks to the following contributors who have helped shape this project:
+
+<!-- readme: collaborators,contributors,ImgBotApp/- -start -->
+<!-- readme: collaborators,contributors,ImgBotApp/- -end -->
