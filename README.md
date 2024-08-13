@@ -33,7 +33,7 @@ View some of the stunning images generated with mandelbrot.site:
 
 [Explore more images](/example-images)
 
-## Getting Started Locally
+## Development
 
 To set up and run the project on your local environment, navigate to the `client/` directory and use the following commands:
 
@@ -48,5 +48,9 @@ To set up and run the project on your local environment, navigate to the `client
 
 Many thanks to the following contributors who have helped shape this project:
 
-<!-- readme: collaborators,contributors,ImgBotApp/- -start -->
-<!-- readme: collaborators,contributors,ImgBotApp/- -end -->
+| Avatar                                                                                   | Name                | GitHub Profile                            |
+| ---------------------------------------------------------------------------------------- | ------------------- | ----------------------------------------- |
+| <img src="https://avatars.githubusercontent.com/u/8635605?v=4" width="100" height="100"> | **Ross Hill**       | [rosslh](https://github.com/rosslh)       |
+| <img src="https://avatars.githubusercontent.com/u/122646?v=4" width="100" height="100">  | **Joseph Weissman** | [jweissman](https://github.com/jweissman) |
+
+Want to contribute? Check out the list of [open issues](https://github.com/rosslh/Mandelbrot.site/issues)!
