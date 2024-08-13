@@ -49,4 +49,31 @@ To set up and run the project on your local environment, navigate to the `client
 Many thanks to the following contributors who have helped shape this project:
 
 <!-- readme: collaborators,contributors,ImgBotApp/- -start -->
+<table>
+	<tbody>
+		<tr>
+            <td align="center">
+                <a href="https://github.com/rosslh">
+                    <img src="https://avatars.githubusercontent.com/u/8635605?v=4" width="100;" alt="rosslh"/>
+                    <br />
+                    <sub><b>Ross Hill</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/ImgBotApp">
+                    <img src="https://avatars.githubusercontent.com/u/31427850?v=4" width="100;" alt="ImgBotApp"/>
+                    <br />
+                    <sub><b>Imgbot</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/jweissman">
+                    <img src="https://avatars.githubusercontent.com/u/122646?v=4" width="100;" alt="jweissman"/>
+                    <br />
+                    <sub><b>Joseph Weissman</b></sub>
+                </a>
+            </td>
+		</tr>
+	<tbody>
+</table>
 <!-- readme: collaborators,contributors,ImgBotApp/- -end -->
