@@ -1,0 +1,17 @@
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  update-readme-contributors:
+    runs-on: ubuntu-latest
+    name: Update Contributors List
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Update list
+        uses: akhilmhdh/contributors-readme-action@v2.3.10
+        env:
+          GITHUB_TOKEN: ${{ secrets.README_TOKEN }}
