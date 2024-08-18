@@ -1,56 +1,78 @@
-# Mandelbrot.site
+<p align="center">
+  <a href="https://mandelbrot.site">
+    <img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/master/example-images/logo.png" height="50px" width="50px" alt="Mandelbrot Logo">
+  </a>
+</p>
 
-[Mandelbrot.site](https://mandelbrot.site) is a web-based viewer that allows you to explore the fascinating world of the Mandelbrot set, a mathematical fractal. The project leverages cutting-edge web technologies, including Rust, WebAssembly (Wasm), TypeScript, and Leaflet.js, to create a high-performance, interactive, and visually captivating experience.
+<h1 align="center">Mandelbrot.site</h1>
 
-![GitHub branch check runs](https://img.shields.io/github/check-runs/rosslh/mandelbrot.site/master?style=flat-square&label=Checks)
-![Uptime Robot status](https://img.shields.io/uptimerobot/status/m792388109-4c544ded2b0e440130ddd401?up_message=online&style=flat-square&label=Status)
-![Uptime Robot ratio (30 days)](<https://img.shields.io/uptimerobot/ratio/m792388109-4c544ded2b0e440130ddd401?style=flat-square&label=Uptime%20(1mo)>)
+<p align="center">
+  <a href="https://mandelbrot.site">Mandelbrot.site</a> is an interactive fractal viewer that runs in the browser. It offers a fast and intuitive way to explore the Mandelbrot set and share your discoveries. This project is built with Rust, WebAssembly, TypeScript, and Leaflet.js.
+</p>
 
-## Project Structure
+<p align="center">
+  <img src="https://img.shields.io/github/check-runs/rosslh/mandelbrot.site/master?style=flat&label=Checks" alt="GitHub branch check runs">
+  <img src="https://img.shields.io/uptimerobot/status/m792388109-4c544ded2b0e440130ddd401?up_message=online&style=flat&label=Status" alt="Uptime Robot status">
+  <img src="https://img.shields.io/uptimerobot/ratio/m792388109-4c544ded2b0e440130ddd401?style=flat&label=Uptime%20(1mo)" alt="Uptime Robot ratio (30 days)">
+</p>
 
-- **Mandelbrot Set Implementation**: [`mandelbrot/src/lib.rs`](mandelbrot/src/lib.rs)
-- **Rust Unit Tests**: [`mandelbrot/src/lib_test.rs`](mandelbrot/src/lib_test.rs)
-- **TypeScript Entry Point**: [`client/js/main.ts`](client/js/main.ts)
+## Features
 
-## Key Features
+Mandelbrot.site offers a variety of features to enhance your experience:
 
-- **Dynamic Zoom**: Use your mouse to scroll or select a region, diving deeper into the fractal.
-- **Iteration Adjustment**: Control the detail level with iteration count.
-- **Multibrot Sets**: Explore "multibrot" sets by changing the exponent.
-- **High-Resolution Rendering**: Enjoy crystal clear fractal images.
-- **Customizable Color Schemes**: Personalize your fractal exploration.
-- **Viewport Coordinates**: View and update the viewport's coordinates on the complex plane.
-- **Image Export**: Save your discoveries as PNG images.
-- **Shareable Views**: Generate URLs to share your current view with others.
+- **Zoom in** by scrolling or selecting a region.
+- Adjust the **detail level** by modifying the iteration count or resolution.
+- Explore **multibrot sets** by changing the exponent parameter.
+- Download **high-resolution images** of your view.
+- Customize your experience with different **color palettes**.
+- View and update **viewport coordinates** on the complex plane.
+- Generate URLs to **share** your favorite views.
 
 ## Gallery
 
-View some of the stunning images generated with mandelbrot.site:
+Explore some stunning images generated with Mandelbrot.site:
 
-![Mandelbrot Set Image](https://raw.githubusercontent.com/rosslh/mandelbrot.site/master/example-images/mandelbrot-4.png)
-
-![Mandelbrot Set Image](https://raw.githubusercontent.com/rosslh/mandelbrot.site/master/example-images/mandelbrot-2.png)
+<table>
+  <tr>
+    <td><img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/master/example-images/mandelbrot-4.png" height="200px" alt="Mandelbrot Example"></td>
+    <td><img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/master/example-images/mandelbrot-2.png" height="200px" alt="Mandelbrot Example"></td>
+  </tr>
+</table>
 
 [Explore more images](/example-images)
 
+## Architecture
+
+Mandelbrot.site is built using modern web technologies to deliver a high-performance, interactive tool for exploring fractals. The computational backend is implemented in [Rust](https://github.com/rust-lang/rust), chosen for its performance and safety features. This Rust code is compiled to [WebAssembly](https://webassembly.org/) (Wasm) using the [wasm-pack](https://github.com/rustwasm/wasm-pack) plugin, enabling high-speed computations directly in the browser. On the frontend, the user interface is crafted with [TypeScript](https://github.com/microsoft/TypeScript), enhancing code quality and maintainability. To render the fractals, [Leaflet.js](https://github.com/Leaflet/Leaflet) is creatively adapted for this purpose.
+
+For performance optimization, Mandelbrot.site employs [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API) via the [threads.js](https://github.com/andywer/threads.js) library. This setup prevents intensive computations from blocking the main browser thread by creating a pool of workers that handle the generation of Mandelbrot set tiles in parallel. A key optimization technique used is "rectangle checking," which saves computation time for areas entirely within the set by checking only the perimeter of a tile.
+
+This robust architecture ensures that Mandelbrot.site provides a seamless and responsive experience for users exploring the intricate details of the Mandelbrot set directly in their web browser.
+
 ## Development
 
-To set up and run the project on your local environment, navigate to the `client/` directory and use the following commands:
+To set up and run the project on your local environment, navigate to the `client` directory and use the following commands:
 
-- **Install Dependencies**: `npm install`
-- **Start Development Server**: `npm run start` - serves the project at `http://localhost:9090`
-- **Build for Production**: `npm run build`
-- **Run Rust Tests**: `npm run test`
-- **Lint**: `npm run lint` - identifies potential code issues
+- **Install dependencies**: `npm install`
+- **Build the project**: `npm run build`
+- **Start development server**: `npm run start`
+- **Run Rust tests**: `npm run test`
+- **Identify code issues**: `npm run lint`
 - **Cleanup**: `npm run clean` - removes caches and build artifacts
+
+### Project Structure
+
+- **Mandelbrot set implementation**: [`mandelbrot/src/lib.rs`](mandelbrot/src/lib.rs)
+- **Rust unit tests**: [`mandelbrot/src/lib_test.rs`](mandelbrot/src/lib_test.rs)
+- **TypeScript entry point**: [`client/js/main.ts`](client/js/main.ts)
 
 ## Contributors
 
 Many thanks to the following contributors who have helped shape this project:
 
-| Avatar                                                                                   | Name                | GitHub Profile                            |
-| ---------------------------------------------------------------------------------------- | ------------------- | ----------------------------------------- |
-| <img src="https://avatars.githubusercontent.com/u/8635605?v=4" width="100" height="100"> | **Ross Hill**       | [rosslh](https://github.com/rosslh)       |
-| <img src="https://avatars.githubusercontent.com/u/122646?v=4" width="100" height="100">  | **Joseph Weissman** | [jweissman](https://github.com/jweissman) |
+| Avatar                                                                                                      | Name                | GitHub Profile                            |
+| ----------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------------------------- |
+| <img src="https://avatars.githubusercontent.com/u/8635605?v=4" width="60" height="60" alt="Ross Hill">      | **Ross Hill**       | [rosslh](https://github.com/rosslh)       |
+| <img src="https://avatars.githubusercontent.com/u/122646?v=4" width="60" height="60" alt="Joseph Weissman"> | **Joseph Weissman** | [jweissman](https://github.com/jweissman) |
 
 Want to contribute? Check out the list of [open issues](https://github.com/rosslh/Mandelbrot.site/issues)!
