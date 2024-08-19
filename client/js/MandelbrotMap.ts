@@ -138,9 +138,6 @@ class MandelbrotMap extends L.Map {
       position.z
     );
 
-    (
-      document.getElementById("shareLink") as HTMLAnchorElement
-    ).href = `?re=${re}&im=${im}&z=${position.z}&i=${config.iterations}&e=${config.exponent}&c=${config.colorScheme}&r=${config.reverseColors}&sharing=true`;
   };
 
   private complexPartsToLatLng(re: number, im: number, z: number) {

@@ -221,6 +221,25 @@ function handleHideShowUiButton() {
   };
 }
 
+function handleShareButton() {
+  const shareButton = document.getElementById(
+    "share-button"
+  ) as HTMLButtonElement;
+
+  const updateShareButtonText = (text: string) => {
+    shareButton.innerText = text;
+  };
+
+  shareButton.onclick = () => {
+    const url = `${window.location.host}?re=${config.re}&im=${config.im}&z=${config.zoom}&i=${config.iterations}&e=${config.exponent}&c=${config.colorScheme}&r=${config.reverseColors}`;
+
+    navigator.clipboard.writeText(url).then(() => {
+      updateShareButtonText("Link copied!");
+      setTimeout(() => updateShareButtonText("Share this view"), 3000);
+    });
+  };
+}
+
 function handleFullScreen() {
   const toggleFullScreen = () => {
     if (document.fullscreenElement) {
@@ -328,6 +347,9 @@ function handleDom(map: MandelbrotMap) {
   });
 
   handleHideShowUiButton();
+
+  handleShareButton();
+
   handleShortcutHints();
 
   const toggleFullScreen = handleFullScreen();
@@ -344,7 +366,6 @@ const setConfigFromUrl = (map: MandelbrotMap) => {
   const exponent = queryParams.get("e");
   const colorScheme = queryParams.get("c");
   const reverseColors = queryParams.get("r");
-  const sharing = queryParams.get("sharing");
 
   if (re && im && zoom) {
     config.re = Number(re);
@@ -371,16 +392,7 @@ const setConfigFromUrl = (map: MandelbrotMap) => {
       (document.getElementById("reverseColors") as HTMLInputElement).checked =
         config.reverseColors;
     }
-
-    if (sharing) {
-      window.history.replaceState(
-        {},
-        document.title,
-        window.location.href.replace("&sharing=true", "")
-      );
-    } else {
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
+    window.history.replaceState({}, document.title, window.location.pathname);
 
     if (
       config.re !== configDefaults.re &&
