@@ -70,9 +70,10 @@ To set up and run the project on your local environment, navigate to the `client
 
 Many thanks to the following contributors who have helped shape this project:
 
-| Avatar                                                                                                      | Name                | GitHub Profile                            |
-| ----------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------------------------- |
-| <img src="https://avatars.githubusercontent.com/u/8635605?v=4" width="60" height="60" alt="Ross Hill">      | **Ross Hill**       | [rosslh](https://github.com/rosslh)       |
-| <img src="https://avatars.githubusercontent.com/u/122646?v=4" width="60" height="60" alt="Joseph Weissman"> | **Joseph Weissman** | [jweissman](https://github.com/jweissman) |
+| Avatar                                                                                                             | Name                     | GitHub Profile                                                              |
+| ------------------------------------------------------------------------------------------------------------------ | ------------------------ | --------------------------------------------------------------------------- |
+| <img src="https://avatars.githubusercontent.com/u/8635605?v=4" width="60" height="60" alt="Ross Hill">             | **Ross Hill**            | [rosslh](https://github.com/rosslh)                                         |
+| <img src="https://avatars.githubusercontent.com/u/122646?v=4" width="60" height="60" alt="Joseph Weissman">        | **Joseph Weissman**      | [jweissman](https://github.com/jweissman)                                   |
+| <img src="https://avatars.githubusercontent.com/u/78155393?v=4" width="60" height="60" alt="Shubhankar Shandilya"> | **Shubhankar Shandilya** | [shubhankar-shandilya-india](https://github.com/shubhankar-shandilya-india) |
 
 Want to contribute? Check out the list of [open issues](https://github.com/rosslh/Mandelbrot.site/issues)!

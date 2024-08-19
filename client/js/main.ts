@@ -221,6 +221,25 @@ function handleHideShowUiButton() {
   };
 }
 
+function handleShareButton() {
+  const shareButton = document.getElementById(
+    "share-button"
+  ) as HTMLButtonElement;
+
+  const updateShareButtonText = (text: string) => {
+    shareButton.innerText = text;
+  };
+
+  shareButton.onclick = () => {
+    const url = `${window.location.host}?re=${config.re}&im=${config.im}&z=${config.zoom}&i=${config.iterations}&e=${config.exponent}&c=${config.colorScheme}&r=${config.reverseColors}`;
+
+    navigator.clipboard.writeText(url).then(() => {
+      updateShareButtonText("Link copied!");
+      setTimeout(() => updateShareButtonText("Share this view"), 3000);
+    });
+  };
+}
+
 function handleFullScreen() {
   const toggleFullScreen = () => {
     if (document.fullscreenElement) {
@@ -328,6 +347,9 @@ function handleDom(map: MandelbrotMap) {
   });
 
   handleHideShowUiButton();
+
+  handleShareButton();
+
   handleShortcutHints();
 
   const toggleFullScreen = handleFullScreen();
@@ -380,21 +402,6 @@ const setConfigFromUrl = (map: MandelbrotMap) => {
       map.refresh();
     }
   }
-};
-const shareButton = document.getElementById("share-button") as HTMLButtonElement;
-
-const updateShareButtonText = (text: string) => {
-  shareButton.innerText = text;
-};
-
-shareButton.onclick = () => {
-    const newUrl = new URL(window.location.href);
-    const url = `${newUrl}?re=${config.re}&im=${config.im}&z=${config.zoom}&i=${config.iterations}&e=${config.exponent}&c=${config.colorScheme}&r=${config.reverseColors}`;
-
-    navigator.clipboard.writeText(url).then(() => {
-        updateShareButtonText("Copied link!");
-        setTimeout(() => updateShareButtonText("Share this view"), 5000);
-    });
 };
 
 window.addEventListener("load", () => {
