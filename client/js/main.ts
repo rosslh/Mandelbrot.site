@@ -381,18 +381,20 @@ const setConfigFromUrl = (map: MandelbrotMap) => {
     }
   }
 };
-const shareButton = document.getElementById(
-  "share-button"
-) as HTMLButtonElement;
+const shareButton = document.getElementById("share-button") as HTMLButtonElement;
+
 const updateShareButtonText = (text: string) => {
   shareButton.innerText = text;
 };
+
 shareButton.onclick = () => {
-  const url = new URL(window.location.href);
-  navigator.clipboard.writeText(url.toString()).then(() => {
-    updateShareButtonText("Copied link!");
-    setTimeout(() => updateShareButtonText("Share this view"), 5000);
-  });
+    const newUrl = new URL(window.location.href);
+    const url = `${newUrl}?re=${config.re}&im=${config.im}&z=${config.zoom}&i=${config.iterations}&e=${config.exponent}&c=${config.colorScheme}&r=${config.reverseColors}`;
+
+    navigator.clipboard.writeText(url).then(() => {
+        updateShareButtonText("Copied link!");
+        setTimeout(() => updateShareButtonText("Share this view"), 5000);
+    });
 };
 
 window.addEventListener("load", () => {
