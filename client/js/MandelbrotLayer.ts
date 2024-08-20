@@ -25,13 +25,13 @@ class MandelbrotLayer extends L.GridLayer {
     const { re: reMin, im: imMin } = this._map.tilePositionToComplexParts(
       tilePosition.x,
       tilePosition.y,
-      tilePosition.z
+      tilePosition.z,
     );
 
     const { re: reMax, im: imMax } = this._map.tilePositionToComplexParts(
       tilePosition.x + 1,
       tilePosition.y + 1,
-      tilePosition.z
+      tilePosition.z,
     );
 
     const bounds = {
@@ -47,7 +47,7 @@ class MandelbrotLayer extends L.GridLayer {
   getSingleImage(
     bounds: { reMin: number; reMax: number; imMin: number; imMax: number },
     imageWidth: number,
-    imageHeight: number
+    imageHeight: number,
   ): Promise<HTMLCanvasElement> {
     return new Promise<HTMLCanvasElement>((resolve, reject) => {
       const canvas = document.createElement("canvas");
@@ -76,7 +76,7 @@ class MandelbrotLayer extends L.GridLayer {
           const imageData = new ImageData(
             Uint8ClampedArray.from(data),
             imageWidth,
-            imageHeight
+            imageHeight,
           );
           context.putImageData(imageData, 0, 0);
           resolve(canvas);
@@ -90,7 +90,7 @@ class MandelbrotLayer extends L.GridLayer {
   private generateTile(
     canvas: HTMLCanvasElement,
     tilePosition: L.Coords,
-    done: Done
+    done: Done,
   ) {
     const context = canvas.getContext("2d");
 
@@ -122,11 +122,11 @@ class MandelbrotLayer extends L.GridLayer {
       const imageData = new ImageData(
         Uint8ClampedArray.from(data),
         scaledTileSize,
-        scaledTileSize
+        scaledTileSize,
       );
       context.putImageData(imageData, 0, 0);
       this._map.queuedTileTasks = this._map.queuedTileTasks.filter(
-        (task) => task.id !== id
+        (task) => task.id !== id,
       );
       done(null, canvas);
     });
@@ -143,13 +143,13 @@ class MandelbrotLayer extends L.GridLayer {
   private generateTiles() {
     const tilesToGenerate = this.tilesToGenerate.splice(
       0,
-      this.tilesToGenerate.length
+      this.tilesToGenerate.length,
     );
 
     const mapZoom = this._map.getZoom();
 
     const relevantTasks = tilesToGenerate.filter(
-      (task) => task.position.z === mapZoom
+      (task) => task.position.z === mapZoom,
     );
 
     relevantTasks.forEach((task) => {
@@ -162,7 +162,7 @@ class MandelbrotLayer extends L.GridLayer {
   createTile(tilePosition: L.Coords, done: Done) {
     const canvas = L.DomUtil.create(
       "canvas",
-      "leaflet-tile"
+      "leaflet-tile",
     ) as HTMLCanvasElement;
 
     if (config.iterations <= 500 || L.Browser.mobile || L.Browser.android) {

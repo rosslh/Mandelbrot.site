@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://mandelbrot.site">
-    <img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/master/example-images/logo.png" height="50px" width="50px" alt="Mandelbrot Logo">
+    <img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/logo.png" height="50px" width="50px" alt="Mandelbrot Logo">
   </a>
 </p>
 
@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/github/check-runs/rosslh/mandelbrot.site/master?style=flat&label=Checks" alt="GitHub branch check runs">
+  <img src="https://img.shields.io/github/check-runs/rosslh/mandelbrot.site/main?style=flat&label=Checks" alt="GitHub branch check runs">
   <img src="https://img.shields.io/uptimerobot/status/m792388109-4c544ded2b0e440130ddd401?up_message=online&style=flat&label=Status" alt="Uptime Robot status">
   <img src="https://img.shields.io/uptimerobot/ratio/m792388109-4c544ded2b0e440130ddd401?style=flat&label=Uptime%20(1mo)" alt="Uptime Robot ratio (30 days)">
 </p>
@@ -34,8 +34,8 @@ Explore some stunning images generated with Mandelbrot.site:
 
 <table>
   <tr>
-    <td><img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/master/example-images/mandelbrot-4.png" height="200px" alt="Mandelbrot Example"></td>
-    <td><img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/master/example-images/mandelbrot-2.png" height="200px" alt="Mandelbrot Example"></td>
+    <td><img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-4.png" height="200px" alt="Mandelbrot Example"></td>
+    <td><img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-2.png" height="200px" alt="Mandelbrot Example"></td>
   </tr>
 </table>
 
@@ -58,6 +58,7 @@ To set up and run the project on your local environment, navigate to the `client
 - **Start development server**: `npm run start`
 - **Run Rust tests**: `npm run test`
 - **Identify code issues**: `npm run lint`
+- **Format the code**: `npm run format`
 - **Cleanup**: `npm run clean` - removes caches and build artifacts
 
 ### Project Structure
