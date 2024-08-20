@@ -23,7 +23,7 @@ import("../../mandelbrot/pkg").then((wasm) => {
         imageWidth,
         imageHeight,
         colorScheme,
-        reverseColors
+        reverseColors,
       );
     },
   };

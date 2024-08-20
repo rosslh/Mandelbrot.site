@@ -84,13 +84,13 @@ function handleNumberInput({
 
 function handleIterationButtons(map: MandelbrotMap) {
   const multiplyButton = document.getElementById(
-    "iterations-mul-2"
+    "iterations-mul-2",
   ) as HTMLButtonElement;
   const divideButton = document.getElementById(
-    "iterations-div-2"
+    "iterations-div-2",
   ) as HTMLButtonElement;
   const iterationsInput = document.getElementById(
-    "iterations"
+    "iterations",
   ) as HTMLInputElement;
 
   const debouncedRefresh = debounce(() => map.refresh(), 500);
@@ -131,14 +131,14 @@ function handleSaveImageButton(map: MandelbrotMap) {
 
   const saveImageButton = document.getElementById("save-image");
   const saveImageDialog = document.getElementById(
-    "save-image-modal"
+    "save-image-modal",
   ) as HTMLDialogElement;
   const saveImageForm = document.getElementById(
-    "save-image-form"
+    "save-image-form",
   ) as HTMLFormElement;
   const widthInput = document.getElementById("image-width") as HTMLInputElement;
   const heightInput = document.getElementById(
-    "image-height"
+    "image-height",
   ) as HTMLInputElement;
   const saveImageSubmitButton = document.getElementById("save-image-submit");
   const closeModalButton = document.getElementById("save-image-cancel");
@@ -223,7 +223,7 @@ function handleHideShowUiButton() {
 
 function handleShareButton() {
   const shareButton = document.getElementById(
-    "share-button"
+    "share-button",
   ) as HTMLButtonElement;
 
   const updateShareButtonText = (text: string) => {
@@ -272,7 +272,7 @@ function handleFullScreen() {
 function handleHotKeys(
   map: MandelbrotMap,
   toggleSaveImageModalOpen: () => void,
-  toggleFullScreen: () => void
+  toggleFullScreen: () => void,
 ) {
   const mobileBreakpoint = 800;
   document.addEventListener("keypress", (event) => {

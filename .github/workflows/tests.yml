@@ -1,11 +1,11 @@
 name: Tests
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
-    branches: [master]
+    branches: [main]
 jobs:
-  publish:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -13,7 +13,7 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - uses: actions/setup-node@v2
         with:
-          node-version: "18.14"
+          node-version-file: ./.nvmrc
       - name: Install dependencies
         working-directory: ./client
         run: |

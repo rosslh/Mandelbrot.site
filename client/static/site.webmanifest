@@ -1,14 +1,14 @@
 {
-    "name": "Mandelbrot Set Explorer",
-    "short_name": "Mandelbrot",
-    "icons": [
-        {
-            "src": "/static/android-chrome-144x144.png",
-            "sizes": "144x144",
-            "type": "image/png"
-        }
-    ],
-    "theme_color": "#ffffff",
-    "background_color": "#ffffff",
-    "display": "standalone"
+  "name": "Mandelbrot Set Explorer",
+  "short_name": "Mandelbrot",
+  "icons": [
+    {
+      "src": "/static/android-chrome-144x144.png",
+      "sizes": "144x144",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#ffffff",
+  "background_color": "#ffffff",
+  "display": "standalone"
 }

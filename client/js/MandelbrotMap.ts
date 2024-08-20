@@ -60,7 +60,7 @@ class MandelbrotMap extends L.Map {
   tilePositionToComplexParts(
     x: number,
     y: number,
-    z: number
+    z: number,
   ): { re: number; im: number } {
     const scaleFactor = this.mandelbrotLayer.getTileSize().x / 128;
     const d = 2 ** (z - 2);
@@ -85,7 +85,7 @@ class MandelbrotMap extends L.Map {
 
   private latLngToTilePosition(latLng: L.LatLng, z: number) {
     const point = this.project(latLng, z).unscaleBy(
-      this.mandelbrotLayer.getTileSize()
+      this.mandelbrotLayer.getTileSize(),
     );
 
     return { x: point.x, y: point.y };
@@ -99,12 +99,12 @@ class MandelbrotMap extends L.Map {
     const { re: reMin, im: imMax } = this.tilePositionToComplexParts(
       sw.x,
       sw.y,
-      this.getZoom()
+      this.getZoom(),
     );
     const { re: reMax, im: imMin } = this.tilePositionToComplexParts(
       ne.x,
       ne.y,
-      this.getZoom()
+      this.getZoom(),
     );
 
     return { reMin, reMax, imMin, imMax };
@@ -116,7 +116,7 @@ class MandelbrotMap extends L.Map {
       this.mandelbrotLayer.getTileSize().y,
     ];
     const point = this.project(this.getCenter(), this.getZoom()).unscaleBy(
-      new L.Point(tileSize[0], tileSize[1])
+      new L.Point(tileSize[0], tileSize[1]),
     );
 
     const position = { ...point, z: this.getZoom() };
@@ -124,7 +124,7 @@ class MandelbrotMap extends L.Map {
     const { re, im } = this.tilePositionToComplexParts(
       position.x,
       position.y,
-      position.z
+      position.z,
     );
 
     config.re = re;
@@ -135,9 +135,8 @@ class MandelbrotMap extends L.Map {
 
     config.zoom = position.z;
     (document.getElementById("zoom") as HTMLInputElement).value = String(
-      position.z
+      position.z,
     );
-
   };
 
   private complexPartsToLatLng(re: number, im: number, z: number) {
@@ -150,7 +149,7 @@ class MandelbrotMap extends L.Map {
 
     const latLng = this.unproject(
       L.point(x, y).scaleBy(new L.Point(tileSize[0], tileSize[1])),
-      z
+      z,
     );
 
     return latLng;
@@ -185,7 +184,7 @@ class MandelbrotMap extends L.Map {
       const pointToCenter = this.complexPartsToLatLng(
         config.re,
         config.im,
-        config.zoom
+        config.zoom,
       );
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (this as any)._resetView(pointToCenter, config.zoom);
@@ -224,7 +223,11 @@ class MandelbrotMap extends L.Map {
         reMax: bounds.reMin + reDiffPerColumn * (i + 1),
       };
       imagePromises.push(
-        this.mandelbrotLayer.getSingleImage(subBounds, columnWidth, totalHeight)
+        this.mandelbrotLayer.getSingleImage(
+          subBounds,
+          columnWidth,
+          totalHeight,
+        ),
       );
     }
 
@@ -246,7 +249,7 @@ class MandelbrotMap extends L.Map {
         blob,
         `mandelbrot${Date.now()}_r${config.re}_im${config.im}_z${
           config.zoom
-        }.png`
+        }.png`,
       );
     });
   }
