@@ -1,13 +1,13 @@
 <p align="center">
   <a href="https://mandelbrot.site">
-    <img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/logo.png" height="50px" width="50px" alt="Mandelbrot Logo">
+    <img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/icon.png" height="50px" width="50px" alt="Mandelbrot.site icon">
   </a>
 </p>
 
 <h1 align="center">Mandelbrot.site</h1>
 
 <p align="center">
-  <a href="https://mandelbrot.site">Mandelbrot.site</a> is an interactive fractal viewer that runs in the browser. It offers a fast and intuitive way to explore the Mandelbrot set and share your discoveries. This project is built with Rust, WebAssembly, TypeScript, and Leaflet.js.
+  <a href="https://mandelbrot.site">Mandelbrot.site</a> is an interactive fractal viewer that runs in the browser. It offers a fast and intuitive way to explore the Mandelbrot set and share your discoveries. Built with Rust, WebAssembly, TypeScript, and Leaflet.js.
 </p>
 
 <p align="center">
@@ -32,12 +32,8 @@ Mandelbrot.site offers a variety of features to enhance your experience:
 
 Explore some stunning images generated with Mandelbrot.site:
 
-<table>
-  <tr>
-    <td><img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-4.png" height="200px" alt="Mandelbrot Example"></td>
-    <td><img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-2.png" height="200px" alt="Mandelbrot Example"></td>
-  </tr>
-</table>
+<img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-4.png" height="200px" alt="Mandelbrot Example">
+<img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-2.png" height="200px" alt="Mandelbrot Example">
 
 [Explore more images](/example-images)
 
@@ -54,6 +50,7 @@ This robust architecture ensures that Mandelbrot.site provides a seamless and re
 To set up and run the project on your local environment, navigate to the `client` directory and use the following commands:
 
 - **Install dependencies**: `npm install`
+  - This requires [Node.js](https://nodejs.org/) to be installed on your system. Check the [`.nvmrc`](client/.nvmrc) file for the recommended Node.js version.
 - **Build the project**: `npm run build`
 - **Start development server**: `npm run start`
 - **Run Rust tests**: `npm run test`

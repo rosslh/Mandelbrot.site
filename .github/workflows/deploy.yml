@@ -11,7 +11,7 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - uses: actions/setup-node@v2
         with:
-          node-version-file: ./.nvmrc
+          node-version-file: ./client/.nvmrc
       - name: Install dependencies
         working-directory: ./client
         run: |

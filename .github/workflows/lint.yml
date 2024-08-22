@@ -17,7 +17,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version-file: ./.nvmrc
+          node-version-file: ./client/.nvmrc
 
       - name: Install dependencies
         run: npm install
@@ -30,7 +30,7 @@ jobs:
           toolchain: stable
           components: rustfmt
 
-      - name: Run ESLint
+      - name: Lint
         run: npm run lint
         working-directory: ./client
 
