@@ -32,8 +32,7 @@ Mandelbrot.site offers a variety of features to enhance your experience:
 
 Explore some stunning images generated with Mandelbrot.site:
 
-<img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-4.png" height="200px" alt="Mandelbrot Example">
-<img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-2.png" height="200px" alt="Mandelbrot Example">
+<img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-4.png" height="200px" alt="Mandelbrot Example"> <img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-2.png" height="200px" alt="Mandelbrot Example">
 
 [Explore more images](/example-images)
 
