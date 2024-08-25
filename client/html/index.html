@@ -64,8 +64,6 @@
       href="static/favicon-16x16.png"
     />
     <link rel="manifest" href="site.webmanifest" />
-    <meta name="msapplication-TileColor" content="#ff5000" />
-    <meta name="theme-color" content="#ff5000" />
 
     <meta name="author" content="Ross Hill" />
     <meta name="viewport" content="width=device-width,minimum-scale=1" />
@@ -105,9 +103,10 @@
       </div>
     </div>
     <div id="inputsWrapper" class="overlay">
+      <strong class="mobileHidden">Shortcuts</strong>
       <div class="shortcutWrapper mobileHidden">
         <code>shift + drag</code>
-        <div>Zoom in on a region</div>
+        <span>Zoom in</span>
       </div>
       <div class="shortcutWrapper mobileHidden">
         <code class="windowsShortcut">alt + click</code
@@ -115,10 +114,11 @@
         <div>Center a point</div>
       </div>
       <div class="inputSeparator mobileHidden"></div>
+      <strong class="mobileHidden">Render settings</strong>
       <div class="inputWrapper alignStart">
         <label for="iterations" class="labelWithSubtitle">
           <span>Iterations</span>
-          <span class="labelSubtitle">(Detail level)</span>
+          <span class="secondary">(Detail level)</span>
         </label>
         <input type="number" required id="iterations" name="iterations" />
       </div>
@@ -136,12 +136,16 @@
       </div>
       <div class="checkboxWrapper mobileHidden">
         <input type="checkbox" id="highDpiTiles" name="highDpiTiles" />
-        <label for="highDpiTiles">High resolution (slow)</label>
+        <label for="highDpiTiles"
+          >High resolution <span class="secondary">(Slow)</span></label
+        >
       </div>
       <div class="inputSeparator mobileHidden"></div>
+      <label class="colorSchemeLabel mobileHidden" for="colorScheme">
+        Base color scheme
+      </label>
       <div class="inputWrapper mobileHidden">
-        <label for="colorScheme">Color Scheme</label>
-        <select id="colorScheme" name="colorScheme" required>
+        <select id="colorScheme" name="colorScheme" required class="fullWidth">
           <optgroup label="Sequential (Multi-Hue)">
             <option value="cividis">Cividis</option>
             <option value="cool">Cool</option>
@@ -190,37 +194,151 @@
         <input type="checkbox" id="reverseColors" name="reverseColors" />
         <label for="reverseColors">Reverse colors</label>
       </div>
-      <div class="inputSeparator"></div>
+      <div class="inputSeparator mobileHidden"></div>
+      <strong class="mobileHidden">Adjust colors</strong>
+      <datalist id="defaultSliderPosition">
+        <option value="0"></option>
+      </datalist>
+      <div class="inputWrapper mobileHidden">
+        <label for="shiftHueAmount">Hue</label>
+        <input
+          type="range"
+          id="shiftHueAmount"
+          name="shiftHueAmount"
+          min="-180"
+          max="180"
+          list="defaultSliderPosition"
+        />
+      </div>
+      <div class="inputWrapper mobileHidden">
+        <label for="saturateAmount">Saturation</label>
+        <input
+          type="range"
+          id="saturateAmount"
+          name="saturateAmount"
+          min="-1"
+          max="1"
+          step="0.01"
+          list="defaultSliderPosition"
+        />
+      </div>
+      <div class="inputWrapper mobileHidden">
+        <label for="lightenAmount">Lightness</label>
+        <input
+          type="range"
+          id="lightenAmount"
+          name="lightenAmount"
+          min="-1"
+          max="1"
+          step="0.01"
+          list="defaultSliderPosition"
+        />
+      </div>
+      <div class="inputWrapper mobileHidden">
+        <label for="colorSpace">Color space</label>
+        <select id="colorSpace" name="colorSpace" required>
+          <option value="0">HSL</option>
+          <option value="1">HSLuv</option>
+          <option value="2">LCh</option>
+          <option value="3">Okhsl</option>
+        </select>
+      </div>
+      <div class="inputSeparator mobileHidden"></div>
       <strong class="mobileHidden">Coordinates</strong>
-      <div class="inputWrapper">
+      <div class="inputWrapper mobileHidden">
         <label for="re">Real</label>
         <input type="number" required id="re" name="re" />
       </div>
-      <div class="inputWrapper">
+      <div class="inputWrapper mobileHidden">
         <label for="im">Imaginary</label>
         <input type="number" required id="im" name="im" />
       </div>
-      <div class="inputWrapper">
+      <div class="inputWrapper mobileHidden">
         <label for="zoom">Zoom</label>
         <input type="number" required id="zoom" name="zoom" />
       </div>
       <div class="inputSeparator mobileHidden"></div>
-      <button id="save-image" class="mobileHidden" type="button">
-        <span class="shortcutHint">S</span>ave image
-      </button>
-      <button id="exit-full-screen" class="mobileHidden" type="button">
-        Exit <span class="shortcutHint">F</span>ull Screen
-      </button>
-      <button id="full-screen" class="mobileHidden" type="button">
-        <span class="shortcutHint">F</span>ull Screen
-      </button>
-      <button id="hide-show-controls" class="mobileHidden" type="button">
-        <span class="shortcutHint">H</span>ide/Show UI
-      </button>
-      <div class="inputSeparator mobileHidden"></div>
-      <button id="share-button" class="mobileHidden" type="button">
-        Share this view
-      </button>
+      <div class="buttonWrapper mobileHidden">
+        <button id="save-image" title="Save image" type="button">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="1em"
+            height="1em"
+            viewBox="0 0 16 16"
+          >
+            <path
+              fill="currentColor"
+              d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"
+            />
+            <path
+              fill="currentColor"
+              d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06z"
+            />
+          </svg></button
+        ><button id="share-button" title="Share current view" type="button">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="1em"
+            height="1em"
+            viewBox="0 0 16 16"
+          >
+            <path
+              fill="currentColor"
+              d="m12.596 11.596l-3.535 3.536a1.5 1.5 0 0 1-2.122 0l-3.535-3.536a6.5 6.5 0 1 1 9.192-9.193a6.5 6.5 0 0 1 0 9.193m-1.06-8.132a5 5 0 1 0-7.072 7.072L8 14.07l3.536-3.534a5 5 0 0 0 0-7.072M8 9a2 2 0 1 1-.001-3.999A2 2 0 0 1 8 9"
+            />
+          </svg></button
+        ><button id="hide-controls" title="Hide controls" type="button">
+          <svg
+            id="hide-icon"
+            xmlns="http://www.w3.org/2000/svg"
+            width="1em"
+            height="1em"
+            viewBox="0 0 16 16"
+          >
+            <path
+              fill="currentColor"
+              d="M.143 2.31a.75.75 0 0 1 1.047-.167l14.5 10.5a.75.75 0 1 1-.88 1.214l-2.248-1.628C11.346 13.19 9.792 14 8 14c-1.981 0-3.67-.992-4.933-2.078C1.797 10.832.88 9.577.43 8.9a1.62 1.62 0 0 1 0-1.797c.353-.533.995-1.42 1.868-2.305L.31 3.357A.75.75 0 0 1 .143 2.31m1.536 5.622A.12.12 0 0 0 1.657 8q-.001.033.022.068c.412.621 1.242 1.75 2.366 2.717C5.175 11.758 6.527 12.5 8 12.5c1.195 0 2.31-.488 3.29-1.191L9.063 9.695A2 2 0 0 1 6.058 7.52L3.529 5.688a14.2 14.2 0 0 0-1.85 2.244M8 3.5c-.516 0-1.017.09-1.499.251a.75.75 0 1 1-.473-1.423A6.2 6.2 0 0 1 8 2c1.981 0 3.67.992 4.933 2.078c1.27 1.091 2.187 2.345 2.637 3.023a1.62 1.62 0 0 1 0 1.798c-.11.166-.248.365-.41.587a.75.75 0 1 1-1.21-.887c.148-.201.272-.382.371-.53a.12.12 0 0 0 0-.137c-.412-.621-1.242-1.75-2.366-2.717C10.825 4.242 9.473 3.5 8 3.5"
+            />
+          </svg></button
+        ><button id="show-controls" title="Show controls" type="button">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="1em"
+            height="1em"
+            viewBox="0 0 16 16"
+            id="show-icon"
+          >
+            <path
+              fill="currentColor"
+              d="M8 2c1.981 0 3.671.992 4.933 2.078c1.27 1.091 2.187 2.345 2.637 3.023a1.62 1.62 0 0 1 0 1.798c-.45.678-1.367 1.932-2.637 3.023C11.67 13.008 9.981 14 8 14s-3.671-.992-4.933-2.078C1.797 10.83.88 9.576.43 8.898a1.62 1.62 0 0 1 0-1.798c.45-.677 1.367-1.931 2.637-3.022C4.33 2.992 6.019 2 8 2M1.679 7.932a.12.12 0 0 0 0 .136c.411.622 1.241 1.75 2.366 2.717C5.176 11.758 6.527 12.5 8 12.5s2.825-.742 3.955-1.715c1.124-.967 1.954-2.096 2.366-2.717a.12.12 0 0 0 0-.136c-.412-.621-1.242-1.75-2.366-2.717C10.824 4.242 9.473 3.5 8 3.5s-2.825.742-3.955 1.715c-1.124.967-1.954 2.096-2.366 2.717M8 10a2 2 0 1 1-.001-3.999A2 2 0 0 1 8 10"
+            />
+          </svg></button
+        ><button id="exit-full-screen" title="Exit full screen" type="button">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="1em"
+            height="1em"
+            viewBox="0 0 16 16"
+          >
+            <path
+              fill="currentColor"
+              d="M10.75 1a.75.75 0 0 1 .75.75v2.5c0 .138.112.25.25.25h2.5a.75.75 0 0 1 0 1.5h-2.5A1.75 1.75 0 0 1 10 4.25v-2.5a.75.75 0 0 1 .75-.75m-5.5 0a.75.75 0 0 1 .75.75v2.5A1.75 1.75 0 0 1 4.25 6h-2.5a.75.75 0 0 1 0-1.5h2.5a.25.25 0 0 0 .25-.25v-2.5A.75.75 0 0 1 5.25 1M1 10.75a.75.75 0 0 1 .75-.75h2.5c.966 0 1.75.784 1.75 1.75v2.5a.75.75 0 0 1-1.5 0v-2.5a.25.25 0 0 0-.25-.25h-2.5a.75.75 0 0 1-.75-.75m9 1c0-.966.784-1.75 1.75-1.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.25.25 0 0 0-.25.25v2.5a.75.75 0 0 1-1.5 0Z"
+            />
+          </svg></button
+        ><button id="full-screen" title="Full screen" type="button">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="1em"
+            height="1em"
+            viewBox="0 0 16 16"
+          >
+            <path
+              fill="currentColor"
+              d="M1.75 10a.75.75 0 0 1 .75.75v2.5c0 .138.112.25.25.25h2.5a.75.75 0 0 1 0 1.5h-2.5A1.75 1.75 0 0 1 1 13.25v-2.5a.75.75 0 0 1 .75-.75m12.5 0a.75.75 0 0 1 .75.75v2.5A1.75 1.75 0 0 1 13.25 15h-2.5a.75.75 0 0 1 0-1.5h2.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 .75-.75M2.75 2.5a.25.25 0 0 0-.25.25v2.5a.75.75 0 0 1-1.5 0v-2.5C1 1.784 1.784 1 2.75 1h2.5a.75.75 0 0 1 0 1.5ZM10 1.75a.75.75 0 0 1 .75-.75h2.5c.966 0 1.75.784 1.75 1.75v2.5a.75.75 0 0 1-1.5 0v-2.5a.25.25 0 0 0-.25-.25h-2.5a.75.75 0 0 1-.75-.75"
+            />
+          </svg>
+        </button>
+      </div>
     </div>
     <div id="attribution" class="mobileHidden">
       <a

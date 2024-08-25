@@ -5,14 +5,16 @@
   "repository": "https://github.com/rosslh/mandelbrot.site",
   "license": "MIT",
   "scripts": {
-    "start": "webpack-dev-server --mode development --open --port 9090",
     "build": "webpack --mode production || webpack --mode production",
-    "preview": "npx http-server dist -p 9090",
+    "dev": "webpack-dev-server --mode development --open --port 9090",
+    "serve": "npx http-server dist -p 9090",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint . --ignore-path ../.gitignore && cd ../mandelbrot && cargo clippy",
-    "test": "cargo test",
-    "clean": "cd .. && rm -rf Cargo.lock mandelbrot/pkg target/* client/package-lock.json client/node_modules client/dist client/pkg",
     "format": "prettier --ignore-path ../.gitignore --write . && cd ../mandelbrot && cargo fmt",
-    "format:check": "prettier --ignore-path ../.gitignore --check . && cd ../mandelbrot && cargo fmt -- --check"
+    "format:check": "prettier --ignore-path ../.gitignore --check . && cd ../mandelbrot && cargo fmt -- --check",
+    "test": "cargo test",
+    "test:update-snapshots": "cargo insta test --accept",
+    "clean": "cd .. && rm -rf Cargo.lock mandelbrot/pkg target/* client/package-lock.json client/node_modules client/dist client/pkg"
   },
   "bin": {
     "create-rust-wasm-worker": ".bin/create-rust-wasm-worker.js"
@@ -26,7 +28,6 @@
     "@wasm-tool/wasm-pack-plugin": "^1.7.0",
     "css-loader": "^6.9.1",
     "eslint": "^8.56.0",
-    "eslint-plugin-editorconfig": "^4.0.3",
     "file-loader": "^6.2.0",
     "front-matter": "^4.0.2",
     "html-webpack-plugin": "^5.6.0",

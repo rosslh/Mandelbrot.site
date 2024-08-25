@@ -1,5 +1,6 @@
 {
   "name": "Mandelbrot Set Explorer",
+  "description": "Explore the infinite complexity of the Mandelbrot Set with this interactive fractal viewer. Zoom in and generate high resolution images.",
   "short_name": "Mandelbrot",
   "icons": [
     {
@@ -13,7 +14,7 @@
       "type": "image/png"
     }
   ],
-  "theme_color": "#ffffff",
-  "background_color": "#ffffff",
-  "display": "standalone"
+  "background_color": "#222222",
+  "display": "standalone",
+  "start_url": "/"
 }

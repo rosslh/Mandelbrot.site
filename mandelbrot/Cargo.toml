@@ -3,8 +3,8 @@ authors = ["Ross Hill"]
 categories = ["wasm"]
 description = "Generates Mandelbrot set images"
 name = "mandelbrot"
-readme = "./README.md"
-repository = "https://github.com/rosslh/rust-mandelbrot-set"
+readme = "../README.md"
+repository = "https://github.com/rosslh/Mandelbrot.site"
 version = "0.2.0"
 edition = "2018"
 
@@ -19,6 +19,7 @@ insta = "1.34.0"
 itertools-num = "0.1.3"
 num = "0.3.1"
 once_cell = "1.8.0"
+palette = { version = "0.7.6" }
 wasm-bindgen = "0.2.68"
 web-sys = { version = "0.3", features = ["console"] }
 wee_alloc = { version = "0.4.5", optional = true }

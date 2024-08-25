@@ -1,7 +1,6 @@
 import debounce from "lodash/debounce";
 import * as L from "leaflet";
-import MandelbrotMap from "./MandelbrotMap";
-import { config } from "./main";
+import type MandelbrotMap from "./MandelbrotMap";
 
 type Done = (error: null, tile: HTMLCanvasElement) => void;
 
@@ -19,6 +18,83 @@ class MandelbrotLayer extends L.GridLayer {
       noWrap: true,
       tileSize: 200,
     });
+  }
+
+  getImage(
+    bounds: { reMin: number; reMax: number; imMin: number; imMax: number },
+    imageWidth: number,
+    imageHeight: number,
+  ): Promise<HTMLCanvasElement> {
+    return new Promise<HTMLCanvasElement>((resolve, reject) => {
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+
+      if (!context) {
+        reject(new Error("Failed to get canvas context"));
+        return;
+      }
+
+      canvas.width = imageWidth;
+      canvas.height = imageHeight;
+
+      this._map.pool.queue(async (getTile) => {
+        try {
+          const data = await getTile({
+            bounds,
+            iterations: this._map.config.iterations,
+            exponent: this._map.config.exponent,
+            imageWidth,
+            imageHeight,
+            colorScheme: this._map.config.colorScheme,
+            reverseColors: this._map.config.reverseColors,
+            lightenAmount: this._map.config.lightenAmount,
+            saturateAmount: this._map.config.saturateAmount,
+            shiftHueAmount: this._map.config.shiftHueAmount,
+            colorSpace: this._map.config.colorSpace,
+          });
+
+          const imageData = new ImageData(
+            Uint8ClampedArray.from(data),
+            imageWidth,
+            imageHeight,
+          );
+          context.putImageData(imageData, 0, 0);
+          resolve(canvas);
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+  }
+
+  debounceTileGeneration = debounce(this.generateTiles, 350);
+
+  createTile(tilePosition: L.Coords, done: Done) {
+    const canvas = L.DomUtil.create(
+      "canvas",
+      "leaflet-tile",
+    ) as HTMLCanvasElement;
+
+    if (
+      this._map.config.iterations <= 500 ||
+      L.Browser.mobile ||
+      L.Browser.android
+    ) {
+      this.generateTile(canvas, tilePosition, done);
+    } else {
+      this.tilesToGenerate.push({ position: tilePosition, canvas, done });
+      this.debounceTileGeneration();
+    }
+    return canvas;
+  }
+
+  refresh() {
+    let currentMap: MandelbrotMap | null = null;
+    if (this._map) {
+      currentMap = this._map as MandelbrotMap;
+      this.removeFrom(this._map);
+    }
+    this.addTo(currentMap);
   }
 
   private getComplexBoundsOfTile(tilePosition: L.Coords) {
@@ -44,49 +120,6 @@ class MandelbrotLayer extends L.GridLayer {
     return bounds;
   }
 
-  getSingleImage(
-    bounds: { reMin: number; reMax: number; imMin: number; imMax: number },
-    imageWidth: number,
-    imageHeight: number,
-  ): Promise<HTMLCanvasElement> {
-    return new Promise<HTMLCanvasElement>((resolve, reject) => {
-      const canvas = document.createElement("canvas");
-      const context = canvas.getContext("2d");
-
-      if (!context) {
-        reject(new Error("Failed to get canvas context"));
-        return;
-      }
-
-      canvas.width = imageWidth;
-      canvas.height = imageHeight;
-
-      this._map.pool.queue(async ({ getTile }) => {
-        try {
-          const data = await getTile({
-            bounds,
-            maxIterations: config.iterations,
-            exponent: config.exponent,
-            imageWidth,
-            imageHeight,
-            colorScheme: config.colorScheme,
-            reverseColors: config.reverseColors,
-          });
-
-          const imageData = new ImageData(
-            Uint8ClampedArray.from(data),
-            imageWidth,
-            imageHeight,
-          );
-          context.putImageData(imageData, 0, 0);
-          resolve(canvas);
-        } catch (error) {
-          reject(error);
-        }
-      });
-    });
-  }
-
   private generateTile(
     canvas: HTMLCanvasElement,
     tilePosition: L.Coords,
@@ -94,7 +127,7 @@ class MandelbrotLayer extends L.GridLayer {
   ) {
     const context = canvas.getContext("2d");
 
-    const scaledTileSize = config.highDpiTiles
+    const scaledTileSize = this._map.config.highDpiTiles
       ? this.getTileSize().x * Math.max(window.devicePixelRatio || 2, 2)
       : this.getTileSize().x;
 
@@ -108,15 +141,19 @@ class MandelbrotLayer extends L.GridLayer {
         ? crypto.randomUUID()
         : Date.now().toString();
 
-    const tileTask = this._map.pool.queue(async ({ getTile }) => {
+    const tileTask = this._map.pool.queue(async (getTile) => {
       const data = await getTile({
         bounds,
-        maxIterations: config.iterations,
-        exponent: config.exponent,
+        iterations: this._map.config.iterations,
+        exponent: this._map.config.exponent,
         imageWidth: scaledTileSize,
         imageHeight: scaledTileSize,
-        colorScheme: config.colorScheme,
-        reverseColors: config.reverseColors,
+        colorScheme: this._map.config.colorScheme,
+        reverseColors: this._map.config.reverseColors,
+        lightenAmount: this._map.config.lightenAmount,
+        saturateAmount: this._map.config.saturateAmount,
+        shiftHueAmount: this._map.config.shiftHueAmount,
+        colorSpace: this._map.config.colorSpace,
       });
 
       const imageData = new ImageData(
@@ -156,32 +193,6 @@ class MandelbrotLayer extends L.GridLayer {
       this.generateTile(task.canvas, task.position, task.done);
     });
   }
-
-  debounceTileGeneration = debounce(this.generateTiles, 350);
-
-  createTile(tilePosition: L.Coords, done: Done) {
-    const canvas = L.DomUtil.create(
-      "canvas",
-      "leaflet-tile",
-    ) as HTMLCanvasElement;
-
-    if (config.iterations <= 500 || L.Browser.mobile || L.Browser.android) {
-      this.generateTile(canvas, tilePosition, done);
-    } else {
-      this.tilesToGenerate.push({ position: tilePosition, canvas, done });
-      this.debounceTileGeneration();
-    }
-    return canvas;
-  }
-
-  refresh() {
-    let currentMap: MandelbrotMap | null = null;
-    if (this._map) {
-      currentMap = this._map as MandelbrotMap;
-      this.removeFrom(this._map);
-    }
-    this.addTo(currentMap);
-  }
 }
 
-export { MandelbrotLayer };
+export default MandelbrotLayer;

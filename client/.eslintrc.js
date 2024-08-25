@@ -5,7 +5,6 @@ module.exports = {
     node: true,
   },
   extends: [
-    "plugin:editorconfig/all",
     "eslint:recommended",
     "plugin:@typescript-eslint/eslint-recommended",
     "plugin:@typescript-eslint/recommended",
@@ -19,7 +18,7 @@ module.exports = {
     },
   ],
   parser: "@typescript-eslint/parser",
-  plugins: ["@typescript-eslint", "editorconfig"],
+  plugins: ["@typescript-eslint"],
   root: true,
   rules: {
     "brace-style": [1, "1tbs"],
