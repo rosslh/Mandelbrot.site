@@ -32,7 +32,7 @@ Mandelbrot.site offers a variety of features to enhance your experience:
 
 Explore some stunning images generated with Mandelbrot.site:
 
-<img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-4.png" height="200px" alt="Mandelbrot Example"> <img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-2.png" height="200px" alt="Mandelbrot Example">
+<img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-4.png" height="200px" alt="Mandelbrot Example 1"> <img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-2.png" height="200px" alt="Mandelbrot Example 2">
 
 [Explore more images](/example-images)
 
@@ -46,15 +46,20 @@ This robust architecture ensures that Mandelbrot.site provides a seamless and re
 
 ## Development
 
-To set up and run the project on your local environment, navigate to the `client` directory and use the following commands:
+This project requires [Node.js](https://nodejs.org/) to be installed on your system. Check the [`.nvmrc`](client/.nvmrc) file for the recommended Node.js version.
+
+### Commands
+
+To set up and run the project on your local environment, navigate to the `client` directory and use the following commands.
 
 - **Install dependencies**: `npm install`
-  - This requires [Node.js](https://nodejs.org/) to be installed on your system. Check the [`.nvmrc`](client/.nvmrc) file for the recommended Node.js version.
 - **Build the project**: `npm run build`
-- **Start development server**: `npm run start`
-- **Run Rust tests**: `npm run test`
+- **Start development server**: `npm run dev`
+- **Preview production build**: `npm run serve`
+- **Check for type errors**: `npm run typecheck`
 - **Identify code issues**: `npm run lint`
 - **Format the code**: `npm run format`
+- **Run Rust tests**: `npm run test`
 - **Cleanup**: `npm run clean` - removes caches and build artifacts
 
 ### Project Structure

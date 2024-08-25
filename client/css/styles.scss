@@ -31,15 +31,15 @@ html {
 
 .overlay {
   padding: 8px;
-  background-color: #00000066;
+  background-color: #00000099;
   backdrop-filter: blur(3px);
   z-index: 2000;
   text-shadow: 0 0 2px #000;
   color: white;
   position: absolute;
   font-size: 14px;
-  min-width: 200px;
-  border: 1px solid #888;
+  min-width: 230px;
+  border: 1px solid #777;
 
   a {
     color: white;
@@ -74,7 +74,7 @@ html {
   #nav-spacer {
     width: 1px;
     align-self: stretch;
-    border-right: 1px solid #888;
+    border-right: 1px solid #777;
   }
 }
 
@@ -84,7 +84,6 @@ html {
 
   top: 0;
   right: 0;
-  width: 170px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -95,8 +94,7 @@ html {
 
   .inputSeparator {
     height: 1px;
-    border-bottom: 1px solid white;
-    opacity: 0.3;
+    border-bottom: 1px solid #777;
   }
 
   .checkboxWrapper {
@@ -107,12 +105,8 @@ html {
 
   .shortcutWrapper {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
-
-    > * {
-      align-self: flex-start;
-    }
+    align-items: center;
+    gap: 8px;
 
     .macShortcut {
       display: none;
@@ -127,12 +121,10 @@ html {
     margin-right: 80px;
     transform: translateX(100%);
   }
+}
 
-  #shareLink {
-    margin: 0 auto;
-    margin-top: -4px;
-    margin-bottom: 4px;
-  }
+datalist {
+  display: none;
 }
 
 .inputWrapper {
@@ -146,13 +138,20 @@ html {
     display: block;
   }
 
-  > input {
+  > input,
+  > select {
     width: 80px;
   }
 
-  > select,
-  option {
-    width: 100%;
+  > input[type="range"] {
+    width: 100px;
+  }
+
+  > select.fullWidth {
+    &,
+    option {
+      width: 100%;
+    }
   }
 
   &.alignStart {
@@ -163,12 +162,45 @@ html {
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+}
 
-    .labelSubtitle {
-      opacity: 0.75;
-      font-size: 13px;
+.secondary {
+  color: #ccc;
+  font-size: 13px;
+}
+
+.buttonWrapper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 8px;
+  padding-right: 8px;
+
+  > button {
+    background: none;
+    border: none;
+    color: white;
+    height: 32px;
+    width: 32px;
+    font-size: 20px;
+
+    &:hover {
+      color: #ccc;
+    }
+
+    &#hide-controls {
+      display: inline-block;
+    }
+
+    &#show-controls {
+      display: none;
     }
   }
+}
+
+.colorSchemeLabel {
+  font-weight: bold;
 }
 
 button.underlineButton {
@@ -269,7 +301,7 @@ input {
     font-size: 16px;
   }
 
-  .labelSubtitle {
+  .secondary {
     font-size: 15px !important;
   }
 }
@@ -287,8 +319,28 @@ input {
 
 @media (min-width: 801px) {
   body.hideOverlays {
-    #inputsWrapper > *:not(#hide-show-controls) {
+    #inputsWrapper > *:not(.buttonWrapper) {
       display: none !important;
+    }
+
+    .overlay {
+      min-width: unset;
+    }
+
+    .buttonWrapper {
+      padding: 0;
+
+      > *:not(#show-controls) {
+        display: none !important;
+      }
+
+      #hide-controls {
+        display: none;
+      }
+
+      #show-controls {
+        display: inline-block;
+      }
     }
 
     #attribution {
@@ -323,8 +375,8 @@ input {
     }
 
     nav {
-      border-right: 1px solid #888;
-      background-color: rgba(0, 0, 0, 0.2);
+      border-right: 1px solid #777;
+      background-color: #00000099;
       padding: 16px 24px;
 
       ul {
@@ -402,7 +454,7 @@ input {
 
       nav {
         border-right: none;
-        border-bottom: 1px solid #888;
+        border-bottom: 1px solid #777;
       }
 
       main {

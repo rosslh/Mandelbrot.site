@@ -9,6 +9,7 @@ mod lib_test;
 
 use itertools_num::linspace;
 use num::complex::Complex64;
+use palette::{FromColor, Hsl, Hsluv, IntoColor, Lch, Lighten, Okhsl, Saturate, ShiftHue, Srgb};
 use wasm_bindgen::prelude::*;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global allocator.
@@ -161,6 +162,90 @@ static REVERSE_COLOR_PALETTES: Lazy<HashMap<String, colorous::Gradient>> = Lazy:
     map
 });
 
+/// Represents a valid color space that can be used to transform colors.
+#[wasm_bindgen]
+#[derive(Clone, Copy, Debug)]
+pub enum ValidColorSpace {
+    Hsl,
+    Hsluv,
+    Lch,
+    Okhsl,
+}
+
+/// Transforms a color using the specified color space and transformation amounts.
+///
+/// # Parameters
+/// - `color`: The color to transform.
+/// - `color_space`: The color space to use for the transformation.
+/// - `shift_hue_amount`: The amount to shift the hue by.
+/// - `saturate_amount`: The amount to saturate the color by.
+/// - `lighten_amount`: The amount to lighten the color by.
+///
+/// # Returns
+/// The transformed color.
+pub fn transform_color(
+    color: colorous::Color,
+    color_space: &ValidColorSpace,
+    shift_hue_amount: f32,
+    saturate_amount: f32,
+    lighten_amount: f32,
+) -> colorous::Color {
+    let mut transformed_color = color;
+
+    if shift_hue_amount != 0.0 || saturate_amount != 0.0 || lighten_amount != 0.0 {
+        let srgb_color = Srgb::new(
+            color.r as f32 / 255.0,
+            color.g as f32 / 255.0,
+            color.b as f32 / 255.0,
+        );
+
+        let modified_color: Srgb = match color_space {
+            ValidColorSpace::Hsl => {
+                let hsl_color = Hsl::from_color(srgb_color);
+                hsl_color
+                    .shift_hue(shift_hue_amount)
+                    .saturate(saturate_amount)
+                    .lighten(lighten_amount)
+                    .into_color()
+            }
+            ValidColorSpace::Hsluv => {
+                let hsluv_color = Hsluv::from_color(srgb_color);
+                hsluv_color
+                    .shift_hue(shift_hue_amount)
+                    .saturate(saturate_amount)
+                    .lighten(lighten_amount)
+                    .into_color()
+            }
+            ValidColorSpace::Lch => {
+                let lch_color = Lch::from_color(srgb_color);
+                lch_color
+                    .shift_hue(shift_hue_amount)
+                    .saturate(saturate_amount)
+                    .lighten(lighten_amount)
+                    .into_color()
+            }
+            ValidColorSpace::Okhsl => {
+                let okhsl_color = Okhsl::from_color(srgb_color);
+                okhsl_color
+                    .shift_hue(shift_hue_amount)
+                    .saturate(saturate_amount)
+                    .lighten(lighten_amount)
+                    .into_color()
+            }
+        };
+
+        let rgb_color: Srgb = modified_color.into_color();
+
+        transformed_color = colorous::Color {
+            r: (rgb_color.red * 255.0) as u8,
+            g: (rgb_color.green * 255.0) as u8,
+            b: (rgb_color.blue * 255.0) as u8,
+        };
+    }
+
+    transformed_color
+}
+
 /// Generates a image of the Mandelbrot set given the bounds, number of iterations,
 /// exponent for escape time algorithm, image side length, and color scheme.
 ///
@@ -190,12 +275,13 @@ pub fn get_mandelbrot_image(
     image_height: usize,
     color_scheme: String,
     reverse_colors: bool,
+    shift_hue_amount: f32,
+    saturate_amount: f32,
+    lighten_amount: f32,
+    color_space: ValidColorSpace,
 ) -> Vec<u8> {
-    let mut should_reverse_colors = reverse_colors;
-
-    let min_channel_value = 0;
-    let max_channel_value = 255;
     let mut palette = &colorous::TURBO;
+    let mut should_reverse_colors = reverse_colors;
 
     if COLOR_PALETTES.contains_key(&color_scheme) {
         palette = COLOR_PALETTES.get(&color_scheme).unwrap();
@@ -210,11 +296,17 @@ pub fn get_mandelbrot_image(
 
     let re_range = linspace(re_min, re_max, image_width);
     let im_range = linspace(im_min, im_max, image_height);
+
     let enumerated_re_range = re_range.clone().enumerate();
     let enumerated_im_range = im_range.clone().enumerate();
 
     let palette_scale_factor = 20.0;
+
     let scaled_max_iterations = (max_iterations * palette_scale_factor as u32) as usize;
+
+    let min_channel_value = 0;
+    let max_channel_value = 255;
+
     let rgb_black = [min_channel_value; 3];
     let rgba_black = [
         min_channel_value,
@@ -251,18 +343,29 @@ pub fn get_mandelbrot_image(
                 // See: https://iquilezles.org/articles/msetsmooth/
                 let smoothed_value = f64::from(escape_iterations)
                     - ((z.norm().ln() / escape_radius.ln()).ln() / f64::from(exponent).ln());
+
                 // more colors to reduce banding
                 let mut scaled_value = (smoothed_value * palette_scale_factor) as usize;
+
                 if should_reverse_colors {
                     scaled_value = scaled_max_iterations - scaled_value;
                 }
+
                 let color = palette.eval_rational(scaled_value, scaled_max_iterations);
 
-                color.as_array()
+                transform_color(
+                    color,
+                    &color_space,
+                    shift_hue_amount,
+                    saturate_amount,
+                    lighten_amount,
+                )
+                .as_array()
             };
 
             // index = ((current row * row length) + current column) * 4 to fit r,g,b,a values
             let index = (x * image_width + y) * NUM_COLOR_CHANNELS;
+
             img[index] = pixel[0]; // r
             img[index + 1] = pixel[1]; // g
             img[index + 2] = pixel[2]; // b

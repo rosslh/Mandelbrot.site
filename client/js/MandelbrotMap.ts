@@ -1,60 +1,99 @@
-import throttle from "lodash/throttle";
 import * as L from "leaflet";
 import { saveAs } from "file-saver";
-import { Pool, Worker, spawn } from "threads";
-import { MandelbrotLayer } from "./MandelbrotLayer";
-import { config } from "./main";
+import { FunctionThread, Pool, Worker, spawn } from "threads";
+import MandelbrotLayer from "./MandelbrotLayer";
 import { QueuedTask } from "threads/dist/master/pool-types";
+import MandelbrotControls from "./MandelbrotControls";
+import type { ValidColorSpace } from "../../mandelbrot/pkg";
+
+type MapWithResetView = MandelbrotMap & {
+  _resetView: (center: L.LatLng | [number, number], zoom: number) => void;
+};
+
+type MandelbrotConfig = {
+  iterations: number;
+  exponent: number;
+
+  colorScheme: string;
+  reverseColors: boolean;
+  lightenAmount: number;
+  saturateAmount: number;
+  shiftHueAmount: number;
+  colorSpace: ValidColorSpace;
+
+  highDpiTiles: boolean;
+
+  re: number;
+  im: number;
+  zoom: number;
+};
+
+type WasmRequestPayload = Omit<
+  MandelbrotConfig,
+  "re" | "im" | "zoom" | "highDpiTiles"
+> & {
+  bounds: { reMin: number; reMax: number; imMin: number; imMax: number };
+  imageWidth: number;
+  imageHeight: number;
+};
+
+type MandelbrotThread = FunctionThread<[WasmRequestPayload], Uint8Array>;
 
 class MandelbrotMap extends L.Map {
   mandelbrotLayer: MandelbrotLayer;
   mapId: string;
-  defaultPosition: [number, number];
-  defaultZoom: number;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  pool: Pool<any>;
+  controls: MandelbrotControls;
+  initialConfig: MandelbrotConfig;
+  config: MandelbrotConfig;
+  pool: Pool<MandelbrotThread>;
   queuedTileTasks: {
     id: string;
     position: L.Coords;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    task: QueuedTask<any, void>;
+    task: QueuedTask<MandelbrotThread, void>;
   }[] = [];
 
   constructor({
     htmlId,
-    defaultPosition,
+    initialConfig,
   }: {
     htmlId: string;
-    defaultPosition: [number, number];
+    initialConfig: MandelbrotConfig;
   }) {
     super(htmlId, {
       attributionControl: false,
       maxZoom: 48,
       zoomAnimationThreshold: 48,
-      center: defaultPosition,
+      center: [initialConfig.re, initialConfig.im],
     });
 
     this.createPool();
     this.mapId = htmlId;
     this.mandelbrotLayer = new MandelbrotLayer().addTo(this);
-    this.defaultPosition = defaultPosition;
-    this.defaultZoom = 3;
-    this.setView(this.defaultPosition, this.defaultZoom);
+    this.initialConfig = { ...initialConfig };
+    this.config = { ...initialConfig };
+    this.controls = new MandelbrotControls(this);
 
-    this.on("drag", function () {
+    this.setView(
+      [this.initialConfig.re, this.initialConfig.im],
+      this.initialConfig.zoom,
+    );
+
+    this.setConfigFromUrl();
+
+    this.on("drag", () => {
       this.mandelbrotLayer.debounceTileGeneration.flush();
     });
     this.on("click", this.handleMapClick);
 
-    this.on("load", this.throttleSetDomElementValues);
-    this.on("move", this.throttleSetDomElementValues);
-    this.on("moveend", this.throttleSetDomElementValues);
+    this.on("load", this.controls.throttleSetInputValues);
+    this.on("move", this.controls.throttleSetInputValues);
+    this.on("moveend", this.controls.throttleSetInputValues);
     this.on("zoomend", () => {
       this.cancelTileTasksOnWrongZoom();
-      this.throttleSetDomElementValues();
+      this.controls.throttleSetInputValues();
     });
-    this.on("viewreset", this.throttleSetDomElementValues);
-    this.on("resize", this.throttleSetDomElementValues);
+    this.on("viewreset", this.controls.throttleSetInputValues);
+    this.on("resize", this.controls.throttleSetInputValues);
   }
 
   tilePositionToComplexParts(
@@ -64,8 +103,8 @@ class MandelbrotMap extends L.Map {
   ): { re: number; im: number } {
     const scaleFactor = this.mandelbrotLayer.getTileSize().x / 128;
     const d = 2 ** (z - 2);
-    const re = (x / d) * scaleFactor - 4 + this.defaultPosition[0];
-    const im = (y / d) * scaleFactor - 4 + this.defaultPosition[1];
+    const re = (x / d) * scaleFactor - 4 + this.initialConfig.re;
+    const im = (y / d) * scaleFactor - 4 + this.initialConfig.im;
     return { re, im };
   }
 
@@ -78,8 +117,8 @@ class MandelbrotMap extends L.Map {
   private complexPartsToTilePosition(re: number, im: number, z: number) {
     const scaleFactor = this.mandelbrotLayer.getTileSize().x / 128;
     const d = 2 ** (z - 2);
-    const x = ((re + 4 - this.defaultPosition[0]) * d) / scaleFactor;
-    const y = ((im + 4 - this.defaultPosition[1]) * d) / scaleFactor;
+    const x = ((re + 4 - this.initialConfig.re) * d) / scaleFactor;
+    const y = ((im + 4 - this.initialConfig.im) * d) / scaleFactor;
     return { x, y };
   }
 
@@ -110,35 +149,6 @@ class MandelbrotMap extends L.Map {
     return { reMin, reMax, imMin, imMax };
   }
 
-  private setDomElementValues = () => {
-    const tileSize = [
-      this.mandelbrotLayer.getTileSize().x,
-      this.mandelbrotLayer.getTileSize().y,
-    ];
-    const point = this.project(this.getCenter(), this.getZoom()).unscaleBy(
-      new L.Point(tileSize[0], tileSize[1]),
-    );
-
-    const position = { ...point, z: this.getZoom() };
-
-    const { re, im } = this.tilePositionToComplexParts(
-      position.x,
-      position.y,
-      position.z,
-    );
-
-    config.re = re;
-    (document.getElementById("re") as HTMLInputElement).value = String(re);
-
-    config.im = im;
-    (document.getElementById("im") as HTMLInputElement).value = String(im);
-
-    config.zoom = position.z;
-    (document.getElementById("zoom") as HTMLInputElement).value = String(
-      position.z,
-    );
-  };
-
   private complexPartsToLatLng(re: number, im: number, z: number) {
     const tileSize = [
       this.mandelbrotLayer.getTileSize().x,
@@ -154,8 +164,6 @@ class MandelbrotMap extends L.Map {
 
     return latLng;
   }
-
-  private throttleSetDomElementValues = throttle(this.setDomElementValues, 200);
 
   private async cancelTileTasksOnWrongZoom() {
     this.queuedTileTasks = this.queuedTileTasks.filter(({ task, position }) => {
@@ -177,17 +185,20 @@ class MandelbrotMap extends L.Map {
 
   async refresh(resetView = false) {
     await this.createPool();
+    const mapWithResetView = this as unknown as MapWithResetView;
     if (resetView) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (this as any)._resetView(this.defaultPosition, this.defaultZoom);
+      mapWithResetView._resetView(
+        [this.initialConfig.re, this.initialConfig.im],
+        this.initialConfig.zoom,
+      );
     } else {
       const pointToCenter = this.complexPartsToLatLng(
-        config.re,
-        config.im,
-        config.zoom,
+        this.config.re,
+        this.config.im,
+        this.config.zoom,
       );
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (this as any)._resetView(pointToCenter, config.zoom);
+      (this as any)._resetView(pointToCenter, this.config.zoom);
     }
   }
 
@@ -223,11 +234,7 @@ class MandelbrotMap extends L.Map {
         reMax: bounds.reMin + reDiffPerColumn * (i + 1),
       };
       imagePromises.push(
-        this.mandelbrotLayer.getSingleImage(
-          subBounds,
-          columnWidth,
-          totalHeight,
-        ),
+        this.mandelbrotLayer.getImage(subBounds, columnWidth, totalHeight),
       );
     }
 
@@ -247,11 +254,76 @@ class MandelbrotMap extends L.Map {
     finalCanvas.toBlob((blob) => {
       saveAs(
         blob,
-        `mandelbrot${Date.now()}_r${config.re}_im${config.im}_z${
-          config.zoom
+        `mandelbrot${Date.now()}_r${this.config.re}_im${this.config.im}_z${
+          this.config.zoom
         }.png`,
       );
     });
+  }
+
+  setConfigFromUrl() {
+    const queryParams = new URLSearchParams(window.location.search);
+    const re = queryParams.get("re");
+    const im = queryParams.get("im");
+    const zoom = queryParams.get("z");
+    const iterations = queryParams.get("i");
+    const exponent = queryParams.get("e");
+    const colorScheme = queryParams.get("c");
+    const reverseColors = queryParams.get("r");
+    const shiftHueAmount = queryParams.get("h");
+    const saturateAmount = queryParams.get("s");
+    const lightenAmount = queryParams.get("l");
+    const colorSpace = queryParams.get("cs");
+
+    if (re && im && zoom) {
+      this.config.re = Number(re);
+      this.config.im = Number(im);
+      this.config.zoom = Number(zoom);
+
+      if (iterations) {
+        this.config.iterations = Number(iterations);
+        (document.getElementById("iterations") as HTMLInputElement).value =
+          iterations;
+      }
+      if (exponent) {
+        this.config.exponent = Number(exponent);
+        (document.getElementById("exponent") as HTMLInputElement).value =
+          exponent;
+      }
+      if (colorScheme) {
+        this.config.colorScheme = colorScheme;
+        (document.getElementById("colorScheme") as HTMLSelectElement).value =
+          colorScheme;
+      }
+      if (reverseColors) {
+        this.config.reverseColors = reverseColors === "true";
+        (document.getElementById("reverseColors") as HTMLInputElement).checked =
+          this.config.reverseColors;
+      }
+      if (shiftHueAmount) {
+        this.config.shiftHueAmount = Number(shiftHueAmount);
+        (document.getElementById("shiftHueAmount") as HTMLInputElement).value =
+          shiftHueAmount;
+      }
+      if (saturateAmount) {
+        this.config.saturateAmount = Number(saturateAmount);
+        (document.getElementById("saturateAmount") as HTMLInputElement).value =
+          saturateAmount;
+      }
+      if (lightenAmount) {
+        this.config.lightenAmount = Number(lightenAmount);
+        (document.getElementById("lightenAmount") as HTMLInputElement).value =
+          lightenAmount;
+      }
+      if (colorSpace) {
+        this.config.colorSpace = Number(colorSpace);
+        (document.getElementById("colorSpace") as HTMLSelectElement).value =
+          String(colorSpace);
+      }
+
+      window.history.replaceState({}, document.title, window.location.pathname);
+      this.refresh();
+    }
   }
 }
 
