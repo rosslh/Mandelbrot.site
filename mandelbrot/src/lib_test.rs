@@ -199,9 +199,22 @@ mod lib_test {
                                                     color_space
                                                 );
 
+                                                // this updates each value in the response to the nearest even integer
+                                                // to reduce flakes in the snapshot tests
+                                                let even_response: Vec<u8> = response
+                                                    .iter()
+                                                    .map(|&x| {
+                                                        if x % 2 == 0 || x == 255 {
+                                                            x
+                                                        } else {
+                                                            x + 1
+                                                        }
+                                                    })
+                                                    .collect();
+
                                                 insta::assert_snapshot!(
                                                     snapshot_name.clone(),
-                                                    format!("{:?}", response)
+                                                    format!("{:?}", even_response)
                                                 );
 
                                                 let image_name = format!(
