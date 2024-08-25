@@ -7,6 +7,7 @@ const { marked } = require("marked");
 const frontMatter = require("front-matter");
 const fs = require("fs");
 const template = require("lodash/template");
+const Dotenv = require("dotenv-webpack");
 
 const blogDir = "./blog";
 for (const file of fs.readdirSync(blogDir)) {
@@ -37,6 +38,7 @@ for (const file of fs.readdirSync(blogDir)) {
 const appConfig = {
   entry: "./js/main.ts",
   plugins: [
+    new Dotenv(),
     new HtmlWebpackPlugin({
       template: "html/index.html",
       root: path.resolve(__dirname, "."),

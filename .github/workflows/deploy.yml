@@ -20,6 +20,9 @@ jobs:
         working-directory: ./client
         run: |
           npm run build
+        env:
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
       - name: Publish
         uses: netlify/actions/cli@master
         with:
