@@ -145,6 +145,11 @@ datalist {
 
   > input[type="range"] {
     width: 100px;
+
+    &::-webkit-slider-runnable-track {
+      background: #007aff;
+      border-radius: 48px;
+    }
   }
 
   > select.fullWidth {
@@ -254,6 +259,7 @@ select {
   padding: 2px;
   background-color: white;
   color: black;
+  border-radius: 4px;
 
   &:not(:disabled)hover {
     opacity: 0.9;

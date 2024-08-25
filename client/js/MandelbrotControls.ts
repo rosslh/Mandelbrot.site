@@ -2,6 +2,7 @@ import * as L from "leaflet";
 import debounce from "lodash/debounce";
 import type MandelbrotMap from "./MandelbrotMap";
 import throttle from "lodash/throttle";
+import api from "./api";
 
 type NumberInput = {
   id: "iterations" | "exponent" | "re" | "im" | "zoom";
@@ -125,6 +126,20 @@ class MandelbrotControls {
     }, 300);
   }
 
+  private async logEvent(eventName: "image_save" | "share") {
+    await api.client?.from("events").insert([
+      {
+        event_name: eventName,
+        share_url: this.getShareUrl(),
+        re: String(this.map.config.re),
+        im: String(this.map.config.im),
+        zoom: this.map.config.zoom,
+        iterations: this.map.config.iterations,
+        session_id: api.sessionId,
+      },
+    ]);
+  }
+
   private handleSaveImageButton() {
     let isSavingImage = false;
 
@@ -197,6 +212,8 @@ class MandelbrotControls {
       saveImageSubmitButton.setAttribute("disabled", "true");
       closeModalButton.setAttribute("disabled", "true");
 
+      this.logEvent("image_save");
+
       this.map
         .saveVisibleImage(width, height)
         .catch((error) => {
@@ -261,6 +278,7 @@ class MandelbrotControls {
       navigator.clipboard.writeText(this.getShareUrl()).then(() => {
         alert("The URL for this view has been copied!");
       });
+      this.logEvent("share");
     };
   }
 
