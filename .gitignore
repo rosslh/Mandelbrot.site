@@ -41,7 +41,7 @@
 .Trashes
 .VolumeIcon.icns
 .vscode-test
-.vscode/
+.vscode/settings.json
 .vuepress/dist
 .yarn-integrity
 .yarn/build-state.yml

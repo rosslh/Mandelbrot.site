@@ -145,11 +145,6 @@ datalist {
 
   > input[type="range"] {
     width: 100px;
-
-    &::-webkit-slider-runnable-track {
-      background: #007aff;
-      border-radius: 48px;
-    }
   }
 
   > select.fullWidth {
@@ -366,7 +361,7 @@ input {
 // Blog styles below
 
 .blogPostRoot {
-  background: #1a022e url("https://mandelbrot.site/static/blog-background.png")
+  background: #1e0a30 url("https://mandelbrot.site/static/blog-background.png")
     center / cover fixed !important;
 
   .blogPost {
@@ -378,11 +373,16 @@ input {
 
     a {
       color: white;
+
+      &.active {
+        font-style: italic;
+        text-decoration: none;
+      }
     }
 
     nav {
       border-right: 1px solid #777;
-      background-color: #00000099;
+      background-color: rgba(0, 0, 0, 0.25);
       padding: 16px 24px;
 
       ul {
