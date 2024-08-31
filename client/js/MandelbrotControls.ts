@@ -1,7 +1,8 @@
 import * as L from "leaflet";
 import debounce from "lodash/debounce";
-import type MandelbrotMap from "./MandelbrotMap";
 import throttle from "lodash/throttle";
+import snakeCase from "lodash/snakeCase";
+import type MandelbrotMap from "./MandelbrotMap";
 import api from "./api";
 
 type NumberInput = {
@@ -69,10 +70,10 @@ class MandelbrotControls {
 
   private handleIterationButtons() {
     const multiplyButton = document.getElementById(
-      "iterations-mul-2",
+      "iterationsMul2",
     ) as HTMLButtonElement;
     const divideButton = document.getElementById(
-      "iterations-div-2",
+      "iterationsDiv2",
     ) as HTMLButtonElement;
     const iterationsInput = document.getElementById(
       "iterations",
@@ -126,10 +127,10 @@ class MandelbrotControls {
     }, 300);
   }
 
-  private async logEvent(eventName: "image_save" | "share") {
+  private async logEvent(eventName: "imageSave" | "share") {
     await api.client?.from("events").insert([
       {
-        event_name: eventName,
+        event_name: snakeCase(eventName),
         share_url: this.getShareUrl(),
         re: String(this.map.config.re),
         im: String(this.map.config.im),
@@ -143,21 +144,23 @@ class MandelbrotControls {
   private handleSaveImageButton() {
     let isSavingImage = false;
 
-    const saveImageButton = document.getElementById("save-image");
+    const saveImageButton = document.getElementById(
+      "saveImage",
+    ) as HTMLButtonElement;
     const saveImageDialog = document.getElementById(
-      "save-image-modal",
+      "saveImageModal",
     ) as HTMLDialogElement;
     const saveImageForm = document.getElementById(
-      "save-image-form",
+      "saveImageForm",
     ) as HTMLFormElement;
     const widthInput = document.getElementById(
-      "image-width",
+      "imageWidth",
     ) as HTMLInputElement;
     const heightInput = document.getElementById(
-      "image-height",
+      "imageHeight",
     ) as HTMLInputElement;
-    const saveImageSubmitButton = document.getElementById("save-image-submit");
-    const closeModalButton = document.getElementById("save-image-cancel");
+    const saveImageSubmitButton = document.getElementById("saveImageSubmit");
+    const closeModalButton = document.getElementById("saveImageCancel");
 
     const ignoreSubmitListener: EventListener = (event) =>
       event.preventDefault();
@@ -178,6 +181,8 @@ class MandelbrotControls {
       if (saveImageDialog.open) {
         saveImageDialog.close();
       } else {
+        widthInput.value = String(window.screen.width * 2);
+        heightInput.value = String(window.screen.height * 2);
         saveImageDialog.showModal();
       }
     };
@@ -212,7 +217,7 @@ class MandelbrotControls {
       saveImageSubmitButton.setAttribute("disabled", "true");
       closeModalButton.setAttribute("disabled", "true");
 
-      this.logEvent("image_save");
+      this.logEvent("imageSave");
 
       this.map
         .saveVisibleImage(width, height)
@@ -232,14 +237,14 @@ class MandelbrotControls {
   }
 
   private handleHideShowUiButton() {
-    const hideControlsButton = document.getElementById("hide-controls");
+    const hideControlsButton = document.getElementById("hideControls");
     hideControlsButton.onclick = () => {
-      document.body.classList.add("hideOverlays");
+      document.body.classList.add("hide-overlays");
     };
 
-    const showControlsButton = document.getElementById("show-controls");
+    const showControlsButton = document.getElementById("showControls");
     showControlsButton.onclick = () => {
-      document.body.classList.remove("hideOverlays");
+      document.body.classList.remove("hide-overlays");
     };
   }
 
@@ -271,7 +276,7 @@ class MandelbrotControls {
 
   private handleShareButton() {
     const shareButton = document.getElementById(
-      "share-button",
+      "shareButton",
     ) as HTMLButtonElement;
 
     shareButton.onclick = () => {
@@ -291,14 +296,14 @@ class MandelbrotControls {
       }
     };
 
-    const fullScreenButton = document.getElementById("full-screen");
-    const exitFullScreenButton = document.getElementById("exit-full-screen");
+    const fullScreenButton = document.getElementById("fullScreen");
+    const exitFullScreenButton = document.getElementById("exitFullScreen");
     fullScreenButton.onclick = toggleFullScreen;
     exitFullScreenButton.onclick = toggleFullScreen;
 
     document.addEventListener("fullscreenchange", () => {
-      const fullScreenButton = document.getElementById("full-screen");
-      const exitFullScreenButton = document.getElementById("exit-full-screen");
+      const fullScreenButton = document.getElementById("fullScreen");
+      const exitFullScreenButton = document.getElementById("exitFullScreen");
       if (document.fullscreenElement) {
         fullScreenButton.style.display = "none";
         exitFullScreenButton.style.display = "inline-block";
@@ -311,9 +316,8 @@ class MandelbrotControls {
 
   private handleShortcutHints() {
     const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
-    const windowsShortcut =
-      document.querySelector<HTMLSpanElement>("windowsShortcut");
-    const macShortcut = document.querySelector<HTMLSpanElement>("macShortcut");
+    const windowsShortcut = document.getElementById("windowsShortcut");
+    const macShortcut = document.getElementById("macShortcut");
 
     if (isMac && windowsShortcut && macShortcut) {
       windowsShortcut.style.display = "none";

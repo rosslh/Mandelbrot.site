@@ -1,6 +1,6 @@
 // Styles
-import "../css/styles.scss";
 import "../css/normalize.css";
+import "../css/styles.scss";
 import "../node_modules/leaflet/dist/leaflet.css";
 
 // SEO and images

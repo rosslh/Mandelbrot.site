@@ -73,9 +73,9 @@
 
   <body>
     <div id="navigation" class="overlay">
-      <div class="navLinks">
-        <h1 class="navHeading">
-          <a href="https://mandelbrot.site" id="site-link">Mandelbrot.site</a>:
+      <div class="nav-links">
+        <h1 class="nav-heading">
+          <a href="https://mandelbrot.site" id="siteLink">Mandelbrot.site</a>:
         </h1>
         <div>
           <a
@@ -88,9 +88,9 @@
           <a href="/how-mandelbrot-site-was-built">Technical details</a>
         </div>
       </div>
-      <div id="nav-spacer"></div>
-      <div class="navLinks">
-        <span class="navHeading">Mandelbrot set:</span>
+      <div id="navSpacer"></div>
+      <div class="nav-links">
+        <span class="nav-heading">Mandelbrot set:</span>
         <div>
           <a href="/what-is-mandelbrot-set">Overview</a>
           &middot;
@@ -103,43 +103,43 @@
       </div>
     </div>
     <div id="inputsWrapper" class="overlay">
-      <details open class="mobileHidden">
+      <details open class="mobile-hidden">
         <summary><span>Shortcuts</span></summary>
         <div class="details-content">
-          <div class="shortcutWrapper">
+          <div class="shortcut-wrapper">
             <code>shift + drag</code>
             <span>Zoom in</span>
           </div>
-          <div class="shortcutWrapper">
-            <code class="windowsShortcut">alt + click</code
-            ><code class="macShortcut">option + click</code>
+          <div class="shortcut-wrapper">
+            <code id="windowsShortcut">alt + click</code
+            ><code id="macShortcut">option + click</code>
             <div>Center a point</div>
           </div>
         </div>
       </details>
       <details open>
-        <summary class="mobileHidden"><span>Render settings</span></summary>
+        <summary class="mobile-hidden"><span>Render settings</span></summary>
         <div class="details-content">
-          <div class="inputWrapper alignStart">
-            <label for="iterations" class="labelWithSubtitle">
+          <div class="input-wrapper align-start">
+            <label for="iterations" class="label-with-subtitle">
               <span>Iterations</span>
               <span class="secondary">(Detail level)</span>
             </label>
             <input type="number" required id="iterations" name="iterations" />
           </div>
-          <div class="iterationButtons">
-            <button type="button" id="iterations-mul-2" class="underlineButton">
+          <div class="iteration-buttons">
+            <button type="button" id="iterationsMul2" class="underline-button">
               &times;2
             </button>
-            <button type="button" id="iterations-div-2" class="underlineButton">
+            <button type="button" id="iterationsDiv2" class="underline-button">
               &divide;2
             </button>
           </div>
-          <div class="inputWrapper mobileHidden">
+          <div class="input-wrapper mobile-hidden">
             <label for="exponent">Exponent</label>
             <input type="number" required id="exponent" name="exponent" />
           </div>
-          <div class="checkboxWrapper mobileHidden">
+          <div class="checkbox-wrapper mobile-hidden">
             <input type="checkbox" id="highDpiTiles" name="highDpiTiles" />
             <label for="highDpiTiles"
               >High resolution <span class="secondary">(Slow)</span></label
@@ -147,17 +147,17 @@
           </div>
         </div>
       </details>
-      <details class="mobileHidden">
+      <details class="mobile-hidden">
         <summary>
           <label for="colorScheme">Color scheme</label>
         </summary>
         <div class="details-content">
-          <div class="inputWrapper">
+          <div class="input-wrapper">
             <select
               id="colorScheme"
               name="colorScheme"
               required
-              class="fullWidth"
+              class="full-width"
             >
               <optgroup label="Sequential (Multi-Hue)">
                 <option value="cividis">Cividis</option>
@@ -203,19 +203,19 @@
               </optgroup>
             </select>
           </div>
-          <div class="checkboxWrapper">
+          <div class="checkbox-wrapper">
             <input type="checkbox" id="reverseColors" name="reverseColors" />
             <label for="reverseColors">Reverse colors</label>
           </div>
         </div>
       </details>
-      <details class="mobileHidden">
+      <details class="mobile-hidden">
         <summary><span>Adjust colors</span></summary>
         <div class="details-content">
           <datalist id="defaultSliderPosition">
             <option value="0"></option>
           </datalist>
-          <div class="inputWrapper">
+          <div class="input-wrapper">
             <label for="shiftHueAmount">Hue</label>
             <input
               type="range"
@@ -226,7 +226,7 @@
               list="defaultSliderPosition"
             />
           </div>
-          <div class="inputWrapper">
+          <div class="input-wrapper">
             <label for="saturateAmount">Saturation</label>
             <input
               type="range"
@@ -238,7 +238,7 @@
               list="defaultSliderPosition"
             />
           </div>
-          <div class="inputWrapper">
+          <div class="input-wrapper">
             <label for="lightenAmount">Lightness</label>
             <input
               type="range"
@@ -250,7 +250,7 @@
               list="defaultSliderPosition"
             />
           </div>
-          <div class="inputWrapper">
+          <div class="input-wrapper">
             <label for="colorSpace">Color space</label>
             <select id="colorSpace" name="colorSpace" required>
               <option value="0">HSL</option>
@@ -261,26 +261,26 @@
           </div>
         </div>
       </details>
-      <details class="mobileHidden">
+      <details class="mobile-hidden">
         <summary><span>Coordinates</span></summary>
         <div class="details-content">
-          <div class="inputWrapper">
+          <div class="input-wrapper">
             <label for="re">Real</label>
             <input type="number" required id="re" name="re" />
           </div>
-          <div class="inputWrapper">
+          <div class="input-wrapper">
             <label for="im">Imaginary</label>
             <input type="number" required id="im" name="im" />
           </div>
-          <div class="inputWrapper">
+          <div class="input-wrapper">
             <label for="zoom">Zoom</label>
             <input type="number" required id="zoom" name="zoom" />
           </div>
         </div>
       </details>
 
-      <div class="buttonWrapper mobileHidden">
-        <button id="save-image" title="Save image" type="button">
+      <div class="button-wrapper mobile-hidden">
+        <button id="saveImage" title="Save image" type="button">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="1em"
@@ -296,7 +296,7 @@
               d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06z"
             />
           </svg></button
-        ><button id="share-button" title="Share current view" type="button">
+        ><button id="shareButton" title="Share current view" type="button">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="1em"
@@ -308,9 +308,9 @@
               d="m12.596 11.596l-3.535 3.536a1.5 1.5 0 0 1-2.122 0l-3.535-3.536a6.5 6.5 0 1 1 9.192-9.193a6.5 6.5 0 0 1 0 9.193m-1.06-8.132a5 5 0 1 0-7.072 7.072L8 14.07l3.536-3.534a5 5 0 0 0 0-7.072M8 9a2 2 0 1 1-.001-3.999A2 2 0 0 1 8 9"
             />
           </svg></button
-        ><button id="hide-controls" title="Hide controls" type="button">
+        ><button id="hideControls" title="Hide controls" type="button">
           <svg
-            id="hide-icon"
+            id="hideIcon"
             xmlns="http://www.w3.org/2000/svg"
             width="1em"
             height="1em"
@@ -321,20 +321,20 @@
               d="M.143 2.31a.75.75 0 0 1 1.047-.167l14.5 10.5a.75.75 0 1 1-.88 1.214l-2.248-1.628C11.346 13.19 9.792 14 8 14c-1.981 0-3.67-.992-4.933-2.078C1.797 10.832.88 9.577.43 8.9a1.62 1.62 0 0 1 0-1.797c.353-.533.995-1.42 1.868-2.305L.31 3.357A.75.75 0 0 1 .143 2.31m1.536 5.622A.12.12 0 0 0 1.657 8q-.001.033.022.068c.412.621 1.242 1.75 2.366 2.717C5.175 11.758 6.527 12.5 8 12.5c1.195 0 2.31-.488 3.29-1.191L9.063 9.695A2 2 0 0 1 6.058 7.52L3.529 5.688a14.2 14.2 0 0 0-1.85 2.244M8 3.5c-.516 0-1.017.09-1.499.251a.75.75 0 1 1-.473-1.423A6.2 6.2 0 0 1 8 2c1.981 0 3.67.992 4.933 2.078c1.27 1.091 2.187 2.345 2.637 3.023a1.62 1.62 0 0 1 0 1.798c-.11.166-.248.365-.41.587a.75.75 0 1 1-1.21-.887c.148-.201.272-.382.371-.53a.12.12 0 0 0 0-.137c-.412-.621-1.242-1.75-2.366-2.717C10.825 4.242 9.473 3.5 8 3.5"
             />
           </svg></button
-        ><button id="show-controls" title="Show controls" type="button">
+        ><button id="showControls" title="Show controls" type="button">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="1em"
             height="1em"
             viewBox="0 0 16 16"
-            id="show-icon"
+            id="showIcon"
           >
             <path
               fill="currentColor"
               d="M8 2c1.981 0 3.671.992 4.933 2.078c1.27 1.091 2.187 2.345 2.637 3.023a1.62 1.62 0 0 1 0 1.798c-.45.678-1.367 1.932-2.637 3.023C11.67 13.008 9.981 14 8 14s-3.671-.992-4.933-2.078C1.797 10.83.88 9.576.43 8.898a1.62 1.62 0 0 1 0-1.798c.45-.677 1.367-1.931 2.637-3.022C4.33 2.992 6.019 2 8 2M1.679 7.932a.12.12 0 0 0 0 .136c.411.622 1.241 1.75 2.366 2.717C5.176 11.758 6.527 12.5 8 12.5s2.825-.742 3.955-1.715c1.124-.967 1.954-2.096 2.366-2.717a.12.12 0 0 0 0-.136c-.412-.621-1.242-1.75-2.366-2.717C10.824 4.242 9.473 3.5 8 3.5s-2.825.742-3.955 1.715c-1.124.967-1.954 2.096-2.366 2.717M8 10a2 2 0 1 1-.001-3.999A2 2 0 0 1 8 10"
             />
           </svg></button
-        ><button id="exit-full-screen" title="Exit full screen" type="button">
+        ><button id="exitFullScreen" title="Exit full screen" type="button">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="1em"
@@ -346,7 +346,7 @@
               d="M10.75 1a.75.75 0 0 1 .75.75v2.5c0 .138.112.25.25.25h2.5a.75.75 0 0 1 0 1.5h-2.5A1.75 1.75 0 0 1 10 4.25v-2.5a.75.75 0 0 1 .75-.75m-5.5 0a.75.75 0 0 1 .75.75v2.5A1.75 1.75 0 0 1 4.25 6h-2.5a.75.75 0 0 1 0-1.5h2.5a.25.25 0 0 0 .25-.25v-2.5A.75.75 0 0 1 5.25 1M1 10.75a.75.75 0 0 1 .75-.75h2.5c.966 0 1.75.784 1.75 1.75v2.5a.75.75 0 0 1-1.5 0v-2.5a.25.25 0 0 0-.25-.25h-2.5a.75.75 0 0 1-.75-.75m9 1c0-.966.784-1.75 1.75-1.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.25.25 0 0 0-.25.25v2.5a.75.75 0 0 1-1.5 0Z"
             />
           </svg></button
-        ><button id="full-screen" title="Full screen" type="button">
+        ><button id="fullScreen" title="Full screen" type="button">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="1em"
@@ -361,7 +361,7 @@
         </button>
       </div>
     </div>
-    <div id="attribution" class="mobileHidden">
+    <div id="attribution" class="mobile-hidden">
       <a
         class="github-button"
         href="https://github.com/rosslh/mandelbrot.site"
@@ -374,25 +374,25 @@
         Star on GitHub
       </a>
     </div>
-    <dialog id="save-image-modal" class="overlay">
-      <form id="save-image-form">
+    <dialog id="saveImageModal" class="overlay">
+      <form id="saveImageForm">
         <strong>Save image</strong>
-        <div class="inputWrapper">
-          <label for="image-width">Width (px)</label>
-          <input type="number" required id="image-width" name="image-width" />
+        <div class="input-wrapper">
+          <label for="imageWidth">Width (px)</label>
+          <input type="number" required id="imageWidth" name="imageWidth" />
         </div>
-        <div class="inputWrapper">
-          <label for="image-height">Height (px)</label>
-          <input type="number" required id="image-height" name="image-height" />
+        <div class="input-wrapper">
+          <label for="imageHeight">Height (px)</label>
+          <input type="number" required id="imageHeight" name="imageHeight" />
         </div>
-        <div class="submitOrCancel">
-          <button type="submit" id="save-image-submit">Save</button>
-          <button type="button" id="save-image-cancel" class="underlineButton">
+        <div class="submit-or-cancel">
+          <button type="submit" id="saveImageSubmit">Save</button>
+          <button type="button" id="saveImageCancel" class="underline-button">
             Cancel
           </button>
         </div>
       </form>
     </dialog>
-    <div id="leaflet-map"></div>
+    <div id="leaflet"></div>
   </body>
 </html>
