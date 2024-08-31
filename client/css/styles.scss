@@ -81,20 +81,14 @@ html {
 #inputsWrapper {
   max-height: calc(100% - 52px);
   overflow-y: auto;
-
   top: 0;
   right: 0;
   display: flex;
+  padding-top: 0;
   flex-direction: column;
-  gap: 14px;
 
   .shortcutHint {
     text-decoration: underline;
-  }
-
-  .inputSeparator {
-    height: 1px;
-    border-bottom: 1px solid #777;
   }
 
   .checkboxWrapper {
@@ -121,6 +115,43 @@ html {
     margin-right: 80px;
     transform: translateX(100%);
   }
+
+  details {
+    border-top: 1px solid #777;
+
+    &:first-child {
+      border-top: none;
+    }
+
+    summary {
+      cursor: pointer;
+      font-weight: bold;
+      padding: 16px 0;
+      user-select: none;
+
+      &:hover {
+        color: #ccc;
+      }
+
+      > span,
+      > label {
+        padding-left: 4px;
+      }
+
+      > label {
+        pointer-events: none;
+      }
+    }
+
+    .details-content {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding-bottom: 16px;
+      padding-left: 8px;
+      padding-right: 4px;
+    }
+  }
 }
 
 datalist {
@@ -132,7 +163,7 @@ datalist {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 
   > * {
     display: block;
@@ -176,6 +207,8 @@ datalist {
   justify-content: space-between;
   padding-left: 8px;
   padding-right: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #777;
 
   > button {
     background: none;
@@ -184,23 +217,18 @@ datalist {
     height: 32px;
     width: 32px;
     font-size: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 
     &:hover {
       color: #ccc;
-    }
-
-    &#hide-controls {
-      display: inline-block;
     }
 
     &#show-controls {
       display: none;
     }
   }
-}
-
-.colorSchemeLabel {
-  font-weight: bold;
 }
 
 button.underlineButton {
@@ -216,6 +244,10 @@ button.underlineButton {
   right: 8px;
   z-index: 2000;
   display: inline-block;
+
+  .github-button {
+    display: none;
+  }
 }
 
 #save-image-modal {
@@ -291,6 +323,16 @@ input {
   .mobileHidden {
     display: none !important;
   }
+
+  #inputsWrapper {
+    padding-top: 12px;
+    padding-bottom: 0;
+
+    details {
+      border-top: none;
+    }
+  }
+
   .overlay {
     &,
     * {
@@ -320,27 +362,31 @@ input {
 
 @media (min-width: 801px) {
   body.hideOverlays {
-    #inputsWrapper > *:not(.buttonWrapper) {
-      display: none !important;
-    }
-
     .overlay {
       min-width: unset;
     }
 
-    .buttonWrapper {
-      padding: 0;
-
-      > *:not(#show-controls) {
+    #inputsWrapper {
+      > *:not(.buttonWrapper) {
         display: none !important;
       }
 
-      #hide-controls {
-        display: none;
-      }
+      .buttonWrapper {
+        padding: 0;
+        border-top: none;
+        padding-top: 8px;
 
-      #show-controls {
-        display: inline-block;
+        > button:not(#show-controls) {
+          display: none !important;
+        }
+
+        > button#hide-controls {
+          display: none !important;
+        }
+
+        > button#show-controls {
+          display: inline-flex;
+        }
       }
     }
 

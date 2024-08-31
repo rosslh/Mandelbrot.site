@@ -103,161 +103,182 @@
       </div>
     </div>
     <div id="inputsWrapper" class="overlay">
-      <strong class="mobileHidden">Shortcuts</strong>
-      <div class="shortcutWrapper mobileHidden">
-        <code>shift + drag</code>
-        <span>Zoom in</span>
-      </div>
-      <div class="shortcutWrapper mobileHidden">
-        <code class="windowsShortcut">alt + click</code
-        ><code class="macShortcut">option + click</code>
-        <div>Center a point</div>
-      </div>
-      <div class="inputSeparator mobileHidden"></div>
-      <strong class="mobileHidden">Render settings</strong>
-      <div class="inputWrapper alignStart">
-        <label for="iterations" class="labelWithSubtitle">
-          <span>Iterations</span>
-          <span class="secondary">(Detail level)</span>
-        </label>
-        <input type="number" required id="iterations" name="iterations" />
-      </div>
-      <div class="iterationButtons">
-        <button type="button" id="iterations-mul-2" class="underlineButton">
-          &times;2
-        </button>
-        <button type="button" id="iterations-div-2" class="underlineButton">
-          &divide;2
-        </button>
-      </div>
-      <div class="inputWrapper mobileHidden">
-        <label for="exponent">Exponent</label>
-        <input type="number" required id="exponent" name="exponent" />
-      </div>
-      <div class="checkboxWrapper mobileHidden">
-        <input type="checkbox" id="highDpiTiles" name="highDpiTiles" />
-        <label for="highDpiTiles"
-          >High resolution <span class="secondary">(Slow)</span></label
-        >
-      </div>
-      <div class="inputSeparator mobileHidden"></div>
-      <label class="colorSchemeLabel mobileHidden" for="colorScheme">
-        Color scheme
-      </label>
-      <div class="inputWrapper mobileHidden">
-        <select id="colorScheme" name="colorScheme" required class="fullWidth">
-          <optgroup label="Sequential (Multi-Hue)">
-            <option value="cividis">Cividis</option>
-            <option value="cool">Cool</option>
-            <option value="cubehelix">Cubehelix</option>
-            <option value="inferno">Inferno</option>
-            <option value="magma">Magma</option>
-            <option value="plasma">Plasma</option>
-            <option value="turbo">Turbo</option>
-            <option value="viridis">Viridis</option>
-            <option value="warm">Warm</option>
-            <option value="yellowGreenBlue">Blue Green Yellow</option>
-            <option value="greenBlue">Blue Green</option>
-            <option value="purpleBlueGreen">Green Blue Purple</option>
-            <option value="yellowGreen">Green Yellow</option>
-            <option value="redPurple">Purple Red</option>
-            <option value="yellowOrangeRed">Red Orange Yellow</option>
-            <option value="orangeRed">Red Orange</option>
-            <option value="purpleRed">Red Purple</option>
-          </optgroup>
-          <optgroup label="Sequential (Single-Hue)">
-            <option value="blues">Blues</option>
-            <option value="greens">Greens</option>
-            <option value="greys">Greys</option>
-            <option value="oranges">Oranges</option>
-            <option value="purples">Purples</option>
-            <option value="reds">Reds</option>
-          </optgroup>
-          <optgroup label="Diverging">
-            <option value="spectral">Spectral</option>
-            <option value="brownGreen">Brown Green</option>
-            <option value="pinkGreen">Green Pink</option>
-            <option value="purpleGreen">Purple Green</option>
-            <option value="purpleOrange">Purple Orange</option>
-            <option value="redBlue">Red Blue</option>
-            <option value="redGrey">Red Grey</option>
-            <option value="redYellowBlue">Red Yellow Blue</option>
-            <option value="redYellowGreen">Red Yellow Green</option>
-          </optgroup>
-          <optgroup label="Cyclical">
-            <option value="rainbow">Rainbow</option>
-            <option value="sinebow">Sinebow</option>
-          </optgroup>
-        </select>
-      </div>
-      <div class="checkboxWrapper mobileHidden">
-        <input type="checkbox" id="reverseColors" name="reverseColors" />
-        <label for="reverseColors">Reverse colors</label>
-      </div>
-      <div class="inputSeparator mobileHidden"></div>
-      <strong class="mobileHidden">Adjust colors</strong>
-      <datalist id="defaultSliderPosition">
-        <option value="0"></option>
-      </datalist>
-      <div class="inputWrapper mobileHidden">
-        <label for="shiftHueAmount">Hue</label>
-        <input
-          type="range"
-          id="shiftHueAmount"
-          name="shiftHueAmount"
-          min="-180"
-          max="180"
-          list="defaultSliderPosition"
-        />
-      </div>
-      <div class="inputWrapper mobileHidden">
-        <label for="saturateAmount">Saturation</label>
-        <input
-          type="range"
-          id="saturateAmount"
-          name="saturateAmount"
-          min="-1"
-          max="1"
-          step="0.01"
-          list="defaultSliderPosition"
-        />
-      </div>
-      <div class="inputWrapper mobileHidden">
-        <label for="lightenAmount">Lightness</label>
-        <input
-          type="range"
-          id="lightenAmount"
-          name="lightenAmount"
-          min="-1"
-          max="1"
-          step="0.01"
-          list="defaultSliderPosition"
-        />
-      </div>
-      <div class="inputWrapper mobileHidden">
-        <label for="colorSpace">Color space</label>
-        <select id="colorSpace" name="colorSpace" required>
-          <option value="0">HSL</option>
-          <option value="1">HSLuv</option>
-          <option value="2">LCh</option>
-          <option value="3">Okhsl</option>
-        </select>
-      </div>
-      <div class="inputSeparator mobileHidden"></div>
-      <strong class="mobileHidden">Coordinates</strong>
-      <div class="inputWrapper mobileHidden">
-        <label for="re">Real</label>
-        <input type="number" required id="re" name="re" />
-      </div>
-      <div class="inputWrapper mobileHidden">
-        <label for="im">Imaginary</label>
-        <input type="number" required id="im" name="im" />
-      </div>
-      <div class="inputWrapper mobileHidden">
-        <label for="zoom">Zoom</label>
-        <input type="number" required id="zoom" name="zoom" />
-      </div>
-      <div class="inputSeparator mobileHidden"></div>
+      <details open class="mobileHidden">
+        <summary><span>Shortcuts</span></summary>
+        <div class="details-content">
+          <div class="shortcutWrapper">
+            <code>shift + drag</code>
+            <span>Zoom in</span>
+          </div>
+          <div class="shortcutWrapper">
+            <code class="windowsShortcut">alt + click</code
+            ><code class="macShortcut">option + click</code>
+            <div>Center a point</div>
+          </div>
+        </div>
+      </details>
+      <details open>
+        <summary class="mobileHidden"><span>Render settings</span></summary>
+        <div class="details-content">
+          <div class="inputWrapper alignStart">
+            <label for="iterations" class="labelWithSubtitle">
+              <span>Iterations</span>
+              <span class="secondary">(Detail level)</span>
+            </label>
+            <input type="number" required id="iterations" name="iterations" />
+          </div>
+          <div class="iterationButtons">
+            <button type="button" id="iterations-mul-2" class="underlineButton">
+              &times;2
+            </button>
+            <button type="button" id="iterations-div-2" class="underlineButton">
+              &divide;2
+            </button>
+          </div>
+          <div class="inputWrapper mobileHidden">
+            <label for="exponent">Exponent</label>
+            <input type="number" required id="exponent" name="exponent" />
+          </div>
+          <div class="checkboxWrapper mobileHidden">
+            <input type="checkbox" id="highDpiTiles" name="highDpiTiles" />
+            <label for="highDpiTiles"
+              >High resolution <span class="secondary">(Slow)</span></label
+            >
+          </div>
+        </div>
+      </details>
+      <details class="mobileHidden">
+        <summary>
+          <label for="colorScheme">Color scheme</label>
+        </summary>
+        <div class="details-content">
+          <div class="inputWrapper">
+            <select
+              id="colorScheme"
+              name="colorScheme"
+              required
+              class="fullWidth"
+            >
+              <optgroup label="Sequential (Multi-Hue)">
+                <option value="cividis">Cividis</option>
+                <option value="cool">Cool</option>
+                <option value="cubehelix">Cubehelix</option>
+                <option value="inferno">Inferno</option>
+                <option value="magma">Magma</option>
+                <option value="plasma">Plasma</option>
+                <option value="turbo">Turbo</option>
+                <option value="viridis">Viridis</option>
+                <option value="warm">Warm</option>
+                <option value="yellowGreenBlue">Blue Green Yellow</option>
+                <option value="greenBlue">Blue Green</option>
+                <option value="purpleBlueGreen">Green Blue Purple</option>
+                <option value="yellowGreen">Green Yellow</option>
+                <option value="redPurple">Purple Red</option>
+                <option value="yellowOrangeRed">Red Orange Yellow</option>
+                <option value="orangeRed">Red Orange</option>
+                <option value="purpleRed">Red Purple</option>
+              </optgroup>
+              <optgroup label="Cyclical">
+                <option value="rainbow">Rainbow</option>
+                <option value="sinebow">Sinebow</option>
+              </optgroup>
+              <optgroup label="Diverging">
+                <option value="spectral">Spectral</option>
+                <option value="brownGreen">Brown Green</option>
+                <option value="pinkGreen">Green Pink</option>
+                <option value="purpleGreen">Purple Green</option>
+                <option value="purpleOrange">Purple Orange</option>
+                <option value="redBlue">Red Blue</option>
+                <option value="redGrey">Red Grey</option>
+                <option value="redYellowBlue">Red Yellow Blue</option>
+                <option value="redYellowGreen">Red Yellow Green</option>
+              </optgroup>
+              <optgroup label="Sequential (Single-Hue)">
+                <option value="blues">Blues</option>
+                <option value="greens">Greens</option>
+                <option value="greys">Greys</option>
+                <option value="oranges">Oranges</option>
+                <option value="purples">Purples</option>
+                <option value="reds">Reds</option>
+              </optgroup>
+            </select>
+          </div>
+          <div class="checkboxWrapper">
+            <input type="checkbox" id="reverseColors" name="reverseColors" />
+            <label for="reverseColors">Reverse colors</label>
+          </div>
+        </div>
+      </details>
+      <details class="mobileHidden">
+        <summary><span>Adjust colors</span></summary>
+        <div class="details-content">
+          <datalist id="defaultSliderPosition">
+            <option value="0"></option>
+          </datalist>
+          <div class="inputWrapper">
+            <label for="shiftHueAmount">Hue</label>
+            <input
+              type="range"
+              id="shiftHueAmount"
+              name="shiftHueAmount"
+              min="-180"
+              max="180"
+              list="defaultSliderPosition"
+            />
+          </div>
+          <div class="inputWrapper">
+            <label for="saturateAmount">Saturation</label>
+            <input
+              type="range"
+              id="saturateAmount"
+              name="saturateAmount"
+              min="-1"
+              max="1"
+              step="0.01"
+              list="defaultSliderPosition"
+            />
+          </div>
+          <div class="inputWrapper">
+            <label for="lightenAmount">Lightness</label>
+            <input
+              type="range"
+              id="lightenAmount"
+              name="lightenAmount"
+              min="-1"
+              max="1"
+              step="0.01"
+              list="defaultSliderPosition"
+            />
+          </div>
+          <div class="inputWrapper">
+            <label for="colorSpace">Color space</label>
+            <select id="colorSpace" name="colorSpace" required>
+              <option value="0">HSL</option>
+              <option value="1">HSLuv</option>
+              <option value="2">LCh</option>
+              <option value="3">Okhsl</option>
+            </select>
+          </div>
+        </div>
+      </details>
+      <details class="mobileHidden">
+        <summary><span>Coordinates</span></summary>
+        <div class="details-content">
+          <div class="inputWrapper">
+            <label for="re">Real</label>
+            <input type="number" required id="re" name="re" />
+          </div>
+          <div class="inputWrapper">
+            <label for="im">Imaginary</label>
+            <input type="number" required id="im" name="im" />
+          </div>
+          <div class="inputWrapper">
+            <label for="zoom">Zoom</label>
+            <input type="number" required id="zoom" name="zoom" />
+          </div>
+        </div>
+      </details>
+
       <div class="buttonWrapper mobileHidden">
         <button id="save-image" title="Save image" type="button">
           <svg
