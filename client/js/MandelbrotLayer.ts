@@ -74,18 +74,27 @@ class MandelbrotLayer extends L.GridLayer {
       "canvas",
       "leaflet-tile",
     ) as HTMLCanvasElement;
+    this.shouldImmediatelyGenerateTile()
+      ? this.generateTile(canvas, tilePosition, done)
+      : this.queueTileGeneration(canvas, tilePosition, done);
+    return canvas;
+  }
 
-    if (
+  private shouldImmediatelyGenerateTile(): boolean {
+    return (
       this._map.config.iterations <= 500 ||
       L.Browser.mobile ||
       L.Browser.android
-    ) {
-      this.generateTile(canvas, tilePosition, done);
-    } else {
-      this.tilesToGenerate.push({ position: tilePosition, canvas, done });
-      this.debounceTileGeneration();
-    }
-    return canvas;
+    );
+  }
+
+  private queueTileGeneration(
+    canvas: HTMLCanvasElement,
+    tilePosition: L.Coords,
+    done: Done,
+  ) {
+    this.tilesToGenerate.push({ position: tilePosition, canvas, done });
+    this.debounceTileGeneration();
   }
 
   refresh() {

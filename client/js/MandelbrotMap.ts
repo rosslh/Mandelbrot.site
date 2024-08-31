@@ -4,37 +4,10 @@ import { FunctionThread, Pool, Worker, spawn } from "threads";
 import MandelbrotLayer from "./MandelbrotLayer";
 import { QueuedTask } from "threads/dist/master/pool-types";
 import MandelbrotControls from "./MandelbrotControls";
-import type { ValidColorSpace } from "../../mandelbrot/pkg";
+import { ComplexBounds, MandelbrotConfig, WasmRequestPayload } from "./types";
 
 type MapWithResetView = MandelbrotMap & {
   _resetView: (center: L.LatLng | [number, number], zoom: number) => void;
-};
-
-type MandelbrotConfig = {
-  iterations: number;
-  exponent: number;
-
-  colorScheme: string;
-  reverseColors: boolean;
-  lightenAmount: number;
-  saturateAmount: number;
-  shiftHueAmount: number;
-  colorSpace: ValidColorSpace;
-
-  highDpiTiles: boolean;
-
-  re: number;
-  im: number;
-  zoom: number;
-};
-
-type WasmRequestPayload = Omit<
-  MandelbrotConfig,
-  "re" | "im" | "zoom" | "highDpiTiles"
-> & {
-  bounds: { reMin: number; reMax: number; imMin: number; imMax: number };
-  imageWidth: number;
-  imageHeight: number;
 };
 
 type MandelbrotThread = FunctionThread<[WasmRequestPayload], Uint8Array>;
@@ -66,6 +39,10 @@ class MandelbrotMap extends L.Map {
       center: [initialConfig.re, initialConfig.im],
     });
 
+    this.initializeMap(htmlId, initialConfig);
+  }
+
+  private initializeMap(htmlId: string, initialConfig: MandelbrotConfig) {
     this.createPool();
     this.mapId = htmlId;
     this.mandelbrotLayer = new MandelbrotLayer().addTo(this);
@@ -77,23 +54,22 @@ class MandelbrotMap extends L.Map {
       [this.initialConfig.re, this.initialConfig.im],
       this.initialConfig.zoom,
     );
-
     this.setConfigFromUrl();
+    this.setupEventListeners();
+  }
 
-    this.on("drag", () => {
-      this.mandelbrotLayer.debounceTileGeneration.flush();
-    });
+  private setupEventListeners() {
+    this.on("drag", () => this.mandelbrotLayer.debounceTileGeneration.flush());
     this.on("click", this.handleMapClick);
-
-    this.on("load", this.controls.throttleSetInputValues);
+    this.on(
+      "load moveend zoomend viewreset resize",
+      this.controls.throttleSetInputValues,
+    );
     this.on("move", this.controls.throttleSetInputValues);
-    this.on("moveend", this.controls.throttleSetInputValues);
     this.on("zoomend", () => {
       this.cancelTileTasksOnWrongZoom();
       this.controls.throttleSetInputValues();
     });
-    this.on("viewreset", this.controls.throttleSetInputValues);
-    this.on("resize", this.controls.throttleSetInputValues);
   }
 
   tilePositionToComplexParts(
@@ -203,10 +179,29 @@ class MandelbrotMap extends L.Map {
   }
 
   async saveVisibleImage(totalWidth: number, totalHeight: number) {
-    const numColumns = 24;
-    const columnWidth = Math.ceil(totalWidth / numColumns);
-    const bounds = this.mapBoundsAsComplexParts;
+    const bounds = this.adjustBoundsForAspectRatio(
+      this.mapBoundsAsComplexParts,
+      totalWidth,
+      totalHeight,
+    );
+    const imageCanvases = await this.generateImageColumns(
+      bounds,
+      totalWidth,
+      totalHeight,
+    );
+    const finalCanvas = this.combineImageColumns(
+      imageCanvases,
+      totalWidth,
+      totalHeight,
+    );
+    this.saveCanvasAsImage(finalCanvas);
+  }
 
+  private adjustBoundsForAspectRatio(
+    bounds: ComplexBounds,
+    totalWidth: number,
+    totalHeight: number,
+  ) {
     const imageAspectRatio = totalWidth / totalHeight;
     const complexAspectRatio =
       (bounds.reMax - bounds.reMin) / (bounds.imMax - bounds.imMin);
@@ -223,6 +218,16 @@ class MandelbrotMap extends L.Map {
       bounds.reMax = reCenter + newReWidth / 2;
     }
 
+    return bounds;
+  }
+
+  private async generateImageColumns(
+    bounds: ComplexBounds,
+    totalWidth: number,
+    totalHeight: number,
+  ) {
+    const numColumns = 24;
+    const columnWidth = Math.ceil(totalWidth / numColumns);
     const reDiff = bounds.reMax - bounds.reMin;
     const reDiffPerColumn = reDiff * (columnWidth / totalWidth);
 
@@ -238,8 +243,14 @@ class MandelbrotMap extends L.Map {
       );
     }
 
-    const imageCanvases = await Promise.all(imagePromises);
+    return Promise.all(imagePromises);
+  }
 
+  private combineImageColumns(
+    imageCanvases: HTMLCanvasElement[],
+    totalWidth: number,
+    totalHeight: number,
+  ) {
     const finalCanvas = document.createElement("canvas");
     finalCanvas.width = totalWidth;
     finalCanvas.height = totalHeight;
@@ -251,7 +262,11 @@ class MandelbrotMap extends L.Map {
       xOffset += canvas.width;
     });
 
-    finalCanvas.toBlob((blob) => {
+    return finalCanvas;
+  }
+
+  private saveCanvasAsImage(canvas: HTMLCanvasElement) {
+    canvas.toBlob((blob) => {
       saveAs(
         blob,
         `mandelbrot${Date.now()}_r${this.config.re}_im${this.config.im}_z${

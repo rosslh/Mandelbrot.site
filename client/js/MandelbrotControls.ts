@@ -4,27 +4,7 @@ import throttle from "lodash/throttle";
 import snakeCase from "lodash/snakeCase";
 import type MandelbrotMap from "./MandelbrotMap";
 import api from "./api";
-
-type NumberInput = {
-  id: "iterations" | "exponent" | "re" | "im" | "zoom";
-  minValue: number;
-  maxValue: number;
-  allowFraction?: boolean;
-  resetView?: boolean;
-};
-
-type SelectInput = {
-  id: "colorScheme" | "colorSpace";
-};
-
-type CheckboxInput = {
-  id: "reverseColors" | "highDpiTiles";
-  hidden?: boolean;
-};
-
-type SliderInput = {
-  id: "lightenAmount" | "saturateAmount" | "shiftHueAmount";
-};
+import { NumberInput, SelectInput, CheckboxInput, SliderInput } from "./types";
 
 class MandelbrotControls {
   map: MandelbrotMap;
@@ -36,6 +16,63 @@ class MandelbrotControls {
   }
 
   throttleSetInputValues = throttle(() => this.setInputValues(), 200);
+
+  private handleInputs() {
+    this.handleShortcutHints();
+    this.setupNumberInputs();
+    this.setupSelectInputs();
+    this.setupCheckboxInputs();
+    this.setupSliderInputs();
+    this.setupButtons();
+  }
+
+  private setupNumberInputs() {
+    const numberInputs: NumberInput[] = [
+      { id: "iterations", minValue: 1, maxValue: 10 ** 9 },
+      { id: "exponent", minValue: 2, maxValue: 10 ** 9, resetView: true },
+      { id: "re", minValue: -2, maxValue: 2, allowFraction: true },
+      { id: "im", minValue: -2, maxValue: 2, allowFraction: true },
+      { id: "zoom", minValue: 0, maxValue: 48 },
+    ];
+
+    numberInputs.forEach((input) => this.handleNumberInput(input));
+  }
+
+  private setupSelectInputs() {
+    const selectInputs: SelectInput[] = [
+      { id: "colorScheme" },
+      { id: "colorSpace" },
+    ];
+
+    selectInputs.forEach((input) => this.handleSelectInput(input));
+  }
+
+  private setupCheckboxInputs() {
+    const checkboxInputs: CheckboxInput[] = [
+      { id: "reverseColors" },
+      { id: "highDpiTiles" },
+    ];
+
+    checkboxInputs.forEach((input) => this.handleCheckboxInput(input));
+  }
+
+  private setupSliderInputs() {
+    const sliderInputs: SliderInput[] = [
+      { id: "lightenAmount" },
+      { id: "saturateAmount" },
+      { id: "shiftHueAmount" },
+    ];
+
+    sliderInputs.forEach((input) => this.handleSliderInput(input));
+  }
+
+  private setupButtons() {
+    this.handleIterationButtons();
+    this.handleFullScreen();
+    this.handleHideShowUiButton();
+    this.handleShareButton();
+    this.handleSaveImageButton();
+  }
 
   private handleNumberInput({
     id,
@@ -323,57 +360,6 @@ class MandelbrotControls {
       windowsShortcut.style.display = "none";
       macShortcut.style.display = "inline-block";
     }
-  }
-
-  private handleInputs() {
-    this.handleShortcutHints();
-
-    this.handleNumberInput({
-      id: "iterations",
-      minValue: 1,
-      maxValue: 10 ** 9,
-    });
-    this.handleIterationButtons();
-
-    this.handleNumberInput({
-      id: "exponent",
-      minValue: 2,
-      maxValue: 10 ** 9,
-      resetView: true,
-    });
-    this.handleCheckboxInput({
-      id: "highDpiTiles",
-    });
-
-    this.handleSelectInput({ id: "colorScheme" });
-    this.handleCheckboxInput({ id: "reverseColors" });
-    this.handleSliderInput({ id: "lightenAmount" });
-    this.handleSliderInput({ id: "saturateAmount" });
-    this.handleSliderInput({ id: "shiftHueAmount" });
-    this.handleSelectInput({ id: "colorSpace" });
-
-    this.handleNumberInput({
-      id: "re",
-      minValue: -2,
-      maxValue: 2,
-      allowFraction: true,
-    });
-    this.handleNumberInput({
-      id: "im",
-      minValue: -2,
-      maxValue: 2,
-      allowFraction: true,
-    });
-    this.handleNumberInput({
-      id: "zoom",
-      minValue: 0,
-      maxValue: 48,
-    });
-
-    this.handleFullScreen();
-    this.handleHideShowUiButton();
-    this.handleShareButton();
-    this.handleSaveImageButton();
   }
 
   private setInputValues() {

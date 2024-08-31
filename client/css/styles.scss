@@ -120,6 +120,7 @@ html {
 
 #inputsWrapper {
   max-height: calc(100% - 52px);
+  min-width: 256px;
   overflow-y: auto;
   top: 0;
   right: 0;
@@ -152,7 +153,7 @@ html {
     gap: var(--space-8);
     margin-top: -26px;
     margin-left: auto;
-    margin-right: calc(var(--space-20) * 4);
+    margin-right: calc(var(--space-24) * 4);
     transform: translateX(100%);
   }
 
@@ -211,11 +212,11 @@ datalist {
 
   > input,
   > select {
-    width: 80px;
+    width: 92px;
   }
 
   > input[type="range"] {
-    width: 100px;
+    width: 128px;
   }
 
   > select.full-width {
