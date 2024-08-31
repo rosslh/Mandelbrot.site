@@ -242,4 +242,109 @@ mod lib_test {
             }
         }
     }
+
+    #[test]
+    fn test_transform_color() {
+        let original_color = colorous::Color {
+            r: 128,
+            g: 64,
+            b: 32,
+        };
+
+        // Test HSL color space
+        let transformed_hsl =
+            super::transform_color(original_color, &super::ValidColorSpace::Hsl, 90.0, 0.2, 0.1);
+        assert_eq!(transformed_hsl.r, 53);
+        assert_eq!(transformed_hsl.g, 163);
+        assert_eq!(transformed_hsl.b, 31);
+
+        // Test HSLUV color space
+        let transformed_hsluv = super::transform_color(
+            original_color,
+            &super::ValidColorSpace::Hsluv,
+            90.0,
+            0.2,
+            0.1,
+        );
+        assert_eq!(transformed_hsluv.r, 64);
+        assert_eq!(transformed_hsluv.g, 108);
+        assert_eq!(transformed_hsluv.b, 33);
+
+        // Test LCH color space
+        let transformed_lch =
+            super::transform_color(original_color, &super::ValidColorSpace::Lch, 90.0, 0.2, 0.1);
+        assert_eq!(transformed_lch.r, 1);
+        assert_eq!(transformed_lch.g, 113);
+        assert_eq!(transformed_lch.b, 32);
+
+        // Test OKHSL color space
+        let transformed_okhsl = super::transform_color(
+            original_color,
+            &super::ValidColorSpace::Okhsl,
+            90.0,
+            0.2,
+            0.1,
+        );
+        assert_eq!(transformed_okhsl.r, 71);
+        assert_eq!(transformed_okhsl.g, 113);
+        assert_eq!(transformed_okhsl.b, 47);
+    }
+
+    #[test]
+    fn test_transform_color_no_change() {
+        let original_color = colorous::Color {
+            r: 128,
+            g: 64,
+            b: 32,
+        };
+
+        let transformed =
+            super::transform_color(original_color, &super::ValidColorSpace::Hsl, 0.0, 0.0, 0.0);
+
+        assert_eq!(transformed.r, original_color.r);
+        assert_eq!(transformed.g, original_color.g);
+        assert_eq!(transformed.b, original_color.b);
+    }
+
+    #[test]
+    fn test_transform_color_extreme_values() {
+        let original_color = colorous::Color {
+            r: 128,
+            g: 64,
+            b: 32,
+        };
+
+        let transformed = super::transform_color(
+            original_color,
+            &super::ValidColorSpace::Hsl,
+            360.0,
+            1.0,
+            1.0,
+        );
+
+        assert_eq!(transformed.r, 255);
+        assert_eq!(transformed.g, 255);
+        assert_eq!(transformed.b, 255);
+    }
+
+    #[test]
+    fn test_transform_color_negative_values() {
+        let original_color = colorous::Color {
+            r: 128,
+            g: 64,
+            b: 32,
+        };
+
+        let transformed = super::transform_color(
+            original_color,
+            &super::ValidColorSpace::Hsl,
+            -90.0,
+            -0.2,
+            -0.1,
+        );
+
+        assert_eq!(transformed.r, 95);
+        assert_eq!(transformed.g, 37);
+        assert_eq!(transformed.b, 106);
+    }
 }

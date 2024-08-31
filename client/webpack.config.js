@@ -69,7 +69,17 @@ const appConfig = {
     rules: [
       {
         test: /\.ts$/,
-        use: "ts-loader",
+        use: [
+          {
+            loader: "ts-loader",
+            options: {
+              transpileOnly: true,
+              compilerOptions: {
+                sourceMap: true,
+              },
+            },
+          },
+        ],
         exclude: /node_modules/,
       },
       {
@@ -98,6 +108,7 @@ const appConfig = {
   },
   output: { path: dist, filename: "app.js" },
   experiments: { syncWebAssembly: true },
+  devtool: "source-map",
 };
 
 const workerConfig = {
@@ -112,7 +123,17 @@ const workerConfig = {
     rules: [
       {
         test: /\.ts$/,
-        use: "ts-loader",
+        use: [
+          {
+            loader: "ts-loader",
+            options: {
+              transpileOnly: true,
+              compilerOptions: {
+                sourceMap: true,
+              },
+            },
+          },
+        ],
         exclude: /node_modules/,
       },
       {
@@ -132,8 +153,8 @@ const workerConfig = {
     extensions: [".ts", ".js", ".wasm"],
   },
   output: { path: dist, filename: "worker.js" },
-  //[DDR 2020-11-20] asyncWebAssembly is broken by webpack 5. (See https://github.com/rustwasm/wasm-bindgen/issues/2343)
   experiments: { syncWebAssembly: true },
+  devtool: "source-map",
 };
 
 module.exports = [appConfig, workerConfig];
