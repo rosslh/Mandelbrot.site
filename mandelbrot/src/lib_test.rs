@@ -19,7 +19,7 @@ mod lib_test {
     ];
 
     #[test]
-    fn get_escape_iterations_if_not_in_set_escapes() {
+    fn calculate_escape_iterations_if_not_in_set_escapes() {
         let points = [
             (-0.1, 1.5),
             (-0.7, 0.3),
@@ -36,7 +36,7 @@ mod lib_test {
         ];
 
         for &(re, im) in points.iter() {
-            let iterations = super::get_escape_iterations(re, im, MAX_ITERATIONS, 3.0, 2).0;
+            let iterations = super::calculate_escape_iterations(re, im, MAX_ITERATIONS, 2).0;
 
             assert_ne!(
                 iterations, MAX_ITERATIONS,
@@ -47,7 +47,7 @@ mod lib_test {
     }
 
     #[test]
-    fn get_escape_iterations_if_in_set_stays_bounded() {
+    fn calculate_escape_iterations_if_in_set_stays_bounded() {
         let points = [
             (-0.1, -0.1),
             (-0.1, 0.0),
@@ -60,7 +60,7 @@ mod lib_test {
             (0.1, 0.1),
         ];
         for &(re, im) in points.iter() {
-            let iterations = super::get_escape_iterations(re, im, MAX_ITERATIONS, 3.0, 2).0;
+            let iterations = super::calculate_escape_iterations(re, im, MAX_ITERATIONS, 2).0;
 
             assert_eq!(
                 iterations, MAX_ITERATIONS,
@@ -71,9 +71,9 @@ mod lib_test {
     }
 
     #[test]
-    fn get_mandelbrot_image_outputs_correct_length() {
+    fn get_mandelbrot_set_image_outputs_correct_length() {
         for &(x_min, x_max, y_min, y_max) in SQUARES.iter() {
-            let response = super::get_mandelbrot_image(
+            let response = super::get_mandelbrot_set_image(
                 x_min,
                 x_max,
                 y_min,
@@ -103,9 +103,9 @@ mod lib_test {
     }
 
     #[test]
-    fn get_mandelbrot_image_outputs_valid_colors() {
+    fn get_mandelbrot_set_image_outputs_valid_colors() {
         for &(x_min, x_max, y_min, y_max) in SQUARES.iter() {
-            let response = super::get_mandelbrot_image(
+            let response = super::get_mandelbrot_set_image(
                 x_min,
                 x_max,
                 y_min,
@@ -168,7 +168,7 @@ mod lib_test {
                                             for (index, &(x_min, x_max, y_min, y_max)) in
                                                 snapshot_squares.iter().enumerate()
                                             {
-                                                let response = super::get_mandelbrot_image(
+                                                let response = super::get_mandelbrot_set_image(
                                                     x_min,
                                                     x_max,
                                                     y_min,
@@ -346,5 +346,181 @@ mod lib_test {
         assert_eq!(transformed.r, 95);
         assert_eq!(transformed.g, 37);
         assert_eq!(transformed.b, 106);
+    }
+
+    #[test]
+    fn test_calculate_escape_iterations_quadratic() {
+        use num::complex::Complex64;
+
+        let c = Complex64::new(0.0, 0.0);
+        let (iterations, final_z) = super::calculate_escape_iterations_quadratic(c, 100, 4.0);
+        assert_eq!(iterations, 100);
+        assert_eq!(final_z, Complex64::new(0.0, 0.0));
+
+        let c = Complex64::new(1.0, 1.0);
+        let (iterations, _) = super::calculate_escape_iterations_quadratic(c, 100, 4.0);
+        assert!(iterations < 100);
+    }
+
+    #[test]
+    fn test_calculate_escape_iterations_general() {
+        use num::complex::Complex64;
+
+        let c = Complex64::new(0.0, 0.0);
+        let (iterations, final_z) = super::calculate_escape_iterations_general(c, 100, 2.0, 3);
+        assert_eq!(iterations, 100);
+        assert_eq!(final_z, Complex64::new(0.0, 0.0));
+
+        let c = Complex64::new(1.0, 1.0);
+        let (iterations, _) = super::calculate_escape_iterations_general(c, 100, 2.0, 3);
+        assert!(iterations < 100);
+    }
+
+    #[test]
+    fn test_compute_pixel_color() {
+        let palette = &colorous::TURBO;
+        let color_space = super::ValidColorSpace::Hsl;
+
+        // Test point in set
+        let color: super::RgbColor = super::compute_pixel_color(
+            0.0,
+            0.0,
+            100,
+            2,
+            palette,
+            false,
+            2000,
+            &color_space,
+            0.0,
+            0.0,
+            0.0,
+        );
+        assert_eq!(color, [0, 0, 0]);
+
+        // Test point out of set
+        let color: super::RgbColor = super::compute_pixel_color(
+            2.0,
+            2.0,
+            100,
+            2,
+            palette,
+            false,
+            2000,
+            &color_space,
+            0.0,
+            0.0,
+            0.0,
+        );
+        assert_eq!(color[0], 34); // Red component
+        assert_eq!(color[1], 23); // Green component
+        assert_eq!(color[2], 27); // Blue component
+    }
+
+    #[test]
+    fn test_render_mandelbrot_set() {
+        use super::linspace;
+        use super::ValidColorSpace;
+
+        let re_range = linspace(-2.0, 1.0, 10);
+        let im_range = linspace(-1.0, 1.0, 10);
+        let max_iterations = 100;
+        let exponent = 2;
+        let image_width = 10;
+        let image_height = 10;
+        let palette = &colorous::TURBO;
+        let should_reverse_colors = false;
+        let scaled_max_iterations = 2000;
+        let color_space = ValidColorSpace::Hsl;
+        let shift_hue_amount = 0.0;
+        let saturate_amount = 0.0;
+        let lighten_amount = 0.0;
+
+        let image = super::render_mandelbrot_set(
+            re_range,
+            im_range,
+            max_iterations,
+            exponent,
+            image_width,
+            image_height,
+            palette,
+            should_reverse_colors,
+            scaled_max_iterations,
+            &color_space,
+            shift_hue_amount,
+            saturate_amount,
+            lighten_amount,
+        );
+
+        assert_eq!(
+            image.len(),
+            image_width * image_height * super::NUM_COLOR_CHANNELS
+        );
+
+        assert_eq!(image[0..4], [44, 28, 54, 255]); // Top-left pixel
+        assert_eq!(image[396..400], [44, 28, 54, 255]); // Bottom-right pixel
+    }
+
+    #[test]
+    fn test_point_in_set() {
+        // Test points known to be in the set
+        assert!(super::point_in_set(0.0, 0.0, 100, 2));
+        assert!(super::point_in_set(-1.0, 0.0, 100, 2));
+
+        // Test points known to be outside the set
+        assert!(!super::point_in_set(2.0, 2.0, 100, 2));
+        assert!(!super::point_in_set(-2.0, 3.0, 100, 2));
+    }
+
+    #[test]
+    fn test_is_region_fully_in_mandelbrot_set() {
+        use super::linspace;
+        let re_range = linspace(-0.05, 0.05, 10);
+        let im_range = linspace(-0.05, 0.05, 10);
+        assert!(super::is_region_fully_in_mandelbrot_set(
+            re_range, im_range, 100, 2
+        ));
+
+        let re_range = linspace(-2.0, 2.0, 10);
+        let im_range = linspace(-2.0, 2.0, 10);
+        assert!(!super::is_region_fully_in_mandelbrot_set(
+            re_range, im_range, 100, 2
+        ));
+    }
+
+    #[test]
+    fn test_create_solid_black_image() {
+        let image = super::create_solid_black_image(10, 10);
+        assert_eq!(image.len(), 10 * 10 * super::NUM_COLOR_CHANNELS);
+        assert!(image.chunks(4).all(|chunk| chunk == [0, 0, 0, 255]));
+    }
+
+    #[test]
+    fn test_calculate_escape_iterations() {
+        use num::complex::Complex64;
+
+        let (iterations, z) = super::calculate_escape_iterations(0.0, 0.0, 100, 2);
+        assert_eq!(iterations, 100);
+        assert_eq!(z, Complex64::new(0.0, 0.0));
+
+        let (iterations, z) = super::calculate_escape_iterations(2.0, 2.0, 100, 2);
+        assert!(iterations < 10); // Should escape quickly
+        assert!(z.norm() > super::ESCAPE_RADIUS);
+
+        let (iterations, z) = super::calculate_escape_iterations(0.0, 0.0, 100, 3);
+        assert_eq!(iterations, 100);
+        assert_eq!(z, Complex64::new(0.0, 0.0));
+    }
+
+    #[test]
+    fn test_rect_in_set() {
+        use super::linspace;
+
+        let re_range = linspace(-0.05, 0.05, 10);
+        let im_range = linspace(-0.05, 0.05, 10);
+        assert!(super::rect_in_set(re_range, im_range, 100, 2));
+
+        let re_range = linspace(-2.0, 2.0, 10);
+        let im_range = linspace(-2.0, 2.0, 10);
+        assert!(!super::rect_in_set(re_range, im_range, 100, 2));
     }
 }

@@ -4,7 +4,7 @@ import("../../mandelbrot/pkg").then((wasm) => {
   wasm.init();
 
   const getTile = (params) =>
-    wasm.get_mandelbrot_image(
+    wasm.get_mandelbrot_set_image(
       params.bounds.reMin,
       params.bounds.reMax,
       params.bounds.imMin,
