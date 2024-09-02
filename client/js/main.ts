@@ -3,7 +3,7 @@ import MandelbrotMap from "./MandelbrotMap";
 
 window.addEventListener("load", () => {
   new MandelbrotMap({
-    htmlId: "leaflet-map",
+    htmlId: "leaflet",
     initialConfig: {
       iterations: 200,
       exponent: 2,
@@ -14,6 +14,7 @@ window.addEventListener("load", () => {
       colorSpace: 2,
       reverseColors: false,
       highDpiTiles: false,
+      smoothColoring: true,
 
       re: -0.5,
       im: 0,

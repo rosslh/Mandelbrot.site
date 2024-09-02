@@ -1,4 +1,44 @@
-#leaflet-map {
+:root {
+  // Colors
+  --gray-50: #fafafa;
+  --gray-100: #f5f5f5;
+  --gray-200: #e5e5e5;
+  --gray-300: #d4d4d4;
+  --gray-400: #a3a3a3;
+  --gray-500: #737373;
+  --gray-600: #525252;
+  --gray-700: #404040;
+  --gray-800: #262626;
+  --gray-900: #171717;
+  --gray-950: #0a0a0a;
+
+  // Spacing
+  --space-2: 2px;
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-20: 20px;
+  --space-24: 24px;
+  --space-28: 28px;
+  --space-32: 32px;
+  --space-36: 36px;
+
+  // Font sizes
+  --font-size-xs: 12px;
+  --font-size-sm: 14px;
+  --font-size-md: 16px;
+  --font-size-lg: 20px;
+
+  // Border radius
+  --border-radius: 4px;
+
+  // Z-index
+  --z-index-overlay: 2000;
+  --z-index-modal: 3000;
+}
+
+#leaflet {
   position: absolute;
   top: 0;
   left: 0;
@@ -20,29 +60,29 @@ html {
 
   &,
   .leaflet-container {
-    background-color: #222 !important;
+    background-color: var(--gray-800) !important;
   }
 }
 
 .leaflet-control-zoom {
-  margin-top: 12px !important;
-  margin-left: 12px !important;
+  margin-top: var(--space-12) !important;
+  margin-left: var(--space-12) !important;
 }
 
 .overlay {
-  padding: 8px;
-  background-color: #00000099;
+  padding: var(--space-8);
+  background: color-mix(in sRGB, var(--gray-950) 80%, transparent);
   backdrop-filter: blur(3px);
-  z-index: 2000;
-  text-shadow: 0 0 2px #000;
-  color: white;
+  z-index: var(--z-index-overlay);
+  text-shadow: 0 0 var(--space-2) var(--gray-950);
+  color: var(--gray-50);
   position: absolute;
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   min-width: 230px;
-  border: 1px solid #777;
+  border: 1px solid var(--gray-500);
 
   a {
-    color: white;
+    color: var(--gray-50);
   }
 }
 
@@ -52,18 +92,18 @@ html {
   left: 0;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-12);
 
-  .navLinks {
+  .nav-links {
     display: flex;
-    gap: 4px;
+    gap: var(--space-4);
     flex-wrap: wrap;
 
-    .navHeading {
-      font-size: 14px;
+    .nav-heading {
+      font-size: var(--font-size-sm);
       font-weight: normal;
       margin: 0;
-      margin-right: 4px;
+      margin-right: var(--space-4);
     }
 
     #site-link {
@@ -71,15 +111,16 @@ html {
     }
   }
 
-  #nav-spacer {
+  #navSpacer {
     width: 1px;
     align-self: stretch;
-    border-right: 1px solid #777;
+    border-right: 1px solid var(--gray-500);
   }
 }
 
 #inputsWrapper {
   max-height: calc(100% - 52px);
+  min-width: 256px;
   overflow-y: auto;
   top: 0;
   right: 0;
@@ -87,37 +128,37 @@ html {
   padding-top: 0;
   flex-direction: column;
 
-  .shortcutHint {
+  .shortcut-hint {
     text-decoration: underline;
   }
 
-  .checkboxWrapper {
+  .checkbox-wrapper {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--space-4);
   }
 
-  .shortcutWrapper {
+  .shortcut-wrapper {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-8);
 
-    .macShortcut {
+    #macShortcut {
       display: none;
     }
   }
 
-  .iterationButtons {
+  .iteration-buttons {
     display: inline-flex;
-    gap: 8px;
+    gap: var(--space-8);
     margin-top: -26px;
     margin-left: auto;
-    margin-right: 80px;
+    margin-right: calc(var(--space-24) * 4);
     transform: translateX(100%);
   }
 
   details {
-    border-top: 1px solid #777;
+    border-top: 1px solid var(--gray-500);
 
     &:first-child {
       border-top: none;
@@ -126,16 +167,16 @@ html {
     summary {
       cursor: pointer;
       font-weight: bold;
-      padding: 16px 0;
+      padding: var(--space-16) 0;
       user-select: none;
 
       &:hover {
-        color: #ccc;
+        color: var(--gray-300);
       }
 
       > span,
       > label {
-        padding-left: 4px;
+        padding-left: var(--space-4);
       }
 
       > label {
@@ -146,10 +187,10 @@ html {
     .details-content {
       display: flex;
       flex-direction: column;
-      gap: 12px;
-      padding-bottom: 16px;
-      padding-left: 8px;
-      padding-right: 4px;
+      gap: var(--space-12);
+      padding-bottom: var(--space-16);
+      padding-left: var(--space-8);
+      padding-right: var(--space-4);
     }
   }
 }
@@ -158,12 +199,12 @@ datalist {
   display: none;
 }
 
-.inputWrapper {
+.input-wrapper {
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-8);
 
   > * {
     display: block;
@@ -171,78 +212,78 @@ datalist {
 
   > input,
   > select {
-    width: 80px;
+    width: 92px;
   }
 
   > input[type="range"] {
-    width: 100px;
+    width: 128px;
   }
 
-  > select.fullWidth {
+  > select.full-width {
     &,
     option {
       width: 100%;
     }
   }
 
-  &.alignStart {
+  &.align-start {
     align-items: flex-start;
   }
 
-  label.labelWithSubtitle {
+  label.label-with-subtitle {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-4);
   }
 }
 
 .secondary {
-  color: #ccc;
-  font-size: 13px;
+  color: var(--gray-300);
+  font-size: var(--font-size-xs);
 }
 
-.buttonWrapper {
+.button-wrapper {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-left: 8px;
-  padding-right: 8px;
-  padding-top: 12px;
-  border-top: 1px solid #777;
+  padding-left: var(--space-8);
+  padding-right: var(--space-8);
+  padding-top: var(--space-12);
+  border-top: 1px solid var(--gray-500);
 
   > button {
     background: none;
     border: none;
-    color: white;
-    height: 32px;
-    width: 32px;
-    font-size: 20px;
+    color: var(--gray-50);
+    height: var(--space-32);
+    width: var(--space-32);
+    font-size: var(--font-size-lg);
     display: inline-flex;
     align-items: center;
     justify-content: center;
 
     &:hover {
-      color: #ccc;
+      color: var(--gray-300);
     }
 
-    &#show-controls {
+    &#showControls {
       display: none;
     }
   }
 }
 
-button.underlineButton {
+button.underline-button {
   background: none;
   border: none;
-  color: white;
+  color: var(--gray-50);
   text-decoration: underline;
 }
 
 #attribution {
   position: absolute;
-  bottom: 8px;
-  right: 8px;
-  z-index: 2000;
+  bottom: var(--space-8);
+  right: var(--space-8);
+  z-index: var(--z-index-modal);
   display: inline-block;
 
   .github-button {
@@ -250,18 +291,18 @@ button.underlineButton {
   }
 }
 
-#save-image-modal {
-  padding: 12px;
+#saveImageModal {
+  padding: var(--space-12);
 
   form {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-12);
 
-    .submitOrCancel {
+    .submit-or-cancel {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: var(--space-8);
       justify-content: flex-end;
 
       button[type="submit"] {
@@ -272,23 +313,26 @@ button.underlineButton {
 }
 
 code {
-  color: #eee;
-  background-color: #333;
-  padding: 4px 4px;
+  color: var(--gray-100);
+  background-color: var(--gray-700);
+  padding: var(--space-4);
+  line-height: 1;
   overflow: hidden;
-  display: inline-block;
+  display: inline;
+  border-radius: var(--border-radius);
+  font-size: var(--font-size-sm);
 }
 
 button,
 input,
 select {
   border: none;
-  padding: 2px;
-  background-color: white;
-  color: black;
-  border-radius: 4px;
+  padding: var(--space-2);
+  background-color: var(--gray-50);
+  color: var(--gray-950);
+  border-radius: var(--border-radius);
 
-  &:not(:disabled)hover {
+  &:not(:disabled):hover {
     opacity: 0.9;
   }
 
@@ -307,7 +351,7 @@ input[type="text"] {
   cursor: text;
 }
 
-button#exit-full-screen {
+button#exitFullScreen {
   display: none;
 }
 
@@ -320,12 +364,12 @@ input {
 }
 
 @media (max-width: 800px) {
-  .mobileHidden {
+  .mobile-hidden {
     display: none !important;
   }
 
   #inputsWrapper {
-    padding-top: 12px;
+    padding-top: var(--space-12);
     padding-bottom: 0;
 
     details {
@@ -336,16 +380,16 @@ input {
   .overlay {
     &,
     * {
-      font-size: 16px !important;
+      font-size: var(--font-size-md) !important;
     }
   }
 
-  .navHeading {
-    font-size: 16px;
+  .nav-heading {
+    font-size: var(--font-size-md);
   }
 
   .secondary {
-    font-size: 15px !important;
+    font-size: var(--font-size-sm) !important;
   }
 }
 
@@ -354,37 +398,39 @@ input {
     flex-direction: column;
     align-items: flex-start;
 
-    #nav-spacer {
+    #navSpacer {
       display: none;
     }
   }
 }
 
 @media (min-width: 801px) {
-  body.hideOverlays {
+  body.hide-overlays {
     .overlay {
       min-width: unset;
     }
 
     #inputsWrapper {
-      > *:not(.buttonWrapper) {
+      min-width: unset;
+
+      > *:not(.button-wrapper) {
         display: none !important;
       }
 
-      .buttonWrapper {
+      .button-wrapper {
         padding: 0;
         border-top: none;
-        padding-top: 8px;
+        padding-top: var(--space-8);
 
-        > button:not(#show-controls) {
+        > button:not(#showControls) {
           display: none !important;
         }
 
-        > button#hide-controls {
+        > button#hideControls {
           display: none !important;
         }
 
-        > button#show-controls {
+        > button#showControls {
           display: inline-flex;
         }
       }
@@ -406,19 +452,19 @@ input {
 
 // Blog styles below
 
-.blogPostRoot {
+.blog-post-root {
   background: #1e0a30 url("https://mandelbrot.site/static/blog-background.png")
     center / cover fixed !important;
 
-  .blogPost {
+  .blog-post {
     display: flex;
-    gap: 12px;
-    text-shadow: 0 0 2px #000;
-    color: white;
-    font-size: 16px;
+    gap: var(--space-12);
+    text-shadow: 0 0 var(--space-2) var(--gray-950);
+    color: var(--gray-50);
+    font-size: var(--font-size-md);
 
     a {
-      color: white;
+      color: var(--gray-50);
 
       &.active {
         font-style: italic;
@@ -427,9 +473,9 @@ input {
     }
 
     nav {
-      border-right: 1px solid #777;
-      background-color: rgba(0, 0, 0, 0.25);
-      padding: 16px 24px;
+      border-right: 1px solid var(--gray-500);
+      background: color-mix(in sRGB, var(--gray-950) 25%, transparent);
+      padding: var(--space-16) var(--space-24);
 
       ul {
         list-style: none;
@@ -437,7 +483,7 @@ input {
         margin: 0;
 
         li.github {
-          padding-top: 24px;
+          padding-top: var(--space-24);
           display: flex;
           justify-content: center;
 
@@ -447,15 +493,15 @@ input {
         }
 
         li.topics {
-          padding-top: 24px;
+          padding-top: var(--space-24);
         }
 
         li {
-          line-height: 1.4;
-          padding: 12px 0;
+          line-height: 1.6;
+          padding: var(--space-12) 0;
 
-          .siteName {
-            line-height: 1.4;
+          .site-name {
+            line-height: 1.6;
             padding: 0;
             margin: 0;
           }
@@ -464,12 +510,12 @@ input {
     }
 
     main {
-      padding: 36px 16px 0;
+      padding: var(--space-36) var(--space-16) 0;
       flex-grow: 1;
       max-height: 100vh;
       overflow-y: auto;
 
-      .blogContent {
+      .blog-content {
         max-width: 800px;
         margin: 0 auto;
 
@@ -479,20 +525,15 @@ input {
 
         p,
         li {
-          line-height: 1.4;
+          line-height: 1.6;
         }
 
         li:not(:last-child) {
-          margin-bottom: 8px;
+          margin-bottom: var(--space-8);
         }
 
-        code {
-          display: inline;
-          padding: 2px 4px;
-        }
-
-        .bottomSpacer {
-          height: 36px;
+        .bottom-spacer {
+          height: var(--space-36);
         }
       }
     }
@@ -500,13 +541,13 @@ input {
 }
 
 @media (max-width: 800px) {
-  .blogPostRoot {
-    .blogPost {
+  .blog-post-root {
+    .blog-post {
       display: block;
 
       nav {
         border-right: none;
-        border-bottom: 1px solid #777;
+        border-bottom: 1px solid var(--gray-500);
       }
 
       main {

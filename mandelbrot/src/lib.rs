@@ -17,99 +17,8 @@ use wasm_bindgen::prelude::*;
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-/// Calculates the number of iterations it takes for a complex number to escape the set,
-/// based on the given coordinates, maximum iterations, escape radius, and exponent.
-///
-/// # Parameters
-/// - `x`: The real part of the complex number.
-/// - `y`: The imaginary part of the complex number.
-/// - `max_iterations`: The maximum number of iterations to perform.
-/// - `escape_radius`: The escape radius beyond which the function considers the number to have escaped.
-/// - `exponent`: The exponent used in the escape time algorithm.
-///
-/// # Returns
-/// A tuple containing the number of iterations it took to escape and the final value of the complex number.
-fn get_escape_iterations(
-    x: f64,
-    y: f64,
-    max_iterations: u32,
-    escape_radius: f64,
-    exponent: u32,
-) -> (u32, Complex64) {
-    let c: Complex64 = Complex64::new(x, y);
-    let mut z: Complex64 = c;
-
-    let mut iter: u32 = 0;
-
-    if exponent == 2 {
-        while z.norm_sqr() < escape_radius.powi(2) && iter < max_iterations {
-            iter += 1;
-            z = z * z + c;
-        }
-    } else {
-        while z.norm() < escape_radius && iter < max_iterations {
-            iter += 1;
-            z = z.powu(exponent) + c;
-        }
-    }
-
-    (iter, z)
-}
-
-/// Checks if a rectangle, defined by ranges of real and imaginary values, is completely within the Mandelbrot set.
-/// This is determined using a specified maximum number of iterations, escape radius, and exponent for the escape time
-/// algorithm. The Mandelbrot set is simply connected, meaning if the rectangle's border is in the set, the entire
-/// rectangle is guaranteed to be in the set as well.
-///
-/// # Parameters
-/// - `re_range`: A range of real values to check.
-/// - `im_range`: A range of imaginary values to check.
-/// - `max_iterations`: The maximum number of iterations to perform.
-/// - `escape_radius`: The escape radius beyond which the function considers a point to have escaped the set.
-/// - `exponent`: The exponent used in the escape time algorithm.
-///
-/// # Returns
-/// `true` if the entire rectangle is within the Mandelbrot set, `false` otherwise.
-fn rect_in_set(
-    re_range: itertools_num::Linspace<f64>,
-    im_range: itertools_num::Linspace<f64>,
-    max_iterations: u32,
-    escape_radius: f64,
-    exponent: u32,
-) -> bool {
-    let (top, bottom) = (
-        im_range.clone().next().unwrap(),
-        im_range.clone().last().unwrap(),
-    );
-    for re in re_range.clone() {
-        let top_in_set = get_escape_iterations(re, top, max_iterations, escape_radius, exponent).0
-            == max_iterations;
-        let bottom_in_set =
-            get_escape_iterations(re, bottom, max_iterations, escape_radius, exponent).0
-                == max_iterations;
-        if !top_in_set || !bottom_in_set {
-            return false;
-        }
-    }
-
-    let (left, right) = (
-        re_range.clone().next().unwrap(),
-        re_range.clone().last().unwrap(),
-    );
-    for im in im_range {
-        let left_in_set = get_escape_iterations(left, im, max_iterations, escape_radius, exponent)
-            .0
-            == max_iterations;
-        let right_in_set =
-            get_escape_iterations(right, im, max_iterations, escape_radius, exponent).0
-                == max_iterations;
-        if !left_in_set || !right_in_set {
-            return false;
-        }
-    }
-
-    true
-}
+const ESCAPE_RADIUS: f64 = 3.0;
+type RgbColor = [u8; 3];
 
 const NUM_COLOR_CHANNELS: usize = 4;
 
@@ -161,6 +70,162 @@ static REVERSE_COLOR_PALETTES: Lazy<HashMap<String, colorous::Gradient>> = Lazy:
 
     map
 });
+
+/// Performs the escape time algorithm for the quadratic Mandelbrot set (exponent = 2).
+///
+/// # Parameters
+/// - `c`: The complex number to iterate on.
+/// - `max_iterations`: The maximum number of iterations to perform.
+/// - `escape_radius_squared`: The square of the escape radius.
+///
+/// # Returns
+/// A tuple containing the number of iterations and the final complex value.
+fn calculate_escape_iterations_quadratic(
+    c: Complex64,
+    max_iterations: u32,
+    escape_radius_squared: f64,
+) -> (u32, Complex64) {
+    let mut z = c;
+    let mut iter = 0;
+
+    while z.norm_sqr() < escape_radius_squared && iter < max_iterations {
+        z = z * z + c;
+        iter += 1;
+    }
+
+    (iter, z)
+}
+
+/// Performs the escape time algorithm for the general Mandelbrot set (exponent > 2).
+///
+/// # Parameters
+/// - `c`: The complex number to iterate on.
+/// - `max_iterations`: The maximum number of iterations to perform.
+/// - `escape_radius`: The escape radius.
+/// - `exponent`: The exponent used in the iteration formula.
+///
+/// # Returns
+/// A tuple containing the number of iterations and the final complex value.
+fn calculate_escape_iterations_general(
+    c: Complex64,
+    max_iterations: u32,
+    escape_radius: f64,
+    exponent: u32,
+) -> (u32, Complex64) {
+    let mut z = c;
+    let mut iter = 0;
+
+    while z.norm() < escape_radius && iter < max_iterations {
+        z = z.powu(exponent) + c;
+        iter += 1;
+    }
+
+    (iter, z)
+}
+
+/// Calculates the number of iterations it takes for a complex number to escape the set,
+/// based on the given coordinates, maximum iterations, escape radius, and exponent.
+///
+/// # Parameters
+/// - `x`: The real part of the complex number.
+/// - `y`: The imaginary part of the complex number.
+/// - `max_iterations`: The maximum number of iterations to perform.
+/// - `exponent`: The exponent used in the escape time algorithm.
+///
+/// # Returns
+/// A tuple containing the number of iterations it took to escape and the final value of the complex number.
+fn calculate_escape_iterations(
+    x: f64,
+    y: f64,
+    max_iterations: u32,
+    exponent: u32,
+) -> (u32, Complex64) {
+    let c = Complex64::new(x, y);
+
+    if exponent == 2 {
+        calculate_escape_iterations_quadratic(c, max_iterations, ESCAPE_RADIUS.powi(2))
+    } else {
+        calculate_escape_iterations_general(c, max_iterations, ESCAPE_RADIUS, exponent)
+    }
+}
+
+/// Checks if a point is within the Mandelbrot set.
+///
+/// # Parameters
+/// - `re`: The real part of the complex number.
+/// - `im`: The imaginary part of the complex number.
+/// - `max_iterations`: The maximum number of iterations to perform.
+/// - `exponent`: The exponent used in the escape time algorithm.
+///
+/// # Returns
+/// `true` if the point is within the Mandelbrot set, `false` otherwise.
+fn point_in_set(re: f64, im: f64, max_iterations: u32, exponent: u32) -> bool {
+    calculate_escape_iterations(re, im, max_iterations, exponent).0 == max_iterations
+}
+
+/// Checks if a rectangle, defined by ranges of real and imaginary values, is completely within the Mandelbrot set.
+/// This is determined using a specified maximum number of iterations, escape radius, and exponent for the escape time
+/// algorithm. The Mandelbrot set is simply connected, meaning if the rectangle's border is in the set, the entire
+/// rectangle is guaranteed to be in the set as well.
+///
+/// # Parameters
+/// - `re_range`: A range of real values to check.
+/// - `im_range`: A range of imaginary values to check.
+/// - `max_iterations`: The maximum number of iterations to perform.
+/// - `exponent`: The exponent used in the escape time algorithm.
+///
+/// # Returns
+/// `true` if the entire rectangle is within the Mandelbrot set, `false` otherwise.
+fn rect_in_set(
+    re_range: itertools_num::Linspace<f64>,
+    im_range: itertools_num::Linspace<f64>,
+    max_iterations: u32,
+    exponent: u32,
+) -> bool {
+    let (re_min, re_max) = (
+        re_range.clone().next().unwrap(),
+        re_range.clone().last().unwrap(),
+    );
+    let (im_min, im_max) = (
+        im_range.clone().next().unwrap(),
+        im_range.clone().last().unwrap(),
+    );
+
+    // Check the four corners of the rectangle
+    let corners = [
+        (re_min, im_min),
+        (re_min, im_max),
+        (re_max, im_min),
+        (re_max, im_max),
+    ];
+
+    // If any corner is not in the set, the rectangle is not entirely in the set
+    if corners
+        .iter()
+        .any(|&(re, im)| !point_in_set(re, im, max_iterations, exponent))
+    {
+        return false;
+    }
+
+    // Check the borders of the rectangle
+    for re in re_range {
+        if !point_in_set(re, im_min, max_iterations, exponent)
+            || !point_in_set(re, im_max, max_iterations, exponent)
+        {
+            return false;
+        }
+    }
+
+    for im in im_range {
+        if !point_in_set(re_min, im, max_iterations, exponent)
+            || !point_in_set(re_max, im, max_iterations, exponent)
+        {
+            return false;
+        }
+    }
+
+    true
+}
 
 /// Represents a valid color space that can be used to transform colors.
 #[wasm_bindgen]
@@ -246,25 +311,174 @@ pub fn transform_color(
     transformed_color
 }
 
-/// Generates a image of the Mandelbrot set given the bounds, number of iterations,
-/// exponent for escape time algorithm, image side length, and color scheme.
+/// Determines the color palette to use based on the given color scheme and reverse colors option.
 ///
 /// # Parameters
-/// - `re_min`: The minimum real value (left side of the image).
-/// - `re_max`: The maximum real value (right side of the image).
-/// - `im_min`: The minimum imaginary value (bottom of the image).
-/// - `im_max`: The maximum imaginary value (top of the image).
+/// - `color_scheme`: The name of the color scheme to use.
+/// - `reverse_colors`: Whether to reverse the colors of the color scheme.
+///
+/// # Returns
+/// A tuple containing the selected color palette and whether the colors should be reversed.
+fn get_color_palette(
+    color_scheme: &str,
+    reverse_colors: bool,
+) -> (&'static colorous::Gradient, bool) {
+    let palette = COLOR_PALETTES
+        .get(color_scheme)
+        .or_else(|| REVERSE_COLOR_PALETTES.get(color_scheme))
+        .unwrap_or(&colorous::TURBO);
+
+    let should_reverse_colors = if REVERSE_COLOR_PALETTES.contains_key(color_scheme) {
+        !reverse_colors
+    } else {
+        reverse_colors
+    };
+
+    (palette, should_reverse_colors)
+}
+
+/// Calculates the color for a given point in the Mandelbrot set.
+///
+/// # Parameters
+/// - `re`: The real part of the complex number.
+/// - `im`: The imaginary part of the complex number.
+/// - `max_iterations`: The maximum number of iterations to perform.
+/// - `exponent`: The exponent used in the escape time algorithm.
+/// - `palette`: The color palette to use.
+/// - `should_reverse_colors`: Whether to reverse the colors of the color scheme.
+/// - `scaled_max_iterations`: The scaled maximum number of iterations.
+/// - `color_space`: The color space to use for color transformations.
+/// - `shift_hue_amount`: The amount to shift the hue by.
+/// - `saturate_amount`: The amount to saturate the color by.
+/// - `lighten_amount`: The amount to lighten the color by.
+/// - `smooth_coloring`: Whether to use smooth coloring.
+///
+/// # Returns
+/// An array of 3 u8 values representing the RGB color.
+fn compute_pixel_color(
+    re: f64,
+    im: f64,
+    max_iterations: u32,
+    exponent: u32,
+    palette: &colorous::Gradient,
+    should_reverse_colors: bool,
+    scaled_max_iterations: usize,
+    color_space: &ValidColorSpace,
+    shift_hue_amount: f32,
+    saturate_amount: f32,
+    lighten_amount: f32,
+    smooth_coloring: bool,
+) -> RgbColor {
+    let (escape_iterations, z) = calculate_escape_iterations(re, im, max_iterations, exponent);
+
+    if escape_iterations == max_iterations {
+        [0, 0, 0]
+    } else {
+        let smoothed_value = if smooth_coloring {
+            // See: https://iquilezles.org/articles/msetsmooth/
+            f64::from(escape_iterations)
+                - ((z.norm().ln() / ESCAPE_RADIUS.ln()).ln() / f64::from(exponent).ln())
+        } else {
+            f64::from(escape_iterations)
+        };
+
+        let mut scaled_value = (smoothed_value * 20.0) as usize;
+
+        if should_reverse_colors {
+            scaled_value = scaled_max_iterations - scaled_value;
+        }
+
+        let color = palette.eval_rational(scaled_value, scaled_max_iterations);
+
+        transform_color(
+            color,
+            color_space,
+            shift_hue_amount,
+            saturate_amount,
+            lighten_amount,
+        )
+        .as_array()
+    }
+}
+
+/// Generates the Mandelbrot set image data.
+///
+/// # Parameters
+/// - `re_range`: The range of real values.
+/// - `im_range`: The range of imaginary values.
 /// - `max_iterations`: The maximum number of iterations to perform.
 /// - `exponent`: The exponent used in the escape time algorithm.
 /// - `image_width`: The width of the image, in pixels.
-/// - `image_height: The height of the image, in pixels.
-/// - `color_scheme`: The name of the color scheme to use.
-/// - `_reverse_colors`: Whether to reverse the colors of the color scheme.
+/// - `image_height`: The height of the image, in pixels.
+/// - `palette`: The color palette to use.
+/// - `should_reverse_colors`: Whether to reverse the colors of the color scheme.
+/// - `scaled_max_iterations`: The scaled maximum number of iterations.
+/// - `color_space`: The color space to use for color transformations.
+/// - `shift_hue_amount`: The amount to shift the hue by.
+/// - `saturate_amount`: The amount to saturate the color by.
+/// - `lighten_amount`: The amount to lighten the color by.
+/// - `smooth_coloring`: Whether to use smooth coloring.
 ///
 /// # Returns
 /// A vector of bytes representing the RGBA color values of the image.
+fn render_mandelbrot_set(
+    re_range: itertools_num::Linspace<f64>,
+    im_range: itertools_num::Linspace<f64>,
+    max_iterations: u32,
+    exponent: u32,
+    image_width: usize,
+    image_height: usize,
+    palette: &colorous::Gradient,
+    should_reverse_colors: bool,
+    scaled_max_iterations: usize,
+    color_space: &ValidColorSpace,
+    shift_hue_amount: f32,
+    saturate_amount: f32,
+    lighten_amount: f32,
+    smooth_coloring: bool,
+) -> Vec<u8> {
+    let output_size: usize = image_width * image_height * NUM_COLOR_CHANNELS;
+    let mut img: Vec<u8> = vec![0; output_size];
+
+    for (x, im) in im_range.enumerate() {
+        for (y, re) in re_range.clone().enumerate() {
+            let pixel = compute_pixel_color(
+                re,
+                im,
+                max_iterations,
+                exponent,
+                palette,
+                should_reverse_colors,
+                scaled_max_iterations,
+                color_space,
+                shift_hue_amount,
+                saturate_amount,
+                lighten_amount,
+                smooth_coloring,
+            );
+
+            let index = (x * image_width + y) * NUM_COLOR_CHANNELS;
+            img[index] = pixel[0];
+            img[index + 1] = pixel[1];
+            img[index + 2] = pixel[2];
+            img[index + 3] = 255;
+        }
+    }
+
+    img
+}
+
+/// Creates a solid black image
+fn create_solid_black_image(image_width: usize, image_height: usize) -> Vec<u8> {
+    vec![0, 0, 0, 255]
+        .into_iter()
+        .cycle()
+        .take(image_width * image_height * NUM_COLOR_CHANNELS)
+        .collect()
+}
+
 #[wasm_bindgen]
-pub fn get_mandelbrot_image(
+pub fn get_mandelbrot_set_image(
     re_min: f64,
     re_max: f64,
     im_min: f64,
@@ -279,101 +493,35 @@ pub fn get_mandelbrot_image(
     saturate_amount: f32,
     lighten_amount: f32,
     color_space: ValidColorSpace,
+    smooth_coloring: bool,
 ) -> Vec<u8> {
-    let mut palette = &colorous::TURBO;
-    let mut should_reverse_colors = reverse_colors;
-
-    if COLOR_PALETTES.contains_key(&color_scheme) {
-        palette = COLOR_PALETTES.get(&color_scheme).unwrap();
-    }
-
-    if REVERSE_COLOR_PALETTES.contains_key(&color_scheme) {
-        palette = REVERSE_COLOR_PALETTES.get(&color_scheme).unwrap();
-        should_reverse_colors = !should_reverse_colors;
-    }
-
-    let output_size: usize = image_width * image_height * NUM_COLOR_CHANNELS;
+    let (palette, should_reverse_colors) = get_color_palette(&color_scheme, reverse_colors);
 
     let re_range = linspace(re_min, re_max, image_width);
     let im_range = linspace(im_min, im_max, image_height);
 
-    let enumerated_re_range = re_range.clone().enumerate();
-    let enumerated_im_range = im_range.clone().enumerate();
-
-    let palette_scale_factor = 20.0;
-
-    let scaled_max_iterations = (max_iterations * palette_scale_factor as u32) as usize;
-
-    let min_channel_value = 0;
-    let max_channel_value = 255;
-
-    let rgb_black = [min_channel_value; 3];
-    let rgba_black = [
-        min_channel_value,
-        min_channel_value,
-        min_channel_value,
-        max_channel_value,
-    ];
-
-    // radius has to be >=3 for color smoothing
-    let escape_radius = 3.0;
-
-    if rect_in_set(re_range, im_range, max_iterations, escape_radius, exponent) {
-        let black_pixels = rgba_black
-            .iter()
-            .cycle()
-            .take(output_size)
-            .cloned()
-            .collect();
-
-        return black_pixels;
+    if rect_in_set(re_range.clone(), im_range.clone(), max_iterations, exponent) {
+        return create_solid_black_image(image_width, image_height);
     }
 
-    // Canvas API expects UInt8ClampedArray
-    let mut img: Vec<u8> = vec![0; output_size]; // [ r, g, b, a, r, g, b, a, r, g, b, a... ]
+    let scaled_max_iterations = (max_iterations * 20) as usize;
 
-    for (x, im) in enumerated_im_range {
-        for (y, re) in enumerated_re_range.clone() {
-            let (escape_iterations, z) =
-                get_escape_iterations(re, im, max_iterations, escape_radius, exponent);
-
-            let pixel: [u8; 3] = if escape_iterations == max_iterations {
-                rgb_black
-            } else {
-                // See: https://iquilezles.org/articles/msetsmooth/
-                let smoothed_value = f64::from(escape_iterations)
-                    - ((z.norm().ln() / escape_radius.ln()).ln() / f64::from(exponent).ln());
-
-                // more colors to reduce banding
-                let mut scaled_value = (smoothed_value * palette_scale_factor) as usize;
-
-                if should_reverse_colors {
-                    scaled_value = scaled_max_iterations - scaled_value;
-                }
-
-                let color = palette.eval_rational(scaled_value, scaled_max_iterations);
-
-                transform_color(
-                    color,
-                    &color_space,
-                    shift_hue_amount,
-                    saturate_amount,
-                    lighten_amount,
-                )
-                .as_array()
-            };
-
-            // index = ((current row * row length) + current column) * 4 to fit r,g,b,a values
-            let index = (x * image_width + y) * NUM_COLOR_CHANNELS;
-
-            img[index] = pixel[0]; // r
-            img[index + 1] = pixel[1]; // g
-            img[index + 2] = pixel[2]; // b
-            img[index + 3] = max_channel_value; // a
-        }
-    }
-
-    img
+    render_mandelbrot_set(
+        re_range,
+        im_range,
+        max_iterations,
+        exponent,
+        image_width,
+        image_height,
+        palette,
+        should_reverse_colors,
+        scaled_max_iterations,
+        &color_space,
+        shift_hue_amount,
+        saturate_amount,
+        lighten_amount,
+        smooth_coloring,
+    )
 }
 
 /// Initializes the module. This function is specifically designed to be called
