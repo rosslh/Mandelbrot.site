@@ -3,7 +3,7 @@ import debounce from "lodash/debounce";
 import throttle from "lodash/throttle";
 import snakeCase from "lodash/snakeCase";
 import type MandelbrotMap from "./MandelbrotMap";
-import api from "./api";
+import * as api from "./api";
 import { NumberInput, SelectInput, CheckboxInput, SliderInput } from "./types";
 
 class MandelbrotControls {
@@ -219,8 +219,12 @@ class MandelbrotControls {
       if (saveImageDialog.open) {
         saveImageDialog.close();
       } else {
-        widthInput.value = String(window.screen.width * 2);
-        heightInput.value = String(window.screen.height * 2);
+        widthInput.value = String(
+          window.screen.width * 2 * (window.devicePixelRatio || 1),
+        );
+        heightInput.value = String(
+          window.screen.height * 2 * (window.devicePixelRatio || 1),
+        );
         saveImageDialog.showModal();
       }
     };

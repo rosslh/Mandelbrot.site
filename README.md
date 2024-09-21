@@ -22,25 +22,25 @@ Mandelbrot.site offers a variety of features to enhance your experience:
 
 - **Zoom in** by scrolling or selecting a region.
 - Adjust the **detail level** by modifying the iteration count or resolution.
-- Explore **multibrot sets** by changing the exponent parameter.
-- Download **high-resolution images** of your view.
-- Customize your experience with different **color palettes**.
-- View and update **viewport coordinates** on the complex plane.
+- Download **high-resolution images** of your current view.
 - Generate URLs to **share** your favorite views.
+- Customize your experience with different **color palettes**.
+- Explore **multibrot sets** by changing the exponent parameter.
+- View and update **viewport coordinates** on the complex plane.
 
 ## Gallery
 
 Explore some stunning images generated with Mandelbrot.site:
 
-<img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-4.png" height="200px" alt="Mandelbrot Example 1"> <img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-2.png" height="200px" alt="Mandelbrot Example 2">
+<img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-01.png" height="200px" alt="Mandelbrot Example 1"> <img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-02.png" height="200px" alt="Mandelbrot Example 2">
 
-[Explore more images](/example-images)
+[View more images](/example-images)
 
 ## Architecture
 
 Mandelbrot.site is built using modern web technologies to deliver a high-performance, interactive tool for exploring fractals. The computational backend is implemented in [Rust](https://github.com/rust-lang/rust), chosen for its performance and safety features. This Rust code is compiled to [WebAssembly](https://webassembly.org/) (Wasm) using the [wasm-pack](https://github.com/rustwasm/wasm-pack) plugin, enabling high-speed computations directly in the browser. On the frontend, the user interface is crafted with [TypeScript](https://github.com/microsoft/TypeScript), enhancing code quality and maintainability. [Leaflet.js](https://github.com/Leaflet/Leaflet) is creatively adapted to render the Mandelbrot set tiles in a zoomable, map-like interface.
 
-For performance optimization, Mandelbrot.site employs [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API) via the [threads.js](https://github.com/andywer/threads.js) library. This setup prevents intensive computations from blocking the main browser thread by creating a pool of workers that handle the generation of Mandelbrot set tiles in parallel. A key optimization technique used is "rectangle checking," which saves computation time for areas entirely within the set by checking only the perimeter of a tile.
+For performance optimization, it employs [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API) via the [threads.js](https://github.com/andywer/threads.js) library. This setup prevents intensive computations from blocking the main browser thread by creating a pool of workers that handle the generation of Mandelbrot set tiles in parallel. A key optimization technique used is "rectangle checking," which saves computation time for areas entirely within the set by checking only the perimeter of a tile.
 
 This robust architecture ensures that Mandelbrot.site provides a seamless and responsive experience for users exploring the intricate details of the Mandelbrot set directly in their web browser.
 
@@ -66,7 +66,7 @@ To set up and run the project on your local environment, navigate to the `client
 
 - **Mandelbrot set implementation**: [`mandelbrot/src/lib.rs`](mandelbrot/src/lib.rs)
 - **Rust unit tests**: [`mandelbrot/src/lib_test.rs`](mandelbrot/src/lib_test.rs)
-- **TypeScript entry point**: [`client/js/main.ts`](client/js/main.ts)
+- **TypeScript entry point**: [`client/js/index.ts`](client/js/index.ts)
 
 ## Contributors
 

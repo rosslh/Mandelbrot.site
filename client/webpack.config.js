@@ -54,7 +54,7 @@ for (const file of fs.readdirSync(blogDir)) {
 }
 
 const appConfig = {
-  entry: "./js/main.ts",
+  entry: "./js/index.ts",
   plugins: [
     new Dotenv({
       systemvars: true,
