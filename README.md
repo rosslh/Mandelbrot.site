@@ -61,4 +61,4 @@ Many thanks to the following contributors who have helped shape this project:
 | <img src="https://avatars.githubusercontent.com/u/122646?v=4" width="50" height="50" alt="Joseph Weissman">        | **Joseph Weissman**      | [jweissman](https://github.com/jweissman)                                   |
 | <img src="https://avatars.githubusercontent.com/u/78155393?v=4" width="50" height="50" alt="Shubhankar Shandilya"> | **Shubhankar Shandilya** | [shubhankar-shandilya-india](https://github.com/shubhankar-shandilya-india) |
 
-Want to contribute? Check out the list of [open issues](https://github.com/rosslh/Mandelbrot.site/issues) and read our [contributing guidelines](CONTRIBUTING.md#your-first-code-contribution).
+Want to contribute? Check out the list of [open issues](https://github.com/rosslh/Mandelbrot.site/issues) and read our [contributing guidelines](CONTRIBUTING.md).
