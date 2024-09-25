@@ -11,6 +11,14 @@ const camelCase = require("lodash/camelCase");
 const fromPairs = require("lodash/fromPairs");
 const Dotenv = require("dotenv-webpack");
 
+if (!fs.existsSync("./dist")) {
+  fs.mkdirSync("./dist");
+}
+
+const privacyPolicySrc = path.join(__dirname, "html", "privacy-policy.html");
+const privacyPolicyDest = path.join(__dirname, "dist", "privacy-policy.html");
+fs.copyFileSync(privacyPolicySrc, privacyPolicyDest);
+
 const blogDir = "./blog";
 for (const file of fs.readdirSync(blogDir)) {
   if (file.endsWith(".md")) {
@@ -44,10 +52,6 @@ for (const file of fs.readdirSync(blogDir)) {
       slug,
       ...linkClasses,
     });
-
-    if (!fs.existsSync("./dist")) {
-      fs.mkdirSync("./dist");
-    }
 
     fs.writeFileSync(path.join("./dist", htmlFile), result);
   }

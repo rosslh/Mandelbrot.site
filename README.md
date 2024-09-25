@@ -14,6 +14,7 @@
   <img src="https://img.shields.io/github/check-runs/rosslh/mandelbrot.site/main?style=flat&label=Checks" alt="GitHub branch check runs">
   <img src="https://img.shields.io/uptimerobot/status/m792388109-4c544ded2b0e440130ddd401?up_message=online&style=flat&label=Status" alt="Uptime Robot status">
   <img src="https://img.shields.io/uptimerobot/ratio/m792388109-4c544ded2b0e440130ddd401?style=flat&label=Uptime%20(1mo)" alt="Uptime Robot ratio (30 days)">
+  <img src="https://img.shields.io/badge/License-MIT-brightgreen?style=flat" alt="MIT license">
 </p>
 
 ## Features
@@ -23,7 +24,7 @@ Mandelbrot.site offers a variety of features to enhance your experience:
 - **Zoom in** by scrolling or selecting a region.
 - Adjust the **detail level** by modifying the iteration count or resolution.
 - Download **high-resolution images** of your current view.
-- Generate URLs to **share** your favorite views.
+- Generate URLs to **share** your favorite Mandelbrot set locations.
 - Customize your experience with different **color palettes**.
 - Explore **multibrot sets** by changing the exponent parameter.
 - View and update **viewport coordinates** on the complex plane.
@@ -46,33 +47,15 @@ This robust architecture ensures that Mandelbrot.site provides a seamless and re
 
 ## Development
 
-This project requires [Node.js](https://nodejs.org/) to be installed on your system. Check the [`.nvmrc`](client/.nvmrc) file for the recommended Node.js version.
+This project requires [Node.js](https://nodejs.org/) to be installed on your system. Check the [`client/.nvmrc`](client/.nvmrc) file for the recommended Node.js version. Development scripts are available in [`client/package.json`](client/package.json).
 
-### Commands
-
-To set up and run the project on your local environment, navigate to the `client` directory and use the following commands.
-
-- **Install dependencies**: `npm install`
-- **Build the project**: `npm run build`
-- **Start development server**: `npm run dev`
-- **Preview production build**: `npm run serve`
-- **Check for type errors**: `npm run typecheck`
-- **Identify code issues**: `npm run lint`
-- **Format the code**: `npm run format`
-- **Run Rust tests**: `npm run test`
-- **Cleanup**: `npm run clean` - removes caches and build artifacts
-
-### Project Structure
-
-- **Mandelbrot set implementation**: [`mandelbrot/src/lib.rs`](mandelbrot/src/lib.rs)
-- **Rust unit tests**: [`mandelbrot/src/lib_test.rs`](mandelbrot/src/lib_test.rs)
-- **TypeScript entry point**: [`client/js/index.ts`](client/js/index.ts)
+A complete guide can be found in [CONTRIBUTING.md](CONTRIBUTING.md#your-first-code-contribution).
 
 ## Contributors
 
 Many thanks to the following contributors who have helped shape this project:
 
-| Avatar                                                                                                             | Name                     | GitHub Profile                                                              |
+|                                                                                                                    | Name                     | GitHub Profile                                                              |
 | ------------------------------------------------------------------------------------------------------------------ | ------------------------ | --------------------------------------------------------------------------- |
 | <img src="https://avatars.githubusercontent.com/u/8635605?v=4" width="60" height="60" alt="Ross Hill">             | **Ross Hill**            | [rosslh](https://github.com/rosslh)                                         |
 | <img src="https://avatars.githubusercontent.com/u/122646?v=4" width="60" height="60" alt="Joseph Weissman">        | **Joseph Weissman**      | [jweissman](https://github.com/jweissman)                                   |

@@ -30,6 +30,10 @@
   <loc>https://mandelbrot.site/why-mandelbrot-set-important</loc>
   <priority>0.80</priority>
 </url>
+<url>
+  <loc>https://mandelbrot.site/privacy-policy</loc>
+  <priority>0.60</priority>
+</url>
 
 
 </urlset>
