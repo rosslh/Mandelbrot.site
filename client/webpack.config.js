@@ -11,47 +11,47 @@ const camelCase = require("lodash/camelCase");
 const fromPairs = require("lodash/fromPairs");
 const Dotenv = require("dotenv-webpack");
 
-const blogDir = "./blog";
-for (const file of fs.readdirSync(blogDir)) {
-  if (file.endsWith(".md")) {
-    const md = fs.readFileSync(path.join(blogDir, file), "utf8");
-    const metadata = frontMatter(md).attributes;
-    const html = marked(md.replace(/^---$.*^---$/ms, ""));
-    const htmlFile = file.replace(".md", ".html");
-    const blogTemplate = fs.readFileSync("./html/blog-template.html", "utf8");
-
-    const slug = htmlFile.replace(/\.html$/, "");
-    const slugCamel = camelCase(slug);
-
-    const linkClasses = fromPairs(
-      [
-        "howMandelbrotSiteWasBuiltClass",
-        "whatIsMandelbrotSetClass",
-        "historyOfMandelbrotSetClass",
-        "whoWasBenoitMandelbrotClass",
-        "whyMandelbrotSetImportantClass",
-      ].map((c) => {
-        return [c, slugCamel === c.split("Class")[0] ? "active" : ""];
-      }),
-    );
-
-    const result = template(blogTemplate, {
-      interpolate: /{{([\s\S]+?)}}/g,
-    })({
-      title: metadata.title,
-      description: metadata.excerpt,
-      content: html,
-      slug,
-      ...linkClasses,
-    });
-
-    if (!fs.existsSync("./dist")) {
-      fs.mkdirSync("./dist");
-    }
-
-    fs.writeFileSync(path.join("./dist", htmlFile), result);
-  }
-}
+//const blogDir = "./blog";
+//for (const file of fs.readdirSync(blogDir)) {
+//  if (file.endsWith(".md")) {
+//    const md = fs.readFileSync(path.join(blogDir, file), "utf8");
+//    const metadata = frontMatter(md).attributes;
+//    const html = marked(md.replace(/^---$.*^---$/ms, ""));
+//    const htmlFile = file.replace(".md", ".html");
+//    const blogTemplate = fs.readFileSync("./html/blog-template.html", "utf8");
+//
+//    const slug = htmlFile.replace(/\.html$/, "");
+//    const slugCamel = camelCase(slug);
+//
+//    const linkClasses = fromPairs(
+//      [
+//        "howMandelbrotSiteWasBuiltClass",
+//        "whatIsMandelbrotSetClass",
+//        "historyOfMandelbrotSetClass",
+//        "whoWasBenoitMandelbrotClass",
+//        "whyMandelbrotSetImportantClass",
+//      ].map((c) => {
+//        return [c, slugCamel === c.split("Class")[0] ? "active" : ""];
+//      }),
+//    );
+//
+//    const result = template(blogTemplate, {
+//      interpolate: /{{([\s\S]+?)}}/g,
+//    })({
+//      title: metadata.title,
+//      description: metadata.excerpt,
+//      content: html,
+//      slug,
+//      ...linkClasses,
+//    });
+//
+//    if (!fs.existsSync("./dist")) {
+//      fs.mkdirSync("./dist");
+//    }
+//
+//    fs.writeFileSync(path.join("./dist", htmlFile), result);
+//  }
+//}
 
 const appConfig = {
   entry: "./js/index.ts",
