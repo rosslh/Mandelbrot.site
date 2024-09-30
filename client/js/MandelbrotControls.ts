@@ -29,7 +29,7 @@ class MandelbrotControls {
   private setupNumberInputs() {
     const numberInputs: NumberInput[] = [
       { id: "iterations", minValue: 1, maxValue: 10 ** 9 },
-      { id: "exponent", minValue: 2, maxValue: 10 ** 9, resetView: true },
+//      { id: "exponent", minValue: 2, maxValue: 10 ** 9, resetView: true },
       { id: "re", minValue: -2, maxValue: 2, allowFraction: true },
       { id: "im", minValue: -2, maxValue: 2, allowFraction: true },
       { id: "zoom", minValue: 0, maxValue: 48 },

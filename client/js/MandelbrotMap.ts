@@ -46,8 +46,8 @@ class MandelbrotMap extends L.Map {
     this.createPool();
     this.mapId = htmlId;
     this.mandelbrotLayer = new MandelbrotLayer().addTo(this);
-    this.initialConfig = { ...initialConfig };
-    this.config = { ...initialConfig };
+    this.initialConfig = { ...initialConfig, exponent: 2 };
+    this.config = { ...initialConfig, exponent: 2 };
     this.controls = new MandelbrotControls(this);
 
     this.setView(
@@ -282,7 +282,7 @@ class MandelbrotMap extends L.Map {
     const im = queryParams.get("im");
     const zoom = queryParams.get("z");
     const iterations = queryParams.get("i");
-    const exponent = queryParams.get("e");
+    // const exponent = queryParams.get("e");
     const colorScheme = queryParams.get("c");
     const reverseColors = queryParams.get("r");
     const shiftHueAmount = queryParams.get("h");
@@ -301,11 +301,11 @@ class MandelbrotMap extends L.Map {
         (document.getElementById("iterations") as HTMLInputElement).value =
           iterations;
       }
-      if (exponent) {
-        this.config.exponent = Number(exponent);
-        (document.getElementById("exponent") as HTMLInputElement).value =
-          exponent;
-      }
+      // if (exponent) {
+      //   this.config.exponent = Number(exponent);
+      //   (document.getElementById("exponent") as HTMLInputElement).value =
+      //     exponent;
+      // }
       if (colorScheme) {
         this.config.colorScheme = colorScheme;
         (document.getElementById("colorScheme") as HTMLSelectElement).value =

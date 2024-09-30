@@ -6,7 +6,7 @@ window.addEventListener("load", () => {
     htmlId: "leaflet",
     initialConfig: {
       iterations: 200,
-      exponent: 2,
+//      exponent: 2,
       colorScheme: "turbo",
       lightenAmount: 0,
       saturateAmount: 0,
