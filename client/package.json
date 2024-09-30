@@ -1,7 +1,6 @@
 {
   "author": "Ross Hill <ross@rosshill.ca>",
   "name": "mandelbrot.site",
-  "version": "1.0.1",
   "repository": "https://github.com/rosslh/mandelbrot.site",
   "license": "MIT",
   "scripts": {
@@ -49,8 +48,5 @@
     "leaflet": "1.7.1",
     "lodash": "^4.17.21",
     "threads": "^1.7.0"
-  },
-  "engines": {
-    "node": ">=18.14.0"
   }
 }
