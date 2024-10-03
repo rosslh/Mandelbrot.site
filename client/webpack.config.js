@@ -11,6 +11,7 @@ const camelCase = require("lodash/camelCase");
 const fromPairs = require("lodash/fromPairs");
 const Dotenv = require("dotenv-webpack");
 
+
 //const blogDir = "./blog";
 //for (const file of fs.readdirSync(blogDir)) {
 //  if (file.endsWith(".md")) {

@@ -374,6 +374,10 @@ input {
 
     details {
       border-top: none;
+
+      .details-content {
+        padding-bottom: var(--space-8);
+      }
     }
   }
 

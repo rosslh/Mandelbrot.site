@@ -1,1 +1,2 @@
-snapshots/ linguist-generated
+mandelbrot/src/snapshots/** linguist-generated
+client/html/privacy-policy.html linguist-vendored
