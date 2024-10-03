@@ -6,6 +6,8 @@ import { QueuedTask } from "threads/dist/master/pool-types";
 import MandelbrotControls from "./MandelbrotControls";
 import { ComplexBounds, MandelbrotConfig, WasmRequestPayload } from "./types";
 
+const FIXED_EXPONENT = 2;
+
 type MapWithResetView = MandelbrotMap & {
   _resetView: (center: L.LatLng | [number, number], zoom: number) => void;
 };
@@ -46,8 +48,8 @@ class MandelbrotMap extends L.Map {
     this.createPool();
     this.mapId = htmlId;
     this.mandelbrotLayer = new MandelbrotLayer().addTo(this);
-    this.initialConfig = { ...initialConfig, exponent: 2 };
-    this.config = { ...initialConfig, exponent: 2 };
+    this.initialConfig = { ...initialConfig, exponent: FIXED_EXPONENT };
+    this.config = { ...initialConfig, exponent: FIXED_EXPONENT };
     this.controls = new MandelbrotControls(this);
 
     this.setView(

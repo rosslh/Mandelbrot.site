@@ -4,7 +4,6 @@ import { FunctionThread } from "threads";
 
 export type MandelbrotConfig = {
   iterations: number;
-  exponent: number;
   colorScheme: string;
   lightenAmount: number;
   saturateAmount: number;
@@ -28,7 +27,7 @@ export type WasmRequestPayload = Omit<
 };
 
 export type NumberInput = {
-  id: "iterations" | "exponent" | "re" | "im" | "zoom";
+  id: "iterations" | "re" | "im" | "zoom";
   minValue: number;
   maxValue: number;
   resetView?: boolean;

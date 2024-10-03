@@ -10,7 +10,6 @@ import("../../mandelbrot/pkg").then((wasm) => {
       params.bounds.imMin,
       params.bounds.imMax,
       params.iterations,
-      params.exponent,
       params.imageWidth,
       params.imageHeight,
       params.colorScheme,
