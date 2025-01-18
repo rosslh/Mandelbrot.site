@@ -7,7 +7,7 @@
 <h1 align="center">Mandelbrot.site</h1>
 
 <p align="center">
-  <a href="https://mandelbrot.site">Mandelbrot.site</a> is an interactive fractal viewer that runs in the browser. It offers a fast and intuitive way to explore the Mandelbrot set and share your discoveries. Built with Rust, WebAssembly, TypeScript, and Leaflet.js.
+  <a href="https://mandelbrot.site">Mandelbrot.site</a> is an interactive fractal viewer that runs in your web browser. It offers a fast and intuitive way to explore the Mandelbrot set and share your discoveries. This website is built with Rust, WebAssembly, TypeScript, and Leaflet.js.
 </p>
 
 <p align="center">
@@ -43,7 +43,7 @@ Mandelbrot.site is built using modern web technologies to deliver a high-perform
 
 For performance optimization, it employs [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API) via the [threads.js](https://github.com/andywer/threads.js) library. This setup prevents intensive computations from blocking the main browser thread by creating a pool of workers that handle the generation of Mandelbrot set tiles in parallel. A key optimization technique used is "rectangle checking," which saves computation time for areas entirely within the set by checking only the perimeter of a tile.
 
-This robust architecture ensures that Mandelbrot.site provides a seamless and responsive experience for users exploring the intricate details of the Mandelbrot set directly in their web browser.
+This robust architecture ensures that Mandelbrot.site provides a seamless and responsive experience for users exploring the intricate details of the Mandelbrot set through an online interface.
 
 ## Development
 

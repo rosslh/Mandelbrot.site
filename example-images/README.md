@@ -14,3 +14,4 @@
 ![Mandelbrot Set Image 12](./mandelbrot-12.png)
 ![Mandelbrot Set Image 13](./mandelbrot-13.png)
 ![Mandelbrot Set Image 14](./mandelbrot-14.png)
+![Mandelbrot Set Image 15](./mandelbrot-15.png)
