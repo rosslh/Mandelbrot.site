@@ -1,20 +1,34 @@
 {
-  "name": "Mandelbrot Set Explorer",
-  "description": "Explore the infinite complexity of the Mandelbrot Set with this interactive fractal viewer. Zoom in and generate high resolution images.",
-  "short_name": "Mandelbrot",
+  "background_color": "#222222",
+  "categories": ["education", "entertainment", "games"],
+  "description": "Explore the infinite complexity of the Mandelbrot Set with this online fractal viewer. Zoom in and generate high resolution images.",
+  "dir": "ltr",
+  "display": "standalone",
   "icons": [
     {
-      "src": "/static/android-chrome-144x144.png",
-      "sizes": "144x144",
+      "purpose": "maskable",
+      "sizes": "512x512",
+      "src": "/static/icon512_maskable.png",
       "type": "image/png"
     },
     {
-      "src": "/static/mstile-150x150.png",
-      "sizes": "150x150",
+      "purpose": "any",
+      "sizes": "512x512",
+      "src": "/static/icon512_rounded.png",
+      "type": "image/png"
+    },
+    {
+      "purpose": "maskable",
+      "sizes": "192x192",
+      "src": "/static/icon192_maskable.png",
       "type": "image/png"
     }
   ],
-  "background_color": "#222222",
-  "display": "standalone",
-  "start_url": "/"
+  "id": "mandelbrot.site",
+  "lang": "en",
+  "name": "Mandelbrot Set Explorer",
+  "orientation": "any",
+  "short_name": "Mandelbrot.site",
+  "start_url": "/",
+  "theme_color": "#000000"
 }
