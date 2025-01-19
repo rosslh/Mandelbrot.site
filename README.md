@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/github/check-runs/rosslh/mandelbrot.site/main?style=flat&label=Checks" alt="GitHub branch check runs">
   <img src="https://img.shields.io/uptimerobot/status/m792388109-4c544ded2b0e440130ddd401?up_message=online&style=flat&label=Status" alt="Uptime Robot status">
   <img src="https://img.shields.io/uptimerobot/ratio/m792388109-4c544ded2b0e440130ddd401?style=flat&label=Uptime%20(1mo)" alt="Uptime Robot ratio (30 days)">
-  <img src="https://img.shields.io/badge/License-MIT-brightgreen?style=flat" alt="MIT license">
+  <img src="https://img.shields.io/badge/License-MIT-blue?style=flat" alt="MIT license">
 </p>
 
 ## Features
@@ -42,6 +42,8 @@ Explore some stunning images generated with Mandelbrot.site:
 Mandelbrot.site is built using modern web technologies to deliver a high-performance, interactive tool for exploring fractals. The computational backend is implemented in [Rust](https://github.com/rust-lang/rust), chosen for its performance and safety features. This Rust code is compiled to [WebAssembly](https://webassembly.org/) (Wasm) using the [wasm-pack](https://github.com/rustwasm/wasm-pack) plugin, enabling high-speed computations directly in the browser. On the frontend, the user interface is crafted with [TypeScript](https://github.com/microsoft/TypeScript), enhancing code quality and maintainability. [Leaflet.js](https://github.com/Leaflet/Leaflet) is creatively adapted to render the Mandelbrot set tiles in a zoomable, map-like interface.
 
 For performance optimization, it employs [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API) via the [threads.js](https://github.com/andywer/threads.js) library. This setup prevents intensive computations from blocking the main browser thread by creating a pool of workers that handle the generation of Mandelbrot set tiles in parallel. A key optimization technique used is "rectangle checking," which saves computation time for areas entirely within the set by checking only the perimeter of a tile.
+
+The application leverages [Service Workers](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API) to prioritize a local-first experience, ensuring that users can explore the Mandelbrot set and or with minimal network dependencies.
 
 This robust architecture ensures that Mandelbrot.site provides a seamless and responsive experience for users exploring the intricate details of the Mandelbrot set through an online interface.
 

@@ -10,6 +10,7 @@ const template = require("lodash/template");
 const camelCase = require("lodash/camelCase");
 const fromPairs = require("lodash/fromPairs");
 const Dotenv = require("dotenv-webpack");
+const WorkboxPlugin = require("workbox-webpack-plugin");
 
 if (!fs.existsSync("./dist")) {
   fs.mkdirSync("./dist");
@@ -57,6 +58,26 @@ for (const file of fs.readdirSync(blogDir)) {
   }
 }
 
+const oneWeekInSeconds = 60 * 60 * 24 * 7;
+
+const workbox = new WorkboxPlugin.GenerateSW({
+  clientsClaim: true,
+  skipWaiting: true,
+  cleanupOutdatedCaches: true,
+  runtimeCaching: [
+    {
+      urlPattern: /.*/,
+      handler: "StaleWhileRevalidate",
+      options: {
+        cacheName: "mandelbrot-cache",
+        expiration: {
+          maxAgeSeconds: oneWeekInSeconds,
+        },
+      },
+    },
+  ],
+});
+
 const appConfig = {
   entry: "./js/index.ts",
   plugins: [
@@ -68,6 +89,7 @@ const appConfig = {
       root: path.resolve(__dirname, "."),
     }),
     new MiniCssExtractPlugin(),
+    workbox,
   ],
   module: {
     rules: [
@@ -122,6 +144,7 @@ const workerConfig = {
     new WasmPackPlugin({
       crateDirectory: path.resolve(__dirname, "../mandelbrot"),
     }),
+    workbox,
   ],
   module: {
     rules: [
@@ -139,17 +162,6 @@ const workerConfig = {
           },
         ],
         exclude: /node_modules/,
-      },
-      {
-        test: /\.(css|scss)$/i,
-        use: [
-          {
-            loader: MiniCssExtractPlugin.loader,
-            options: { publicPath: "css/" },
-          },
-          "css-loader",
-          "sass-loader",
-        ],
       },
     ],
   },

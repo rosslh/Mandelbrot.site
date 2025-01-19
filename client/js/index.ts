@@ -1,6 +1,19 @@
 import "./static";
 import MandelbrotMap from "./MandelbrotMap";
 
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("/service-worker.js")
+      .then(() => {
+        console.log("Service worker registered.");
+      })
+      .catch((err: unknown) => {
+        console.error("Service worker registration failed:", err);
+      });
+  });
+}
+
 window.addEventListener("load", () => {
   new MandelbrotMap({
     htmlId: "leaflet",

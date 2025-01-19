@@ -5,7 +5,7 @@ excerpt: Learn about the architecture of Mandelbrot.site, an advanced web-based 
 
 Exploring the intricacies of the Mandelbrot set through a web-based viewer provides a fascinating insight into the beauty of mathematics and complex systems. This Mandelbrot set viewer leverages modern web technologies, including Rust, WebAssembly (Wasm), TypeScript, and Leaflet.js, to deliver a high-performance, interactive fractal exploration tool. This blog post delves into the technical architecture, challenges, and innovative solutions employed in the creation of this viewer.
 
-The Mandelbrot set viewer is designed to allow users to navigate and explore different regions of the Mandelbrot set in high resolution by panning and zooming. The application uses a map interface powered by Leaflet.js, which is traditionally used for geospatial data applications but has been creatively adapted for rendering fractals.
+The Mandelbrot set viewer is designed to allow users to navigate and explore different regions of the Mandelbrot set in high resolution by panning and zooming. The application uses a map interface powered by Leaflet.js, which is traditionally used for geospatial data applications but has been creatively adapted for rendering fractals. The application also employs service workers to enable a local-first approach, ensuring assets are cached for offline use and faster loading during subsequent sessions.
 
 ## Integration and Workflow
 
