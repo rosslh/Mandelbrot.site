@@ -1,6 +1,9 @@
 import "./static";
 import MandelbrotMap from "./MandelbrotMap";
 
+const mapHtmlId = "leaflet";
+const smallScreenWidthPx = 800;
+
 window.addEventListener("load", () => {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker
@@ -10,9 +13,11 @@ window.addEventListener("load", () => {
       });
   }
 
-  if (document.getElementById("leaflet")) {
+  if (document.getElementById(mapHtmlId)) {
+    const initialZoom = window.innerWidth <= smallScreenWidthPx ? 2 : 3;
+
     new MandelbrotMap({
-      htmlId: "leaflet",
+      htmlId: mapHtmlId,
       initialConfig: {
         iterations: 200,
         exponent: 2,
@@ -27,7 +32,7 @@ window.addEventListener("load", () => {
 
         re: -0.5,
         im: 0,
-        zoom: 3,
+        zoom: initialZoom,
       },
     });
   }
