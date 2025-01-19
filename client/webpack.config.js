@@ -1,34 +1,28 @@
 const path = require("path");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
-const dist = path.resolve(__dirname, "dist");
 const WasmPackPlugin = require("@wasm-tool/wasm-pack-plugin");
 const { marked } = require("marked");
 const frontMatter = require("front-matter");
 const fs = require("fs");
-const template = require("lodash/template");
 const camelCase = require("lodash/camelCase");
 const fromPairs = require("lodash/fromPairs");
 const Dotenv = require("dotenv-webpack");
 const WorkboxPlugin = require("workbox-webpack-plugin");
 
-if (!fs.existsSync("./dist")) {
-  fs.mkdirSync("./dist");
-}
+const dist = path.resolve(__dirname, "dist");
 
-const privacyPolicySrc = path.join(__dirname, "html", "privacy-policy.html");
-const privacyPolicyDest = path.join(__dirname, "dist", "privacy-policy.html");
-fs.copyFileSync(privacyPolicySrc, privacyPolicyDest);
+function getBlogPostPlugins() {
+  const blogDir = "./blog";
+  const blogPostPlugins = [];
 
-const blogDir = "./blog";
-for (const file of fs.readdirSync(blogDir)) {
-  if (file.endsWith(".md")) {
+  for (const file of fs.readdirSync(blogDir)) {
+    if (!file.endsWith(".md")) continue;
+
     const md = fs.readFileSync(path.join(blogDir, file), "utf8");
-    const metadata = frontMatter(md).attributes;
-    const html = marked(md.replace(/^---$.*^---$/ms, ""));
+    const { attributes, body } = frontMatter(md);
+    const html = marked(body);
     const htmlFile = file.replace(".md", ".html");
-    const blogTemplate = fs.readFileSync("./html/blog-template.html", "utf8");
-
     const slug = htmlFile.replace(/\.html$/, "");
     const slugCamel = camelCase(slug);
 
@@ -40,23 +34,35 @@ for (const file of fs.readdirSync(blogDir)) {
         "whoWasBenoitMandelbrotClass",
         "whyMandelbrotSetImportantClass",
       ].map((c) => {
-        return [c, slugCamel === c.split("Class")[0] ? "active" : ""];
+        const checkSlug = c.split("Class")[0];
+        return [c, slugCamel === checkSlug ? "active" : ""];
       }),
     );
 
-    const result = template(blogTemplate, {
-      interpolate: /{{([\s\S]+?)}}/g,
-    })({
-      title: metadata.title,
-      description: metadata.excerpt,
-      content: html,
-      slug,
-      ...linkClasses,
-    });
-
-    fs.writeFileSync(path.join("./dist", htmlFile), result);
+    blogPostPlugins.push(
+      new HtmlWebpackPlugin({
+        filename: htmlFile,
+        template: "./html/blog-template.html",
+        templateParameters: {
+          title: attributes.title,
+          description: attributes.excerpt,
+          content: html,
+          slug,
+          ...linkClasses,
+        },
+      }),
+    );
   }
+
+  return blogPostPlugins;
 }
+
+const privacyPolicyPlugin = new HtmlWebpackPlugin({
+  filename: "privacy-policy.html",
+  template: path.join(__dirname, "html", "privacy-policy.html"),
+});
+
+const blogPostPlugins = getBlogPostPlugins();
 
 const oneWeekInSeconds = 60 * 60 * 24 * 7;
 
@@ -81,13 +87,13 @@ const workbox = new WorkboxPlugin.GenerateSW({
 const appConfig = {
   entry: "./js/index.ts",
   plugins: [
-    new Dotenv({
-      systemvars: true,
-    }),
+    new Dotenv({ systemvars: true }),
     new HtmlWebpackPlugin({
       template: "html/index.html",
       root: path.resolve(__dirname, "."),
     }),
+    ...blogPostPlugins,
+    privacyPolicyPlugin,
     new MiniCssExtractPlugin(),
     workbox,
   ],

@@ -43,7 +43,7 @@ Mandelbrot.site is built using modern web technologies to deliver a high-perform
 
 For performance optimization, it employs [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API) via the [threads.js](https://github.com/andywer/threads.js) library. This setup prevents intensive computations from blocking the main browser thread by creating a pool of workers that handle the generation of Mandelbrot set tiles in parallel. A key optimization technique used is "rectangle checking," which saves computation time for areas entirely within the set by checking only the perimeter of a tile.
 
-The application leverages [Service Workers](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API) to prioritize a local-first experience, ensuring that users can explore the Mandelbrot set and or with minimal network dependencies.
+It is a [Progressive Web App](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps) (PWA), leveraging [Service Workers](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API) to prioritize a local-first experience. This ensures that users can explore the Mandelbrot set with minimal network dependencies.
 
 This robust architecture ensures that Mandelbrot.site provides a seamless and responsive experience for users exploring the intricate details of the Mandelbrot set through an online interface.
 
