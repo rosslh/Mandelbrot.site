@@ -3,7 +3,7 @@
   "categories": ["education", "entertainment", "games"],
   "description": "Explore the infinite complexity of the Mandelbrot Set with this online fractal viewer. Zoom in and generate high resolution images.",
   "dir": "ltr",
-  "display": "standalone",
+  "display": "minimal-ui",
   "icons": [
     {
       "purpose": "maskable",
@@ -30,5 +30,5 @@
   "orientation": "any",
   "short_name": "Mandelbrot.site",
   "start_url": "/",
-  "theme_color": "#000000"
+  "theme_color": "#2b2b2b"
 }

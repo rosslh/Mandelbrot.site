@@ -45,7 +45,7 @@ For performance optimization, it employs [Web Workers](https://developer.mozilla
 
 It is a [Progressive Web App](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps) (PWA), leveraging [Service Workers](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API) to prioritize a local-first experience. This ensures that users can explore the Mandelbrot set with minimal network dependencies.
 
-This robust architecture ensures that Mandelbrot.site provides a seamless and responsive experience for users exploring the intricate details of the Mandelbrot set through an online interface.
+This robust architecture allows Mandelbrot.site to provide a seamless and responsive experience for users exploring the intricate details of the Mandelbrot set through an online interface.
 
 ## Development
 
