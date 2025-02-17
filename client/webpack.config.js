@@ -64,8 +64,6 @@ const privacyPolicyPlugin = new HtmlWebpackPlugin({
 
 const blogPostPlugins = getBlogPostPlugins();
 
-const oneWeekInSeconds = 60 * 60 * 24 * 7;
-
 const workbox = new WorkboxPlugin.GenerateSW({
   clientsClaim: true,
   skipWaiting: true,
@@ -74,12 +72,6 @@ const workbox = new WorkboxPlugin.GenerateSW({
     {
       urlPattern: /.*/,
       handler: "StaleWhileRevalidate",
-      options: {
-        cacheName: "mandelbrot-cache",
-        expiration: {
-          maxAgeSeconds: oneWeekInSeconds,
-        },
-      },
     },
   ],
 });
