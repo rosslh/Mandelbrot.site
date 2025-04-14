@@ -181,6 +181,9 @@ html.fractal-root {
       font-weight: bold;
       padding: var(--space-16) 0;
       user-select: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
 
       &:hover {
         color: var(--gray-300);
@@ -193,6 +196,30 @@ html.fractal-root {
 
       > label {
         pointer-events: none;
+      }
+
+      .reset-button {
+        font-size: var(--font-size-sm);
+        background: none;
+        color: var(--gray-400);
+        padding: var(--space-4);
+        margin-right: var(--space-4);
+        border-radius: 50%;
+        width: 24px;
+        height: 24px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        visibility: hidden;
+
+        &:hover {
+          color: var(--gray-50);
+          background-color: var(--gray-700);
+        }
+
+        &.visible {
+          visibility: visible;
+        }
       }
     }
 

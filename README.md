@@ -49,7 +49,7 @@ This robust architecture allows Mandelbrot.site to provide a seamless and respon
 
 ## Development
 
-This project requires [Node.js](https://nodejs.org/) to be installed on your system. Check the [`client/.nvmrc`](client/.nvmrc) file for the recommended Node.js version. Development scripts are available in [`client/package.json`](client/package.json).
+This project requires [Node.js](https://nodejs.org/) and [Rust](https://rust-lang.org/) to be installed on your system. Check the [`client/.nvmrc`](client/.nvmrc) file for the recommended Node.js version. Development scripts are available in [`client/package.json`](client/package.json).
 
 A complete guide can be found in [CONTRIBUTING.md](CONTRIBUTING.md#your-first-code-contribution).
 

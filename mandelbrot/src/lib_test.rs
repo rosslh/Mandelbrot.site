@@ -261,6 +261,8 @@ mod lib_test {
                 param.lightness_shift,
                 param.color_space,
                 param.smooth_coloring,
+                0,
+                param.max_iterations,
             );
 
             let snapshot_name = format!(
@@ -370,6 +372,8 @@ mod lib_test {
                 0.0,
                 crate::ValidColorSpace::Hsl,
                 true,
+                0,
+                MAX_ITERATIONS,
             );
 
             assert_eq!(
@@ -403,6 +407,8 @@ mod lib_test {
                 0.0,
                 crate::ValidColorSpace::Hsl,
                 true,
+                0,
+                MAX_ITERATIONS,
             );
             for n in response.iter() {
                 assert!(
@@ -564,12 +570,13 @@ mod lib_test {
             2,
             palette,
             false,
-            2000,
             &color_space,
             0.0,
             0.0,
             0.0,
             true,
+            0,
+            100,
         );
         assert_eq!(color, [0, 0, 0]);
 
@@ -581,12 +588,13 @@ mod lib_test {
             2,
             palette,
             false,
-            2000,
             &color_space,
             0.0,
             0.0,
             0.0,
             true,
+            0,
+            100,
         );
         assert_eq!(color[0], 34); // Red component
         assert_eq!(color[1], 23); // Green component
@@ -606,12 +614,13 @@ mod lib_test {
         let image_height = 10;
         let palette = &colorous::TURBO;
         let should_reverse_colors = false;
-        let scaled_max_iterations = 2000;
         let color_space = ValidColorSpace::Hsl;
         let shift_hue_amount = 0.0;
         let saturate_amount = 0.0;
         let lighten_amount = 0.0;
         let smooth_coloring = true;
+        let palette_start = 0;
+        let palette_end = 100;
 
         let image = super::render_mandelbrot_set(
             re_range,
@@ -622,12 +631,13 @@ mod lib_test {
             image_height,
             palette,
             should_reverse_colors,
-            scaled_max_iterations,
             &color_space,
             shift_hue_amount,
             saturate_amount,
             lighten_amount,
             smooth_coloring,
+            palette_start,
+            palette_end,
         );
 
         assert_eq!(
@@ -635,8 +645,8 @@ mod lib_test {
             image_width * image_height * super::NUM_COLOR_CHANNELS
         );
 
-        assert_eq!(image[0..4], [44, 28, 54, 255]); // Top-left pixel
-        assert_eq!(image[396..400], [44, 28, 54, 255]); // Bottom-right pixel
+        assert_eq!(image[0..4], [44, 28, 55, 255]); // Top-left pixel
+        assert_eq!(image[396..400], [44, 28, 55, 255]); // Bottom-right pixel
     }
 
     #[test]

@@ -119,12 +119,22 @@
         </div>
       </details>
       <details open>
-        <summary class="mobile-hidden"><span>Render settings</span></summary>
+        <summary class="mobile-hidden">
+          <span>Render settings</span>
+          <button
+            type="button"
+            class="reset-button"
+            id="resetRender"
+            title="Reset render settings"
+          >
+            ↺
+          </button>
+        </summary>
         <div class="details-content">
           <div class="input-wrapper align-start">
             <label for="iterations" class="label-with-subtitle">
               <span>Iterations</span>
-              <span class="secondary">(Detail level)</span>
+              <span class="secondary">Detail level</span>
             </label>
             <input type="number" required id="iterations" name="iterations" />
           </div>
@@ -151,6 +161,14 @@
       <details class="mobile-hidden">
         <summary>
           <label for="colorScheme">Color scheme</label>
+          <button
+            type="button"
+            class="reset-button"
+            id="resetColorScheme"
+            title="Reset color scheme"
+          >
+            ↺
+          </button>
         </summary>
         <div class="details-content">
           <div class="input-wrapper">
@@ -212,10 +230,55 @@
             <input type="checkbox" id="smoothColoring" name="smoothColoring" />
             <label for="smoothColoring">Smooth coloring</label>
           </div>
+          <div class="input-wrapper">
+            <label for="paletteMinIter" class="label-with-subtitle">
+              <span>Min iterations</span>
+              <span class="secondary">Color palette start</span>
+            </label>
+            <input
+              type="number"
+              id="paletteMinIter"
+              name="paletteMinIter"
+              min="0"
+              required
+            />
+          </div>
+          <div class="input-wrapper">
+            <label for="paletteMaxIter" class="label-with-subtitle">
+              <span>Max iterations</span>
+              <span class="secondary">Color palette end</span>
+            </label>
+            <input
+              type="number"
+              id="paletteMaxIter"
+              name="paletteMaxIter"
+              min="0"
+              required
+            />
+          </div>
+          <div class="checkbox-wrapper">
+            <input
+              type="checkbox"
+              id="scaleWithIterations"
+              name="scaleWithIterations"
+              checked
+            />
+            <label for="scaleWithIterations">Scale with iterations</label>
+          </div>
         </div>
       </details>
       <details class="mobile-hidden">
-        <summary><span>Adjust colors</span></summary>
+        <summary>
+          <span>Adjust colors</span>
+          <button
+            type="button"
+            class="reset-button"
+            id="resetAdjustColors"
+            title="Reset color adjustments"
+          >
+            ↺
+          </button>
+        </summary>
         <div class="details-content">
           <datalist id="defaultSliderPosition">
             <option value="0"></option>
@@ -267,7 +330,17 @@
         </div>
       </details>
       <details class="mobile-hidden">
-        <summary><span>Coordinates</span></summary>
+        <summary>
+          <span>Coordinates</span>
+          <button
+            type="button"
+            class="reset-button"
+            id="resetCoordinates"
+            title="Reset coordinates"
+          >
+            ↺
+          </button>
+        </summary>
         <div class="details-content">
           <div class="input-wrapper">
             <label for="re">Real</label>

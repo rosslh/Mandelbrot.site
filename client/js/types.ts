@@ -13,6 +13,9 @@ export type MandelbrotConfig = {
   reverseColors: boolean;
   highDpiTiles: boolean;
   smoothColoring: boolean;
+  paletteMinIter: number;
+  paletteMaxIter: number;
+  scaleWithIterations: boolean;
   re: number;
   im: number;
   zoom: number;
@@ -20,7 +23,7 @@ export type MandelbrotConfig = {
 
 export type WasmRequestPayload = Omit<
   MandelbrotConfig,
-  "zoom" | "highDpiTiles" | "re" | "im"
+  "zoom" | "highDpiTiles" | "re" | "im" | "scaleWithIterations"
 > & {
   bounds: ComplexBounds;
   imageWidth: number;
@@ -28,7 +31,14 @@ export type WasmRequestPayload = Omit<
 };
 
 export type NumberInput = {
-  id: "iterations" | "exponent" | "re" | "im" | "zoom";
+  id:
+    | "iterations"
+    | "exponent"
+    | "re"
+    | "im"
+    | "zoom"
+    | "paletteMinIter"
+    | "paletteMaxIter";
   minValue: number;
   maxValue: number;
   resetView?: boolean;
@@ -40,7 +50,11 @@ export type SelectInput = {
 };
 
 export type CheckboxInput = {
-  id: "reverseColors" | "highDpiTiles" | "smoothColoring"; // Add "smoothColoring"
+  id:
+    | "reverseColors"
+    | "highDpiTiles"
+    | "smoothColoring"
+    | "scaleWithIterations";
 };
 
 export type SliderInput = {

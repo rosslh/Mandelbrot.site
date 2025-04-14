@@ -115,7 +115,7 @@ Now you can run the project and start making changes to the code! We recommend u
 
 ### Running the Project
 
-Once you've cloned the repository, you can begin working on the project. This project requires [Node.js](https://nodejs.org/) to be installed on your system. Check the [`.nvmrc`](client/.nvmrc) file for the recommended Node.js version.
+Once you've cloned the repository, you can begin working on the project. This project requires [Node.js](https://nodejs.org/) and [Rust](https://rust-lang.org/) to be installed on your system. Check the [`.nvmrc`](client/.nvmrc) file for the recommended Node.js version. [Rust](https://rust-lang.org/) is also required to build the project.
 
 Run all commands from within the `client` directory:
 

@@ -63,12 +63,12 @@ class MandelbrotMap extends L.Map {
     this.on("click", this.handleMapClick);
     this.on(
       "load moveend zoomend viewreset resize",
-      this.controls.throttleSetInputValues,
+      this.controls.throttleSetCoordinateInputValues,
     );
-    this.on("move", this.controls.throttleSetInputValues);
+    this.on("move", this.controls.throttleSetCoordinateInputValues);
     this.on("zoomend", () => {
       this.cancelTileTasksOnWrongZoom();
-      this.controls.throttleSetInputValues();
+      this.controls.throttleSetCoordinateInputValues();
     });
   }
 
@@ -276,6 +276,34 @@ class MandelbrotMap extends L.Map {
     });
   }
 
+  getShareUrl() {
+    const {
+      re,
+      im,
+      zoom: z,
+      iterations: i,
+      exponent: e,
+      colorScheme: c,
+      reverseColors: r,
+      shiftHueAmount: h,
+      saturateAmount: s,
+      lightenAmount: l,
+      colorSpace: cs,
+      paletteMinIter: pmin,
+      paletteMaxIter: pmax,
+    } = this.config;
+
+    const url = new URL(window.location.origin);
+
+    Object.entries({ re, im, z, i, e, c, r, h, s, l, cs, pmin, pmax }).forEach(
+      ([key, value]) => {
+        url.searchParams.set(key, String(value));
+      },
+    );
+
+    return url.toString();
+  }
+
   setConfigFromUrl() {
     const queryParams = new URLSearchParams(window.location.search);
     const re = queryParams.get("re");
@@ -290,6 +318,8 @@ class MandelbrotMap extends L.Map {
     const lightenAmount = queryParams.get("l");
     const colorSpace = queryParams.get("cs");
     const smoothColoring = queryParams.get("sc");
+    const paletteMinIter = queryParams.get("pmin");
+    const paletteMaxIter = queryParams.get("pmax");
 
     if (re && im && zoom) {
       this.config.re = Number(re);
@@ -341,6 +371,16 @@ class MandelbrotMap extends L.Map {
         (
           document.getElementById("smoothColoring") as HTMLInputElement
         ).checked = this.config.smoothColoring;
+      }
+      if (paletteMinIter) {
+        this.config.paletteMinIter = Number(paletteMinIter);
+        (document.getElementById("paletteMinIter") as HTMLInputElement).value =
+          paletteMinIter;
+      }
+      if (paletteMaxIter) {
+        this.config.paletteMaxIter = Number(paletteMaxIter);
+        (document.getElementById("paletteMaxIter") as HTMLInputElement).value =
+          paletteMaxIter;
       }
 
       window.history.replaceState({}, document.title, window.location.pathname);

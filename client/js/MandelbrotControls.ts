@@ -4,7 +4,13 @@ import throttle from "lodash/throttle";
 import snakeCase from "lodash/snakeCase";
 import type MandelbrotMap from "./MandelbrotMap";
 import * as api from "./api";
-import { NumberInput, SelectInput, CheckboxInput, SliderInput } from "./types";
+import {
+  NumberInput,
+  SelectInput,
+  CheckboxInput,
+  SliderInput,
+  MandelbrotConfig,
+} from "./types";
 
 class MandelbrotControls {
   map: MandelbrotMap;
@@ -13,9 +19,13 @@ class MandelbrotControls {
     this.map = map;
 
     this.handleInputs();
+    this.updateResetButtonsVisibility();
   }
 
-  throttleSetInputValues = throttle(() => this.setInputValues(), 200);
+  throttleSetCoordinateInputValues = throttle(() => {
+    this.setCoordinateInputValues();
+    this.updateResetButtonsVisibility();
+  }, 200);
 
   private handleInputs() {
     this.handleShortcutHints();
@@ -33,6 +43,18 @@ class MandelbrotControls {
       { id: "re", minValue: -2, maxValue: 2, allowFraction: true },
       { id: "im", minValue: -2, maxValue: 2, allowFraction: true },
       { id: "zoom", minValue: 0, maxValue: 48 },
+      {
+        id: "paletteMinIter",
+        minValue: 0,
+        maxValue: 10 ** 9,
+        allowFraction: false,
+      },
+      {
+        id: "paletteMaxIter",
+        minValue: 0,
+        maxValue: 10 ** 9,
+        allowFraction: false,
+      },
     ];
 
     numberInputs.forEach((input) => this.handleNumberInput(input));
@@ -52,6 +74,7 @@ class MandelbrotControls {
       { id: "reverseColors" },
       { id: "highDpiTiles" },
       { id: "smoothColoring" },
+      { id: "scaleWithIterations" },
     ];
 
     checkboxInputs.forEach((input) => this.handleCheckboxInput(input));
@@ -73,6 +96,7 @@ class MandelbrotControls {
     this.handleHideShowUiButton();
     this.handleShareButton();
     this.handleSaveImageButton();
+    this.handleResetButtons();
   }
 
   private handleNumberInput({
@@ -95,6 +119,23 @@ class MandelbrotControls {
       ) {
         parsedValue = this.map.config[id];
       }
+
+      if (
+        id === "paletteMinIter" &&
+        parsedValue > this.map.config.paletteMaxIter
+      ) {
+        parsedValue = this.map.config[id]; // Reset to previous value
+      } else if (
+        id === "paletteMaxIter" &&
+        parsedValue < this.map.config.paletteMinIter
+      ) {
+        parsedValue = this.map.config[id]; // Reset to previous value
+      }
+
+      if (id === "iterations" && this.map.config.scaleWithIterations) {
+        this.updatePaletteMinMaxWithIterations(parsedValue);
+      }
+
       input.value = String(parsedValue);
       this.map.config[id] = parsedValue;
       if (resetView) {
@@ -102,8 +143,33 @@ class MandelbrotControls {
         (document.getElementById("iterations") as HTMLInputElement).value =
           String(this.map.initialConfig.iterations);
       }
+
+      this.updateResetButtonsVisibility();
       this.map.refresh(resetView);
     }, 1000);
+  }
+
+  private updatePaletteMinMaxWithIterations(newIterations: number) {
+    const oldIterations = this.map.config.iterations;
+
+    if (oldIterations === 0) return;
+
+    const ratio = newIterations / oldIterations;
+
+    const newMinIter = Math.floor(this.map.config.paletteMinIter * ratio);
+    const newMaxIter = Math.floor(this.map.config.paletteMaxIter * ratio);
+
+    this.map.config.paletteMinIter = newMinIter;
+    this.map.config.paletteMaxIter = newMaxIter;
+
+    const minIterInput = document.getElementById(
+      "paletteMinIter",
+    ) as HTMLInputElement;
+    const maxIterInput = document.getElementById(
+      "paletteMaxIter",
+    ) as HTMLInputElement;
+    minIterInput.value = String(newMinIter);
+    maxIterInput.value = String(newMaxIter);
   }
 
   private handleIterationButtons() {
@@ -117,17 +183,32 @@ class MandelbrotControls {
       "iterations",
     ) as HTMLInputElement;
 
-    const debouncedRefresh = debounce(() => this.map.refresh(), 500);
+    const debouncedRefresh = debounce(() => {
+      this.updateResetButtonsVisibility();
+      this.map.refresh();
+    }, 500);
 
     multiplyButton.onclick = () => {
+      if (this.map.config.scaleWithIterations) {
+        this.updatePaletteMinMaxWithIterations(this.map.config.iterations * 2);
+      }
+
       this.map.config.iterations *= 2;
       iterationsInput.value = String(this.map.config.iterations);
+
       debouncedRefresh();
     };
 
     divideButton.onclick = () => {
-      this.map.config.iterations = Math.ceil(this.map.config.iterations / 2);
+      const newIterations = Math.ceil(this.map.config.iterations / 2);
+
+      if (this.map.config.scaleWithIterations) {
+        this.updatePaletteMinMaxWithIterations(newIterations);
+      }
+
+      this.map.config.iterations = newIterations;
       iterationsInput.value = String(this.map.config.iterations);
+
       debouncedRefresh();
     };
   }
@@ -141,6 +222,7 @@ class MandelbrotControls {
       } else if (id === "colorSpace") {
         this.map.config[id] = Number((target as HTMLSelectElement).value);
       }
+      this.updateResetButtonsVisibility();
       this.map.refresh();
     };
   }
@@ -150,6 +232,7 @@ class MandelbrotControls {
     checkbox.checked = Boolean(this.map.config[id]);
     checkbox.onchange = ({ target }) => {
       this.map.config[id] = (target as HTMLInputElement).checked;
+      this.updateResetButtonsVisibility();
       this.map.refresh();
     };
   }
@@ -158,9 +241,10 @@ class MandelbrotControls {
     const slider = document.getElementById(id) as HTMLInputElement;
     slider.value = String(this.map.config[id]);
     slider.oninput = debounce(({ target }) => {
-      this.map.config[id] = Number.parseFloat(
-        (target as HTMLInputElement).value,
-      );
+      const newValue = Number.parseFloat((target as HTMLInputElement).value);
+
+      this.map.config[id] = newValue;
+      this.updateResetButtonsVisibility();
       this.map.refresh();
     }, 300);
   }
@@ -214,7 +298,6 @@ class MandelbrotControls {
       saveImageSubmitButton.removeAttribute("disabled");
       saveImageForm.removeEventListener("submit", ignoreSubmitListener);
       closeModalButton.removeAttribute("disabled");
-      saveImageDialog.removeEventListener("cancel", ignoreCancelListener);
       saveImageForm.reset();
       if (saveImageDialog.open) {
         saveImageDialog.close();
@@ -303,11 +386,13 @@ class MandelbrotControls {
       saturateAmount: s,
       lightenAmount: l,
       colorSpace: cs,
+      paletteMinIter: pmin,
+      paletteMaxIter: pmax,
     } = this.map.config;
 
     const url = new URL(window.location.origin);
 
-    Object.entries({ re, im, z, i, e, c, r, h, s, l, cs }).forEach(
+    Object.entries({ re, im, z, i, e, c, r, h, s, l, cs, pmin, pmax }).forEach(
       ([key, value]) => {
         url.searchParams.set(key, String(value));
       },
@@ -367,7 +452,7 @@ class MandelbrotControls {
     }
   }
 
-  private setInputValues() {
+  private setCoordinateInputValues() {
     const tileSize = [
       this.map.mandelbrotLayer.getTileSize().x,
       this.map.mandelbrotLayer.getTileSize().y,
@@ -376,24 +461,174 @@ class MandelbrotControls {
       .project(this.map.getCenter(), this.map.getZoom())
       .unscaleBy(new L.Point(tileSize[0], tileSize[1]));
 
-    const position = { ...point, z: this.map.getZoom() };
+    const currentPosition = { ...point, z: this.map.getZoom() };
 
-    const { re, im } = this.map.tilePositionToComplexParts(
-      position.x,
-      position.y,
-      position.z,
+    const { re: currentRe, im: currentIm } =
+      this.map.tilePositionToComplexParts(
+        currentPosition.x,
+        currentPosition.y,
+        currentPosition.z,
+      );
+    const currentZoom = currentPosition.z;
+
+    const reDiff = Math.abs(currentRe - this.map.initialConfig.re);
+    const imDiff = Math.abs(currentIm - this.map.initialConfig.im);
+    const zoomDiff = Math.abs(currentZoom - this.map.initialConfig.zoom);
+
+    let finalRe = currentRe;
+    let finalIm = currentIm;
+    let finalZoom = currentZoom;
+
+    const tolerance = 0.02;
+    if (reDiff <= tolerance && imDiff <= tolerance && zoomDiff <= tolerance) {
+      finalRe = this.map.initialConfig.re;
+      finalIm = this.map.initialConfig.im;
+      finalZoom = this.map.initialConfig.zoom;
+    }
+
+    this.map.config.re = finalRe;
+    (document.getElementById("re") as HTMLInputElement).value = String(finalRe);
+
+    this.map.config.im = finalIm;
+    (document.getElementById("im") as HTMLInputElement).value = String(finalIm);
+
+    this.map.config.zoom = finalZoom;
+    (document.getElementById("zoom") as HTMLInputElement).value =
+      String(finalZoom);
+  }
+
+  private resetConfigValues(keys: Array<keyof MandelbrotConfig>) {
+    keys.forEach((key) => {
+      const initialValue = this.map.initialConfig[key];
+      // TypeScript cannot infer that initialValue matches the type of config[key] in this dynamic assignment pattern
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (this.map.config as any)[key] = initialValue;
+
+      const element = document.getElementById(String(key));
+      if (element) {
+        if (element instanceof HTMLInputElement) {
+          if (element.type === "checkbox") {
+            element.checked = Boolean(initialValue);
+          } else {
+            // Handles text, number, range inputs
+            element.value = String(initialValue);
+          }
+        } else if (element instanceof HTMLSelectElement) {
+          element.value = String(initialValue);
+        }
+      } else {
+        console.warn(
+          `Could not find element with ID: ${String(key)} to reset.`,
+        );
+      }
+    });
+  }
+
+  private handleResetButtons() {
+    const resetRenderButton = document.getElementById("resetRender");
+    resetRenderButton.onclick = () => {
+      this.resetConfigValues(["iterations", "exponent", "highDpiTiles"]);
+
+      if (this.map.config.scaleWithIterations) {
+        this.resetConfigValues(["paletteMinIter"]);
+        this.map.config.paletteMaxIter = this.map.config.iterations;
+        (document.getElementById("paletteMaxIter") as HTMLInputElement).value =
+          String(this.map.config.iterations);
+      }
+
+      this.updateResetButtonsVisibility();
+      this.map.refresh();
+    };
+
+    const resetColorSchemeButton = document.getElementById("resetColorScheme");
+    resetColorSchemeButton.onclick = () => {
+      this.resetConfigValues([
+        "colorScheme",
+        "reverseColors",
+        "smoothColoring",
+        "paletteMinIter",
+        "scaleWithIterations",
+      ]);
+
+      // Reset paletteMaxIter based on current (potentially unchanged) iterations
+      this.map.config.paletteMaxIter = this.map.config.iterations;
+      (document.getElementById("paletteMaxIter") as HTMLInputElement).value =
+        String(this.map.config.iterations);
+
+      this.updateResetButtonsVisibility();
+      this.map.refresh();
+    };
+
+    const resetAdjustColorsButton =
+      document.getElementById("resetAdjustColors");
+    resetAdjustColorsButton.onclick = () => {
+      this.resetConfigValues([
+        "colorSpace",
+        "shiftHueAmount",
+        "saturateAmount",
+        "lightenAmount",
+      ]);
+
+      this.updateResetButtonsVisibility();
+      this.map.refresh();
+    };
+
+    const resetCoordinatesButton = document.getElementById("resetCoordinates");
+    resetCoordinatesButton.onclick = () => {
+      this.map.refresh(true);
+      this.setCoordinateInputValues();
+    };
+  }
+
+  private updateResetButtonsVisibility() {
+    const renderSettingsDiffer =
+      this.map.config.iterations !== this.map.initialConfig.iterations ||
+      this.map.config.exponent !== this.map.initialConfig.exponent ||
+      this.map.config.highDpiTiles !== this.map.initialConfig.highDpiTiles;
+
+    this.toggleResetButtonVisibility("resetRender", renderSettingsDiffer);
+
+    const colorSchemeDiffer =
+      this.map.config.colorScheme !== this.map.initialConfig.colorScheme ||
+      this.map.config.reverseColors !== this.map.initialConfig.reverseColors ||
+      this.map.config.smoothColoring !==
+        this.map.initialConfig.smoothColoring ||
+      this.map.config.paletteMinIter !==
+        this.map.initialConfig.paletteMinIter ||
+      this.map.config.paletteMaxIter !== this.map.config.iterations ||
+      this.map.config.scaleWithIterations !==
+        this.map.initialConfig.scaleWithIterations;
+
+    this.toggleResetButtonVisibility("resetColorScheme", colorSchemeDiffer);
+
+    const colorAdjustmentsDiffer =
+      this.map.config.colorSpace !== this.map.initialConfig.colorSpace ||
+      this.map.config.shiftHueAmount !==
+        this.map.initialConfig.shiftHueAmount ||
+      this.map.config.saturateAmount !==
+        this.map.initialConfig.saturateAmount ||
+      this.map.config.lightenAmount !== this.map.initialConfig.lightenAmount;
+
+    this.toggleResetButtonVisibility(
+      "resetAdjustColors",
+      colorAdjustmentsDiffer,
     );
 
-    this.map.config.re = re;
-    (document.getElementById("re") as HTMLInputElement).value = String(re);
+    const coordinatesDiffer =
+      this.map.config.re !== this.map.initialConfig.re ||
+      this.map.config.im !== this.map.initialConfig.im ||
+      this.map.config.zoom !== this.map.initialConfig.zoom;
 
-    this.map.config.im = im;
-    (document.getElementById("im") as HTMLInputElement).value = String(im);
+    this.toggleResetButtonVisibility("resetCoordinates", coordinatesDiffer);
+  }
 
-    this.map.config.zoom = position.z;
-    (document.getElementById("zoom") as HTMLInputElement).value = String(
-      position.z,
-    );
+  private toggleResetButtonVisibility(buttonId: string, shouldShow: boolean) {
+    const button = document.getElementById(buttonId) as HTMLButtonElement;
+    if (shouldShow) {
+      button.classList.add("visible");
+    } else {
+      button.classList.remove("visible");
+    }
   }
 }
 

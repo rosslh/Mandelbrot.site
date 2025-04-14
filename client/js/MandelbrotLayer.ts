@@ -52,6 +52,8 @@ class MandelbrotLayer extends L.GridLayer {
             shiftHueAmount: this._map.config.shiftHueAmount,
             colorSpace: this._map.config.colorSpace,
             smoothColoring: this._map.config.smoothColoring,
+            paletteMinIter: this._map.config.paletteMinIter,
+            paletteMaxIter: this._map.config.paletteMaxIter,
           });
 
           const imageData = new ImageData(
@@ -165,6 +167,8 @@ class MandelbrotLayer extends L.GridLayer {
         shiftHueAmount: this._map.config.shiftHueAmount,
         colorSpace: this._map.config.colorSpace,
         smoothColoring: this._map.config.smoothColoring,
+        paletteMinIter: this._map.config.paletteMinIter,
+        paletteMaxIter: this._map.config.paletteMaxIter,
       });
 
       const imageData = new ImageData(

@@ -346,12 +346,13 @@ fn get_color_palette(
 /// - `exponent`: The exponent used in the escape time algorithm.
 /// - `palette`: The color palette to use.
 /// - `should_reverse_colors`: Whether to reverse the colors of the color scheme.
-/// - `scaled_max_iterations`: The scaled maximum number of iterations.
 /// - `color_space`: The color space to use for color transformations.
 /// - `shift_hue_amount`: The amount to shift the hue by.
 /// - `saturate_amount`: The amount to saturate the color by.
 /// - `lighten_amount`: The amount to lighten the color by.
 /// - `smooth_coloring`: Whether to use smooth coloring.
+/// - `palette_min_iter`: The minimum iteration count for the color palette range.
+/// - `palette_max_iter`: The maximum iteration count for the color palette range.
 ///
 /// # Returns
 /// An array of 3 u8 values representing the RGB color.
@@ -362,12 +363,13 @@ fn compute_pixel_color(
     exponent: u32,
     palette: &colorous::Gradient,
     should_reverse_colors: bool,
-    scaled_max_iterations: usize,
     color_space: &ValidColorSpace,
     shift_hue_amount: f32,
     saturate_amount: f32,
     lighten_amount: f32,
     smooth_coloring: bool,
+    palette_min_iter: u32,
+    palette_max_iter: u32,
 ) -> RgbColor {
     let (escape_iterations, z) = calculate_escape_iterations(re, im, max_iterations, exponent);
 
@@ -382,13 +384,25 @@ fn compute_pixel_color(
             f64::from(escape_iterations)
         };
 
-        let mut scaled_value = (smoothed_value * 20.0) as usize;
+        let min_iterations_threshold = f64::from(palette_min_iter).max(0.0); // Ensure min is not negative
+        let max_iterations_threshold =
+            f64::from(palette_max_iter).max(min_iterations_threshold + f64::EPSILON); // Ensure max > min
+
+        // Normalize the value between min and max thresholds to get 0.0 to 1.0
+        let mut norm = if smoothed_value <= min_iterations_threshold {
+            0.0
+        } else if smoothed_value >= max_iterations_threshold {
+            1.0
+        } else {
+            (smoothed_value - min_iterations_threshold)
+                / (max_iterations_threshold - min_iterations_threshold)
+        };
 
         if should_reverse_colors {
-            scaled_value = scaled_max_iterations - scaled_value;
+            norm = 1.0 - norm;
         }
 
-        let color = palette.eval_rational(scaled_value, scaled_max_iterations);
+        let color = palette.eval_continuous(norm);
 
         transform_color(
             color,
@@ -412,12 +426,13 @@ fn compute_pixel_color(
 /// - `image_height`: The height of the image, in pixels.
 /// - `palette`: The color palette to use.
 /// - `should_reverse_colors`: Whether to reverse the colors of the color scheme.
-/// - `scaled_max_iterations`: The scaled maximum number of iterations.
 /// - `color_space`: The color space to use for color transformations.
 /// - `shift_hue_amount`: The amount to shift the hue by.
 /// - `saturate_amount`: The amount to saturate the color by.
 /// - `lighten_amount`: The amount to lighten the color by.
 /// - `smooth_coloring`: Whether to use smooth coloring.
+/// - `palette_min_iter`: The minimum iteration count for the color palette range.
+/// - `palette_max_iter`: The maximum iteration count for the color palette range.
 ///
 /// # Returns
 /// A vector of bytes representing the RGBA color values of the image.
@@ -430,12 +445,13 @@ fn render_mandelbrot_set(
     image_height: usize,
     palette: &colorous::Gradient,
     should_reverse_colors: bool,
-    scaled_max_iterations: usize,
     color_space: &ValidColorSpace,
     shift_hue_amount: f32,
     saturate_amount: f32,
     lighten_amount: f32,
     smooth_coloring: bool,
+    palette_min_iter: u32,
+    palette_max_iter: u32,
 ) -> Vec<u8> {
     let output_size: usize = image_width * image_height * NUM_COLOR_CHANNELS;
     let mut img: Vec<u8> = vec![0; output_size];
@@ -449,12 +465,13 @@ fn render_mandelbrot_set(
                 exponent,
                 palette,
                 should_reverse_colors,
-                scaled_max_iterations,
                 color_space,
                 shift_hue_amount,
                 saturate_amount,
                 lighten_amount,
                 smooth_coloring,
+                palette_min_iter,
+                palette_max_iter,
             );
 
             let index = (x * image_width + y) * NUM_COLOR_CHANNELS;
@@ -494,6 +511,8 @@ pub fn get_mandelbrot_set_image(
     lighten_amount: f32,
     color_space: ValidColorSpace,
     smooth_coloring: bool,
+    palette_min_iter: u32,
+    palette_max_iter: u32,
 ) -> Vec<u8> {
     let (palette, should_reverse_colors) = get_color_palette(&color_scheme, reverse_colors);
 
@@ -504,8 +523,6 @@ pub fn get_mandelbrot_set_image(
         return create_solid_black_image(image_width, image_height);
     }
 
-    let scaled_max_iterations = (max_iterations * 20) as usize;
-
     render_mandelbrot_set(
         re_range,
         im_range,
@@ -515,12 +532,13 @@ pub fn get_mandelbrot_set_image(
         image_height,
         palette,
         should_reverse_colors,
-        scaled_max_iterations,
         &color_space,
         shift_hue_amount,
         saturate_amount,
         lighten_amount,
         smooth_coloring,
+        palette_min_iter,
+        palette_max_iter,
     )
 }
 

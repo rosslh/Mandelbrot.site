@@ -29,6 +29,9 @@ window.addEventListener("load", () => {
         reverseColors: false,
         highDpiTiles: false,
         smoothColoring: true,
+        paletteMinIter: 0,
+        paletteMaxIter: 200,
+        scaleWithIterations: true,
 
         re: -0.5,
         im: 0,

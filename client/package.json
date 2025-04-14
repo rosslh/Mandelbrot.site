@@ -4,6 +4,7 @@
   "repository": "https://github.com/rosslh/mandelbrot.site",
   "license": "MIT",
   "scripts": {
+    "postinstall": "cd .. && cargo build",
     "build": "webpack --mode production || webpack --mode production",
     "dev": "webpack-dev-server --mode development --open --port 9090",
     "serve": "npx http-server dist -p 9090",

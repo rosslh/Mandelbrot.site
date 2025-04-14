@@ -20,6 +20,8 @@ import("../../mandelbrot/pkg").then((wasm) => {
       params.lightenAmount,
       params.colorSpace,
       params.smoothColoring,
+      params.paletteMinIter,
+      params.paletteMaxIter,
     );
 
   expose(getTile);
