@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 mod utils;
 
 use once_cell::sync::Lazy;
@@ -184,11 +186,11 @@ fn rect_in_set(
 ) -> bool {
     let (re_min, re_max) = (
         re_range.clone().next().unwrap(),
-        re_range.clone().last().unwrap(),
+        re_range.clone().next_back().unwrap(),
     );
     let (im_min, im_max) = (
         im_range.clone().next().unwrap(),
-        im_range.clone().last().unwrap(),
+        im_range.clone().next_back().unwrap(),
     );
 
     // Check the four corners of the rectangle
@@ -351,8 +353,8 @@ fn get_color_palette(
 /// - `saturate_amount`: The amount to saturate the color by.
 /// - `lighten_amount`: The amount to lighten the color by.
 /// - `smooth_coloring`: Whether to use smooth coloring.
-/// - `palette_min_iter`: The minimum iteration count for the color palette range.
-/// - `palette_max_iter`: The maximum iteration count for the color palette range.
+/// - `min_iterations_threshold`: The minimum threshold for color palette mapping.
+/// - `max_iterations_threshold`: The maximum threshold for color palette mapping.
 ///
 /// # Returns
 /// An array of 3 u8 values representing the RGB color.
@@ -368,8 +370,8 @@ fn compute_pixel_color(
     saturate_amount: f32,
     lighten_amount: f32,
     smooth_coloring: bool,
-    palette_min_iter: u32,
-    palette_max_iter: u32,
+    min_iterations_threshold: f64,
+    max_iterations_threshold: f64,
 ) -> RgbColor {
     let (escape_iterations, z) = calculate_escape_iterations(re, im, max_iterations, exponent);
 
@@ -377,16 +379,16 @@ fn compute_pixel_color(
         [0, 0, 0]
     } else {
         let smoothed_value = if smooth_coloring {
+            static ESCAPE_RADIUS_LN: once_cell::sync::Lazy<f64> =
+                once_cell::sync::Lazy::new(|| ESCAPE_RADIUS.ln());
+
+            let exponent_ln = f64::from(exponent).ln();
+
             // See: https://iquilezles.org/articles/msetsmooth/
-            f64::from(escape_iterations)
-                - ((z.norm().ln() / ESCAPE_RADIUS.ln()).ln() / f64::from(exponent).ln())
+            f64::from(escape_iterations) - ((z.norm().ln() / *ESCAPE_RADIUS_LN).ln() / exponent_ln)
         } else {
             f64::from(escape_iterations)
         };
-
-        let min_iterations_threshold = f64::from(palette_min_iter).max(0.0); // Ensure min is not negative
-        let max_iterations_threshold =
-            f64::from(palette_max_iter).max(min_iterations_threshold + f64::EPSILON); // Ensure max > min
 
         // Normalize the value between min and max thresholds to get 0.0 to 1.0
         let mut norm = if smoothed_value <= min_iterations_threshold {
@@ -450,14 +452,25 @@ fn render_mandelbrot_set(
     saturate_amount: f32,
     lighten_amount: f32,
     smooth_coloring: bool,
-    palette_min_iter: u32,
-    palette_max_iter: u32,
+    palette_min_iter: i32,
+    palette_max_iter: i32,
 ) -> Vec<u8> {
     let output_size: usize = image_width * image_height * NUM_COLOR_CHANNELS;
     let mut img: Vec<u8> = vec![0; output_size];
 
+    // Pre-fill the alpha channel with 255 for the entire image
+    for alpha_idx in (3..output_size).step_by(NUM_COLOR_CHANNELS) {
+        img[alpha_idx] = 255;
+    }
+
+    let min_iterations_threshold = f64::from(palette_min_iter);
+    let max_iterations_threshold =
+        f64::from(palette_max_iter).max(min_iterations_threshold + f64::EPSILON);
+
+    let re_values: Vec<f64> = re_range.collect();
+
     for (x, im) in im_range.enumerate() {
-        for (y, re) in re_range.clone().enumerate() {
+        for (y, &re) in re_values.iter().enumerate() {
             let pixel = compute_pixel_color(
                 re,
                 im,
@@ -470,15 +483,14 @@ fn render_mandelbrot_set(
                 saturate_amount,
                 lighten_amount,
                 smooth_coloring,
-                palette_min_iter,
-                palette_max_iter,
+                min_iterations_threshold,
+                max_iterations_threshold,
             );
 
             let index = (x * image_width + y) * NUM_COLOR_CHANNELS;
             img[index] = pixel[0];
             img[index + 1] = pixel[1];
             img[index + 2] = pixel[2];
-            img[index + 3] = 255;
         }
     }
 
@@ -511,8 +523,8 @@ pub fn get_mandelbrot_set_image(
     lighten_amount: f32,
     color_space: ValidColorSpace,
     smooth_coloring: bool,
-    palette_min_iter: u32,
-    palette_max_iter: u32,
+    palette_min_iter: i32,
+    palette_max_iter: i32,
 ) -> Vec<u8> {
     let (palette, should_reverse_colors) = get_color_palette(&color_scheme, reverse_colors);
 

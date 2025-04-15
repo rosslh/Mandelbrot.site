@@ -45,13 +45,13 @@ class MandelbrotControls {
       { id: "zoom", minValue: 0, maxValue: 48 },
       {
         id: "paletteMinIter",
-        minValue: 0,
+        minValue: -(10 ** 9),
         maxValue: 10 ** 9,
         allowFraction: false,
       },
       {
         id: "paletteMaxIter",
-        minValue: 0,
+        minValue: -(10 ** 9),
         maxValue: 10 ** 9,
         allowFraction: false,
       },
@@ -527,13 +527,28 @@ class MandelbrotControls {
   private handleResetButtons() {
     const resetRenderButton = document.getElementById("resetRender");
     resetRenderButton.onclick = () => {
+      const oldIterations = this.map.config.iterations;
+
       this.resetConfigValues(["iterations", "exponent", "highDpiTiles"]);
 
       if (this.map.config.scaleWithIterations) {
-        this.resetConfigValues(["paletteMinIter"]);
-        this.map.config.paletteMaxIter = this.map.config.iterations;
-        (document.getElementById("paletteMaxIter") as HTMLInputElement).value =
-          String(this.map.config.iterations);
+        const newIterations = this.map.config.iterations;
+        const ratio = newIterations / oldIterations;
+
+        const newMinIter = Math.floor(this.map.config.paletteMinIter * ratio);
+        const newMaxIter = Math.floor(this.map.config.paletteMaxIter * ratio);
+
+        this.map.config.paletteMinIter = newMinIter;
+        this.map.config.paletteMaxIter = newMaxIter;
+
+        const minIterInput = document.getElementById(
+          "paletteMinIter",
+        ) as HTMLInputElement;
+        const maxIterInput = document.getElementById(
+          "paletteMaxIter",
+        ) as HTMLInputElement;
+        minIterInput.value = String(newMinIter);
+        maxIterInput.value = String(newMaxIter);
       }
 
       this.updateResetButtonsVisibility();
