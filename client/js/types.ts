@@ -95,3 +95,10 @@ export type ComplexParts = {
   re: number;
   im: number;
 };
+
+export type ResetButtonConfig = {
+  buttonId: string;
+  configKeys: Array<keyof MandelbrotConfig>;
+  specialHandling?: (oldIterations?: number) => void;
+  checkDiff?: () => boolean;
+};

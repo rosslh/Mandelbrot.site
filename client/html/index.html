@@ -118,7 +118,7 @@
           </div>
         </div>
       </details>
-      <details open>
+      <details open id="renderSettings">
         <summary class="mobile-hidden">
           <span>Render settings</span>
           <button
@@ -158,14 +158,14 @@
           </div>
         </div>
       </details>
-      <details class="mobile-hidden">
+      <details class="mobile-hidden" id="colorPalette">
         <summary>
-          <label for="colorScheme">Color scheme</label>
+          <label for="colorScheme">Color palette</label>
           <button
             type="button"
             class="reset-button"
             id="resetColorScheme"
-            title="Reset color scheme"
+            title="Reset color palette"
           >
             ↺
           </button>
@@ -230,11 +230,23 @@
             <input type="checkbox" id="smoothColoring" name="smoothColoring" />
             <label for="smoothColoring">Smooth coloring</label>
           </div>
+        </div>
+      </details>
+      <details class="mobile-hidden" id="paletteRange">
+        <summary>
+          <span>Palette range</span>
+          <button
+            type="button"
+            class="reset-button"
+            id="resetPaletteRange"
+            title="Reset palette range"
+          >
+            ↺
+          </button>
+        </summary>
+        <div class="details-content">
           <div class="input-wrapper">
-            <label for="paletteMinIter" class="label-with-subtitle">
-              <span>Min iterations</span>
-              <span class="secondary">Color palette start</span>
-            </label>
+            <label for="paletteMinIter">Min iterations</label>
             <input
               type="number"
               id="paletteMinIter"
@@ -243,10 +255,7 @@
             />
           </div>
           <div class="input-wrapper">
-            <label for="paletteMaxIter" class="label-with-subtitle">
-              <span>Max iterations</span>
-              <span class="secondary">Color palette end</span>
-            </label>
+            <label for="paletteMaxIter">Max iterations</label>
             <input
               type="number"
               id="paletteMaxIter"
@@ -265,7 +274,7 @@
           </div>
         </div>
       </details>
-      <details class="mobile-hidden">
+      <details class="mobile-hidden" id="adjustColors">
         <summary>
           <span>Adjust colors</span>
           <button
@@ -327,7 +336,7 @@
           </div>
         </div>
       </details>
-      <details class="mobile-hidden">
+      <details class="mobile-hidden" id="coordinates">
         <summary>
           <span>Coordinates</span>
           <button

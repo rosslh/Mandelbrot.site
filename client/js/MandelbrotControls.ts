@@ -10,16 +10,109 @@ import {
   CheckboxInput,
   SliderInput,
   MandelbrotConfig,
+  ResetButtonConfig,
 } from "./types";
+
+const DETAILS_STATE_STORAGE_KEY = "mandelbrot-details-state";
+const SMALL_SCREEN_WIDTH_PX = 800;
 
 class MandelbrotControls {
   map: MandelbrotMap;
+  resetButtonConfigs: ResetButtonConfig[];
 
   constructor(map: MandelbrotMap) {
     this.map = map;
 
+    this.resetButtonConfigs = [
+      {
+        buttonId: "resetRender",
+        configKeys: ["iterations", "exponent", "highDpiTiles"],
+        specialHandling: (oldIterations) => {
+          if (this.map.config.scaleWithIterations && oldIterations) {
+            const newIterations = this.map.config.iterations;
+            const ratio = newIterations / oldIterations;
+
+            const newMinIter = Math.floor(
+              this.map.config.paletteMinIter * ratio,
+            );
+            const newMaxIter = Math.floor(
+              this.map.config.paletteMaxIter * ratio,
+            );
+
+            this.map.config.paletteMinIter = newMinIter;
+            this.map.config.paletteMaxIter = newMaxIter;
+
+            const minIterInput = document.getElementById(
+              "paletteMinIter",
+            ) as HTMLInputElement;
+            const maxIterInput = document.getElementById(
+              "paletteMaxIter",
+            ) as HTMLInputElement;
+            minIterInput.value = String(newMinIter);
+            maxIterInput.value = String(newMaxIter);
+          }
+        },
+      },
+      {
+        buttonId: "resetColorScheme",
+        configKeys: ["colorScheme", "reverseColors", "smoothColoring"],
+      },
+      {
+        buttonId: "resetPaletteRange",
+        configKeys: ["paletteMinIter", "scaleWithIterations"],
+        specialHandling: () => {
+          // Reset paletteMaxIter based on current iterations
+          this.map.config.paletteMaxIter = this.map.config.iterations;
+          (
+            document.getElementById("paletteMaxIter") as HTMLInputElement
+          ).value = String(this.map.config.iterations);
+        },
+        checkDiff: () => {
+          return (
+            this.map.config.paletteMinIter !==
+              this.map.initialConfig.paletteMinIter ||
+            this.map.config.paletteMaxIter !== this.map.config.iterations ||
+            this.map.config.scaleWithIterations !==
+              this.map.initialConfig.scaleWithIterations
+          );
+        },
+      },
+      {
+        buttonId: "resetAdjustColors",
+        configKeys: [
+          "colorSpace",
+          "shiftHueAmount",
+          "saturateAmount",
+          "lightenAmount",
+        ],
+      },
+      {
+        buttonId: "resetCoordinates",
+        configKeys: ["re", "im", "zoom"],
+        specialHandling: () => {
+          this.map.refresh(true);
+          this.setCoordinateInputValues();
+        },
+        checkDiff: () => {
+          return (
+            this.map.config.re !== this.map.initialConfig.re ||
+            this.map.config.im !== this.map.initialConfig.im ||
+            this.map.config.zoom !== this.map.initialConfig.zoom
+          );
+        },
+      },
+    ];
+
     this.handleInputs();
     this.updateResetButtonsVisibility();
+    this.loadDetailsState();
+
+    window.addEventListener(
+      "resize",
+      throttle(() => {
+        this.handleSmallScreenExpansion();
+      }, 250),
+    );
   }
 
   throttleSetCoordinateInputValues = throttle(() => {
@@ -34,6 +127,64 @@ class MandelbrotControls {
     this.setupCheckboxInputs();
     this.setupSliderInputs();
     this.setupButtons();
+    this.setupDetailsToggle();
+  }
+
+  private setupDetailsToggle() {
+    this.getControlPanelDetails().forEach((details) => {
+      details.addEventListener("toggle", () => {
+        this.saveDetailsState();
+      });
+    });
+  }
+
+  private handleSmallScreenExpansion() {
+    const renderSettings = document.getElementById(
+      "renderSettings",
+    ) as HTMLDetailsElement;
+    if (renderSettings && window.innerWidth <= SMALL_SCREEN_WIDTH_PX) {
+      renderSettings.open = true;
+    }
+  }
+
+  private getControlPanelDetails(): HTMLDetailsElement[] {
+    return Array.from(document.querySelectorAll("#inputsWrapper details")).map(
+      (element) => element as HTMLDetailsElement,
+    );
+  }
+
+  private saveDetailsState() {
+    if (!window.localStorage) return;
+
+    const state: Record<string, boolean> = {};
+    this.getControlPanelDetails().forEach((details) => {
+      if (details.id) {
+        state[details.id] = details.open;
+      }
+    });
+
+    localStorage.setItem(DETAILS_STATE_STORAGE_KEY, JSON.stringify(state));
+  }
+
+  private loadDetailsState() {
+    if (!window.localStorage) return;
+
+    try {
+      const savedState = localStorage.getItem(DETAILS_STATE_STORAGE_KEY);
+      if (savedState) {
+        const state = JSON.parse(savedState) as Record<string, boolean>;
+
+        this.getControlPanelDetails().forEach((details) => {
+          if (details.id && state[details.id] !== undefined) {
+            details.open = state[details.id];
+          }
+        });
+      }
+    } catch (e) {
+      console.error("Error loading details state from localStorage", e);
+    }
+
+    this.handleSmallScreenExpansion();
   }
 
   private setupNumberInputs() {
@@ -510,7 +661,6 @@ class MandelbrotControls {
           if (element.type === "checkbox") {
             element.checked = Boolean(initialValue);
           } else {
-            // Handles text, number, range inputs
             element.value = String(initialValue);
           }
         } else if (element instanceof HTMLSelectElement) {
@@ -525,124 +675,55 @@ class MandelbrotControls {
   }
 
   private handleResetButtons() {
-    const resetRenderButton = document.getElementById("resetRender");
-    resetRenderButton.onclick = () => {
-      const oldIterations = this.map.config.iterations;
+    this.resetButtonConfigs.forEach((config) => {
+      const button = document.getElementById(config.buttonId);
+      if (button) {
+        button.onclick = () => {
+          const oldIterations =
+            config.buttonId === "resetRender"
+              ? this.map.config.iterations
+              : undefined;
 
-      this.resetConfigValues(["iterations", "exponent", "highDpiTiles"]);
+          this.resetConfigValues(config.configKeys);
 
-      if (this.map.config.scaleWithIterations) {
-        const newIterations = this.map.config.iterations;
-        const ratio = newIterations / oldIterations;
+          if (config.specialHandling) {
+            config.specialHandling(oldIterations);
+          }
 
-        const newMinIter = Math.floor(this.map.config.paletteMinIter * ratio);
-        const newMaxIter = Math.floor(this.map.config.paletteMaxIter * ratio);
+          this.updateResetButtonsVisibility();
 
-        this.map.config.paletteMinIter = newMinIter;
-        this.map.config.paletteMaxIter = newMaxIter;
-
-        const minIterInput = document.getElementById(
-          "paletteMinIter",
-        ) as HTMLInputElement;
-        const maxIterInput = document.getElementById(
-          "paletteMaxIter",
-        ) as HTMLInputElement;
-        minIterInput.value = String(newMinIter);
-        maxIterInput.value = String(newMaxIter);
+          if (config.buttonId !== "resetCoordinates") {
+            this.map.refresh();
+          }
+        };
       }
-
-      this.updateResetButtonsVisibility();
-      this.map.refresh();
-    };
-
-    const resetColorSchemeButton = document.getElementById("resetColorScheme");
-    resetColorSchemeButton.onclick = () => {
-      this.resetConfigValues([
-        "colorScheme",
-        "reverseColors",
-        "smoothColoring",
-        "paletteMinIter",
-        "scaleWithIterations",
-      ]);
-
-      // Reset paletteMaxIter based on current (potentially unchanged) iterations
-      this.map.config.paletteMaxIter = this.map.config.iterations;
-      (document.getElementById("paletteMaxIter") as HTMLInputElement).value =
-        String(this.map.config.iterations);
-
-      this.updateResetButtonsVisibility();
-      this.map.refresh();
-    };
-
-    const resetAdjustColorsButton =
-      document.getElementById("resetAdjustColors");
-    resetAdjustColorsButton.onclick = () => {
-      this.resetConfigValues([
-        "colorSpace",
-        "shiftHueAmount",
-        "saturateAmount",
-        "lightenAmount",
-      ]);
-
-      this.updateResetButtonsVisibility();
-      this.map.refresh();
-    };
-
-    const resetCoordinatesButton = document.getElementById("resetCoordinates");
-    resetCoordinatesButton.onclick = () => {
-      this.map.refresh(true);
-      this.setCoordinateInputValues();
-    };
+    });
   }
 
   private updateResetButtonsVisibility() {
-    const renderSettingsDiffer =
-      this.map.config.iterations !== this.map.initialConfig.iterations ||
-      this.map.config.exponent !== this.map.initialConfig.exponent ||
-      this.map.config.highDpiTiles !== this.map.initialConfig.highDpiTiles;
+    this.resetButtonConfigs.forEach((config) => {
+      let shouldShow: boolean;
 
-    this.toggleResetButtonVisibility("resetRender", renderSettingsDiffer);
+      if (config.checkDiff) {
+        shouldShow = config.checkDiff();
+      } else {
+        shouldShow = config.configKeys.some(
+          (key) => this.map.config[key] !== this.map.initialConfig[key],
+        );
+      }
 
-    const colorSchemeDiffer =
-      this.map.config.colorScheme !== this.map.initialConfig.colorScheme ||
-      this.map.config.reverseColors !== this.map.initialConfig.reverseColors ||
-      this.map.config.smoothColoring !==
-        this.map.initialConfig.smoothColoring ||
-      this.map.config.paletteMinIter !==
-        this.map.initialConfig.paletteMinIter ||
-      this.map.config.paletteMaxIter !== this.map.config.iterations ||
-      this.map.config.scaleWithIterations !==
-        this.map.initialConfig.scaleWithIterations;
-
-    this.toggleResetButtonVisibility("resetColorScheme", colorSchemeDiffer);
-
-    const colorAdjustmentsDiffer =
-      this.map.config.colorSpace !== this.map.initialConfig.colorSpace ||
-      this.map.config.shiftHueAmount !==
-        this.map.initialConfig.shiftHueAmount ||
-      this.map.config.saturateAmount !==
-        this.map.initialConfig.saturateAmount ||
-      this.map.config.lightenAmount !== this.map.initialConfig.lightenAmount;
-
-    this.toggleResetButtonVisibility(
-      "resetAdjustColors",
-      colorAdjustmentsDiffer,
-    );
-
-    const coordinatesDiffer =
-      this.map.config.re !== this.map.initialConfig.re ||
-      this.map.config.im !== this.map.initialConfig.im ||
-      this.map.config.zoom !== this.map.initialConfig.zoom;
-
-    this.toggleResetButtonVisibility("resetCoordinates", coordinatesDiffer);
+      this.toggleResetButtonVisibility(config.buttonId, shouldShow);
+    });
   }
 
   private toggleResetButtonVisibility(buttonId: string, shouldShow: boolean) {
     const button = document.getElementById(buttonId) as HTMLButtonElement;
-    if (shouldShow) {
-      button.classList.add("visible");
-    } else {
-      button.classList.remove("visible");
+    if (button) {
+      if (shouldShow) {
+        button.classList.add("visible");
+      } else {
+        button.classList.remove("visible");
+      }
     }
   }
 }

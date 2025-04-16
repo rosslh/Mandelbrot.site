@@ -26,7 +26,7 @@ The viewer is equipped with a range of interactive features:
 - **Dynamic Zoom:** Users can zoom into any region of the set using mouse scroll or by selecting a specific area, facilitating deep exploration.
 - **Iteration Adjustment:** This feature allows users to adjust the number of iterations used in the calculations, affecting the detail and rendering time of the fractal.
 - **Multibrot Sets:** Beyond the traditional Mandelbrot set, users can explore multibrot sets by adjusting the exponent in the generating formula.
-- **Customizable Color Schemes:** Users can personalize their visual experience by choosing different color schemes.
+- **Customizable Color Palettes:** Users can personalize their visual experience by choosing different color palettes.
 - **Viewport Coordinates:** Display and update the coordinates of the current viewport on the complex plane.
 - **Image Export:** High-resolution images of the fractal can be saved as PNG files.
 - **Shareable Views:** Users can generate URLs that encapsulate their current view, allowing them to share their fractal explorations with others.
