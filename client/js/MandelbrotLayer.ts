@@ -37,24 +37,28 @@ class MandelbrotLayer extends L.GridLayer {
       canvas.width = imageWidth;
       canvas.height = imageHeight;
 
-      this._map.pool.queue(async (getTile) => {
+      this._map.pool.queue(async (workerTask) => {
         try {
-          const data = await getTile({
-            bounds,
-            iterations: this._map.config.iterations,
-            exponent: this._map.config.exponent,
-            imageWidth,
-            imageHeight,
-            colorScheme: this._map.config.colorScheme,
-            reverseColors: this._map.config.reverseColors,
-            lightenAmount: this._map.config.lightenAmount,
-            saturateAmount: this._map.config.saturateAmount,
-            shiftHueAmount: this._map.config.shiftHueAmount,
-            colorSpace: this._map.config.colorSpace,
-            smoothColoring: this._map.config.smoothColoring,
-            paletteMinIter: this._map.config.paletteMinIter,
-            paletteMaxIter: this._map.config.paletteMaxIter,
-          });
+          const request = {
+            type: "calculate" as const,
+            payload: {
+              bounds,
+              iterations: this._map.config.iterations,
+              exponent: this._map.config.exponent,
+              imageWidth,
+              imageHeight,
+              colorScheme: this._map.config.colorScheme,
+              reverseColors: this._map.config.reverseColors,
+              lightenAmount: this._map.config.lightenAmount,
+              saturateAmount: this._map.config.saturateAmount,
+              shiftHueAmount: this._map.config.shiftHueAmount,
+              colorSpace: this._map.config.colorSpace,
+              smoothColoring: this._map.config.smoothColoring,
+              paletteMinIter: this._map.config.paletteMinIter,
+              paletteMaxIter: this._map.config.paletteMaxIter,
+            },
+          };
+          const data = (await workerTask(request)) as Uint8Array;
 
           const imageData = new ImageData(
             Uint8ClampedArray.from(data),
@@ -153,23 +157,27 @@ class MandelbrotLayer extends L.GridLayer {
         ? crypto.randomUUID()
         : Date.now().toString();
 
-    const tileTask = this._map.pool.queue(async (getTile) => {
-      const data = await getTile({
-        bounds,
-        iterations: this._map.config.iterations,
-        exponent: this._map.config.exponent,
-        imageWidth: scaledTileSize,
-        imageHeight: scaledTileSize,
-        colorScheme: this._map.config.colorScheme,
-        reverseColors: this._map.config.reverseColors,
-        lightenAmount: this._map.config.lightenAmount,
-        saturateAmount: this._map.config.saturateAmount,
-        shiftHueAmount: this._map.config.shiftHueAmount,
-        colorSpace: this._map.config.colorSpace,
-        smoothColoring: this._map.config.smoothColoring,
-        paletteMinIter: this._map.config.paletteMinIter,
-        paletteMaxIter: this._map.config.paletteMaxIter,
-      });
+    const tileTask = this._map.pool.queue(async (workerTask) => {
+      const request = {
+        type: "calculate" as const,
+        payload: {
+          bounds,
+          iterations: this._map.config.iterations,
+          exponent: this._map.config.exponent,
+          imageWidth: scaledTileSize,
+          imageHeight: scaledTileSize,
+          colorScheme: this._map.config.colorScheme,
+          reverseColors: this._map.config.reverseColors,
+          lightenAmount: this._map.config.lightenAmount,
+          saturateAmount: this._map.config.saturateAmount,
+          shiftHueAmount: this._map.config.shiftHueAmount,
+          colorSpace: this._map.config.colorSpace,
+          smoothColoring: this._map.config.smoothColoring,
+          paletteMinIter: this._map.config.paletteMinIter,
+          paletteMaxIter: this._map.config.paletteMaxIter,
+        },
+      };
+      const data = (await workerTask(request)) as Uint8Array;
 
       const imageData = new ImageData(
         Uint8ClampedArray.from(data),

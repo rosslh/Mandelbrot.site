@@ -10,7 +10,16 @@ type MapWithResetView = MandelbrotMap & {
   _resetView: (center: L.LatLng | [number, number], zoom: number) => void;
 };
 
-type MandelbrotThread = FunctionThread<[WasmRequestPayload], Uint8Array>;
+type MandelbrotRequest = { type: "calculate"; payload: WasmRequestPayload };
+type OptimisePayload = { buffer: ArrayBuffer };
+type OptimiseRequest = { type: "optimise"; payload: OptimisePayload };
+type WorkerRequest = MandelbrotRequest | OptimiseRequest;
+
+type MandelbrotResponse = Uint8Array;
+type OptimiseResponse = ArrayBuffer;
+type WorkerResponse = MandelbrotResponse | OptimiseResponse;
+
+type TaskThread = FunctionThread<[WorkerRequest], WorkerResponse>;
 
 class MandelbrotMap extends L.Map {
   mandelbrotLayer: MandelbrotLayer;
@@ -18,11 +27,11 @@ class MandelbrotMap extends L.Map {
   controls: MandelbrotControls;
   initialConfig: MandelbrotConfig;
   config: MandelbrotConfig;
-  pool: Pool<MandelbrotThread>;
+  pool: Pool<TaskThread>;
   queuedTileTasks: {
     id: string;
     position: L.Coords;
-    task: QueuedTask<MandelbrotThread, void>;
+    task: QueuedTask<TaskThread, void>;
   }[] = [];
 
   constructor({
@@ -178,7 +187,12 @@ class MandelbrotMap extends L.Map {
     }
   }
 
-  async saveVisibleImage(totalWidth: number, totalHeight: number) {
+  async saveVisibleImage(
+    totalWidth: number,
+    totalHeight: number,
+    optimize: boolean,
+    onStartOptimizing?: () => void,
+  ) {
     const bounds = this.adjustBoundsForAspectRatio(
       this.mapBoundsAsComplexParts,
       totalWidth,
@@ -194,7 +208,7 @@ class MandelbrotMap extends L.Map {
       totalWidth,
       totalHeight,
     );
-    this.saveCanvasAsImage(finalCanvas);
+    await this.saveCanvasAsImage(finalCanvas, optimize, onStartOptimizing);
   }
 
   private adjustBoundsForAspectRatio(
@@ -265,15 +279,40 @@ class MandelbrotMap extends L.Map {
     return finalCanvas;
   }
 
-  private saveCanvasAsImage(canvas: HTMLCanvasElement) {
-    canvas.toBlob((blob) => {
-      saveAs(
-        blob,
-        `mandelbrot${Date.now()}_r${this.config.re}_im${this.config.im}_z${
-          this.config.zoom
-        }.png`,
-      );
-    });
+  private async saveCanvasAsImage(
+    canvas: HTMLCanvasElement,
+    optimize: boolean,
+    onStartOptimizing?: () => void,
+  ) {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      console.error("Could not get canvas context");
+      return;
+    }
+    const dataUrl = canvas.toDataURL("image/png");
+    const response = await fetch(dataUrl);
+    const rawPngBuffer = await response.arrayBuffer();
+
+    let finalBuffer = rawPngBuffer;
+
+    if (optimize) {
+      onStartOptimizing?.();
+      finalBuffer = (await this.pool.queue((worker) =>
+        worker({
+          type: "optimise",
+          payload: { buffer: rawPngBuffer },
+        }),
+      )) as ArrayBuffer;
+    }
+
+    const blob = new Blob([finalBuffer], { type: "image/png" });
+
+    saveAs(
+      blob,
+      `mandelbrot${Date.now()}_r${this.config.re}_im${this.config.im}_z${
+        this.config.zoom
+      }.png`,
+    );
   }
 
   getShareUrl() {

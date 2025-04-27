@@ -14,6 +14,7 @@ import {
 } from "./types";
 
 const DETAILS_STATE_STORAGE_KEY = "mandelbrot-details-state";
+const OPTIMIZE_IMAGE_STORAGE_KEY = "mandelbrot-optimize-image";
 const SMALL_SCREEN_WIDTH_PX = 800;
 
 class MandelbrotControls {
@@ -434,6 +435,9 @@ class MandelbrotControls {
     ) as HTMLInputElement;
     const saveImageSubmitButton = document.getElementById("saveImageSubmit");
     const closeModalButton = document.getElementById("saveImageCancel");
+    const optimizeImageCheckbox = document.getElementById(
+      "optimizeImage",
+    ) as HTMLInputElement;
 
     const ignoreSubmitListener: EventListener = (event) =>
       event.preventDefault();
@@ -449,7 +453,11 @@ class MandelbrotControls {
       saveImageSubmitButton.removeAttribute("disabled");
       saveImageForm.removeEventListener("submit", ignoreSubmitListener);
       closeModalButton.removeAttribute("disabled");
+
+      const currentOptimizeState = optimizeImageCheckbox.checked;
       saveImageForm.reset();
+      optimizeImageCheckbox.checked = currentOptimizeState;
+
       if (saveImageDialog.open) {
         saveImageDialog.close();
       } else {
@@ -461,6 +469,18 @@ class MandelbrotControls {
         );
         saveImageDialog.showModal();
       }
+    };
+
+    const savedOptimizeState = localStorage.getItem(OPTIMIZE_IMAGE_STORAGE_KEY);
+    if (savedOptimizeState !== null) {
+      optimizeImageCheckbox.checked = JSON.parse(savedOptimizeState);
+    }
+
+    optimizeImageCheckbox.onchange = () => {
+      localStorage.setItem(
+        OPTIMIZE_IMAGE_STORAGE_KEY,
+        JSON.stringify(optimizeImageCheckbox.checked),
+      );
     };
 
     if (typeof Blob !== "undefined") {
@@ -495,8 +515,20 @@ class MandelbrotControls {
 
       this.logEvent("imageSave");
 
+      saveImageSubmitButton.innerText = "Generating...";
+      const shouldOptimize = optimizeImageCheckbox.checked;
+
       this.map
-        .saveVisibleImage(width, height)
+        .saveVisibleImage(
+          width,
+          height,
+          shouldOptimize,
+          shouldOptimize
+            ? () => {
+                saveImageSubmitButton.innerText = "Optimizing...";
+              }
+            : undefined,
+        )
         .catch((error) => {
           alert("Error saving image\n\n" + error);
           console.error(error);

@@ -161,6 +161,14 @@ const workerConfig = {
         ],
         exclude: /node_modules/,
       },
+      {
+        test: /\.wasm$/,
+        exclude: /pkg\/.*\.wasm$/,
+        type: "asset/resource",
+        generator: {
+          filename: "[name][ext]",
+        },
+      },
     ],
   },
   resolve: {

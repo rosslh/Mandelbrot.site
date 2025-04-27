@@ -147,7 +147,10 @@
             </button>
           </div>
           <div class="input-wrapper mobile-hidden">
-            <label for="exponent">Exponent</label>
+            <label for="exponent" class="label-with-subtitle">
+              <span>Exponent</span>
+              <span class="secondary">Symmetry</span>
+            </label>
             <input type="number" required id="exponent" name="exponent" />
           </div>
           <div class="checkbox-wrapper mobile-hidden">
@@ -469,6 +472,12 @@
         <div class="input-wrapper">
           <label for="imageHeight">Height (px)</label>
           <input type="number" required id="imageHeight" name="imageHeight" />
+        </div>
+        <div class="checkbox-wrapper">
+          <input type="checkbox" id="optimizeImage" name="optimizeImage" />
+          <label for="optimizeImage"
+            >Reduce file size <span class="secondary">(slow)</span></label
+          >
         </div>
         <div class="submit-or-cancel">
           <button type="submit" id="saveImageSubmit">Save</button>
