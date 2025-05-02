@@ -3,15 +3,46 @@ import debounce from "lodash/debounce";
 import throttle from "lodash/throttle";
 import snakeCase from "lodash/snakeCase";
 import type MandelbrotMap from "./MandelbrotMap";
+import { MandelbrotConfig } from "./MandelbrotMap";
 import * as api from "./api";
-import {
-  NumberInput,
-  SelectInput,
-  CheckboxInput,
-  SliderInput,
-  MandelbrotConfig,
-  ResetButtonConfig,
-} from "./types";
+
+type NumberInput = {
+  id:
+    | "iterations"
+    | "exponent"
+    | "re"
+    | "im"
+    | "zoom"
+    | "paletteMinIter"
+    | "paletteMaxIter";
+  minValue: number;
+  maxValue: number;
+  resetView?: boolean;
+  allowFraction?: boolean;
+};
+
+type SelectInput = {
+  id: "colorScheme" | "colorSpace";
+};
+
+type CheckboxInput = {
+  id:
+    | "reverseColors"
+    | "highDpiTiles"
+    | "smoothColoring"
+    | "scaleWithIterations";
+};
+
+type SliderInput = {
+  id: "lightenAmount" | "saturateAmount" | "shiftHueAmount";
+};
+
+type ResetButtonConfig = {
+  buttonId: string;
+  configKeys: Array<keyof MandelbrotConfig>;
+  specialHandling?: (oldIterations?: number) => void;
+  checkDiff?: () => boolean;
+};
 
 const DETAILS_STATE_STORAGE_KEY = "mandelbrot-details-state";
 const OPTIMIZE_IMAGE_STORAGE_KEY = "mandelbrot-optimize-image";
@@ -518,7 +549,7 @@ class MandelbrotControls {
       saveImageSubmitButton.innerText = "Generating...";
       const shouldOptimize = optimizeImageCheckbox.checked;
 
-      this.map
+      this.map.imageSaver
         .saveVisibleImage(
           width,
           height,
@@ -529,7 +560,7 @@ class MandelbrotControls {
               }
             : undefined,
         )
-        .catch((error) => {
+        .catch((error: unknown) => {
           alert("Error saving image\n\n" + error);
           console.error(error);
         })

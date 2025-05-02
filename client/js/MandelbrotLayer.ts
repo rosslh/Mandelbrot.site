@@ -1,17 +1,33 @@
 import debounce from "lodash/debounce";
 import * as L from "leaflet";
 import type MandelbrotMap from "./MandelbrotMap";
+import {
+  ComplexBounds,
+  MandelbrotConfig,
+  WorkerRequest,
+} from "./MandelbrotMap";
 
 type Done = (error: null, tile: HTMLCanvasElement) => void;
+
+export type WasmRequestPayload = Omit<
+  MandelbrotConfig,
+  "zoom" | "highDpiTiles" | "re" | "im" | "scaleWithIterations"
+> & {
+  bounds: ComplexBounds;
+  imageWidth: number;
+  imageHeight: number;
+};
+
+type TileGenerationTask = {
+  position: L.Coords;
+  canvas: HTMLCanvasElement;
+  done: Done;
+};
 
 class MandelbrotLayer extends L.GridLayer {
   tileSize: number;
   _map: MandelbrotMap;
-  tilesToGenerate: Array<{
-    position: L.Coords;
-    canvas: HTMLCanvasElement;
-    done: Done;
-  }> = [];
+  tilesToGenerate: TileGenerationTask[] = [];
 
   constructor() {
     super({
@@ -39,7 +55,7 @@ class MandelbrotLayer extends L.GridLayer {
 
       this._map.pool.queue(async (workerTask) => {
         try {
-          const request = {
+          const request: WorkerRequest = {
             type: "calculate" as const,
             payload: {
               bounds,
@@ -113,7 +129,7 @@ class MandelbrotLayer extends L.GridLayer {
     this.addTo(currentMap);
   }
 
-  private getComplexBoundsOfTile(tilePosition: L.Coords) {
+  private getComplexBoundsOfTile(tilePosition: L.Coords): ComplexBounds {
     const { re: reMin, im: imMin } = this._map.tilePositionToComplexParts(
       tilePosition.x,
       tilePosition.y,
@@ -158,7 +174,7 @@ class MandelbrotLayer extends L.GridLayer {
         : Date.now().toString();
 
     const tileTask = this._map.pool.queue(async (workerTask) => {
-      const request = {
+      const request: WorkerRequest = {
         type: "calculate" as const,
         payload: {
           bounds,

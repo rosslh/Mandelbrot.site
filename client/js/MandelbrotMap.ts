@@ -1,25 +1,70 @@
 import * as L from "leaflet";
-import { saveAs } from "file-saver";
-import { FunctionThread, Pool, Worker, spawn } from "threads";
+import { FunctionThread, Pool } from "threads";
 import MandelbrotLayer from "./MandelbrotLayer";
 import { QueuedTask } from "threads/dist/master/pool-types";
 import MandelbrotControls from "./MandelbrotControls";
-import { ComplexBounds, MandelbrotConfig, WasmRequestPayload } from "./types";
+import ImageSaver from "./ImageSaver";
 
-type MapWithResetView = MandelbrotMap & {
+export type MandelbrotConfig = {
+  iterations: number;
+  exponent: number;
+  colorScheme: string;
+  lightenAmount: number;
+  saturateAmount: number;
+  shiftHueAmount: number;
+  colorSpace: number;
+  reverseColors: boolean;
+  highDpiTiles: boolean;
+  smoothColoring: boolean;
+  paletteMinIter: number;
+  paletteMaxIter: number;
+  scaleWithIterations: boolean;
+  re: number;
+  im: number;
+  zoom: number;
+};
+
+// Worker Request/Response Types
+export type MandelbrotRequest = {
+  type: "calculate";
+  payload: import("./MandelbrotLayer").WasmRequestPayload; // Use import type for circular dependency
+};
+export type OptimisePayload = { buffer: ArrayBuffer };
+export type OptimiseRequest = { type: "optimise"; payload: OptimisePayload };
+export type WorkerRequest = MandelbrotRequest | OptimiseRequest;
+
+export type MandelbrotResponse = Uint8Array;
+export type OptimiseResponse = ArrayBuffer;
+export type WorkerResponse = MandelbrotResponse | OptimiseResponse;
+
+type TaskThread = FunctionThread<[WorkerRequest], WorkerResponse>;
+
+type QueuedTileTask = {
+  id: string;
+  position: L.Coords;
+  task: QueuedTask<TaskThread, void>;
+};
+
+type MapWithResetView = L.Map & {
   _resetView: (center: L.LatLng | [number, number], zoom: number) => void;
 };
 
-type MandelbrotRequest = { type: "calculate"; payload: WasmRequestPayload };
-type OptimisePayload = { buffer: ArrayBuffer };
-type OptimiseRequest = { type: "optimise"; payload: OptimisePayload };
-type WorkerRequest = MandelbrotRequest | OptimiseRequest;
+export type ComplexBounds = {
+  reMin: number;
+  reMax: number;
+  imMin: number;
+  imMax: number;
+};
 
-type MandelbrotResponse = Uint8Array;
-type OptimiseResponse = ArrayBuffer;
-type WorkerResponse = MandelbrotResponse | OptimiseResponse;
+type TilePosition = {
+  x: number;
+  y: number;
+};
 
-type TaskThread = FunctionThread<[WorkerRequest], WorkerResponse>;
+type ComplexParts = {
+  re: number;
+  im: number;
+};
 
 class MandelbrotMap extends L.Map {
   mandelbrotLayer: MandelbrotLayer;
@@ -28,11 +73,8 @@ class MandelbrotMap extends L.Map {
   initialConfig: MandelbrotConfig;
   config: MandelbrotConfig;
   pool: Pool<TaskThread>;
-  queuedTileTasks: {
-    id: string;
-    position: L.Coords;
-    task: QueuedTask<TaskThread, void>;
-  }[] = [];
+  imageSaver: ImageSaver;
+  queuedTileTasks: QueuedTileTask[] = [];
 
   constructor({
     htmlId,
@@ -51,13 +93,14 @@ class MandelbrotMap extends L.Map {
     this.initializeMap(htmlId, initialConfig);
   }
 
-  private initializeMap(htmlId: string, initialConfig: MandelbrotConfig) {
-    this.createPool();
+  private async initializeMap(htmlId: string, initialConfig: MandelbrotConfig) {
+    await this.createPool();
     this.mapId = htmlId;
     this.mandelbrotLayer = new MandelbrotLayer().addTo(this);
     this.initialConfig = { ...initialConfig };
     this.config = { ...initialConfig };
     this.controls = new MandelbrotControls(this);
+    this.imageSaver = new ImageSaver(this, this.pool, this.mandelbrotLayer);
 
     this.setView(
       [this.initialConfig.re, this.initialConfig.im],
@@ -81,11 +124,7 @@ class MandelbrotMap extends L.Map {
     });
   }
 
-  tilePositionToComplexParts(
-    x: number,
-    y: number,
-    z: number,
-  ): { re: number; im: number } {
+  tilePositionToComplexParts(x: number, y: number, z: number): ComplexParts {
     const scaleFactor = this.mandelbrotLayer.getTileSize().x / 128;
     const d = 2 ** (z - 2);
     const re = (x / d) * scaleFactor - 4 + this.initialConfig.re;
@@ -99,7 +138,11 @@ class MandelbrotMap extends L.Map {
     }
   };
 
-  private complexPartsToTilePosition(re: number, im: number, z: number) {
+  private complexPartsToTilePosition(
+    re: number,
+    im: number,
+    z: number,
+  ): TilePosition {
     const scaleFactor = this.mandelbrotLayer.getTileSize().x / 128;
     const d = 2 ** (z - 2);
     const x = ((re + 4 - this.initialConfig.re) * d) / scaleFactor;
@@ -107,7 +150,7 @@ class MandelbrotMap extends L.Map {
     return { x, y };
   }
 
-  private latLngToTilePosition(latLng: L.LatLng, z: number) {
+  private latLngToTilePosition(latLng: L.LatLng, z: number): TilePosition {
     const point = this.project(latLng, z).unscaleBy(
       this.mandelbrotLayer.getTileSize(),
     );
@@ -115,7 +158,7 @@ class MandelbrotMap extends L.Map {
     return { x: point.x, y: point.y };
   }
 
-  private get mapBoundsAsComplexParts() {
+  public get mapBoundsAsComplexParts(): ComplexBounds {
     const bounds = this.getBounds();
     const sw = this.latLngToTilePosition(bounds.getSouthWest(), this.getZoom());
     const ne = this.latLngToTilePosition(bounds.getNorthEast(), this.getZoom());
@@ -134,7 +177,7 @@ class MandelbrotMap extends L.Map {
     return { reMin, reMax, imMin, imMax };
   }
 
-  private complexPartsToLatLng(re: number, im: number, z: number) {
+  private complexPartsToLatLng(re: number, im: number, z: number): L.LatLng {
     const tileSize = [
       this.mandelbrotLayer.getTileSize().x,
       this.mandelbrotLayer.getTileSize().y,
@@ -162,14 +205,15 @@ class MandelbrotMap extends L.Map {
 
   private async createPool() {
     if (this.pool) {
-      this.pool.terminate(true);
+      await this.pool.terminate(true);
     }
-
+    const { Worker, spawn } = await import("threads");
     this.pool = Pool(() => spawn(new Worker("./worker.js")));
   }
 
   async refresh(resetView = false) {
     await this.createPool();
+    this.imageSaver = new ImageSaver(this, this.pool, this.mandelbrotLayer);
     const mapWithResetView = this as unknown as MapWithResetView;
     if (resetView) {
       mapWithResetView._resetView(
@@ -182,137 +226,8 @@ class MandelbrotMap extends L.Map {
         this.config.im,
         this.config.zoom,
       );
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (this as any)._resetView(pointToCenter, this.config.zoom);
+      mapWithResetView._resetView(pointToCenter, this.config.zoom);
     }
-  }
-
-  async saveVisibleImage(
-    totalWidth: number,
-    totalHeight: number,
-    optimize: boolean,
-    onStartOptimizing?: () => void,
-  ) {
-    const bounds = this.adjustBoundsForAspectRatio(
-      this.mapBoundsAsComplexParts,
-      totalWidth,
-      totalHeight,
-    );
-    const imageCanvases = await this.generateImageColumns(
-      bounds,
-      totalWidth,
-      totalHeight,
-    );
-    const finalCanvas = this.combineImageColumns(
-      imageCanvases,
-      totalWidth,
-      totalHeight,
-    );
-    await this.saveCanvasAsImage(finalCanvas, optimize, onStartOptimizing);
-  }
-
-  private adjustBoundsForAspectRatio(
-    bounds: ComplexBounds,
-    totalWidth: number,
-    totalHeight: number,
-  ) {
-    const imageAspectRatio = totalWidth / totalHeight;
-    const complexAspectRatio =
-      (bounds.reMax - bounds.reMin) / (bounds.imMax - bounds.imMin);
-
-    if (imageAspectRatio < complexAspectRatio) {
-      const newImHeight = (bounds.reMax - bounds.reMin) / imageAspectRatio;
-      const imCenter = (bounds.imMin + bounds.imMax) / 2;
-      bounds.imMin = imCenter - newImHeight / 2;
-      bounds.imMax = imCenter + newImHeight / 2;
-    } else if (imageAspectRatio > complexAspectRatio) {
-      const newReWidth = (bounds.imMax - bounds.imMin) * imageAspectRatio;
-      const reCenter = (bounds.reMin + bounds.reMax) / 2;
-      bounds.reMin = reCenter - newReWidth / 2;
-      bounds.reMax = reCenter + newReWidth / 2;
-    }
-
-    return bounds;
-  }
-
-  private async generateImageColumns(
-    bounds: ComplexBounds,
-    totalWidth: number,
-    totalHeight: number,
-  ) {
-    const numColumns = 24;
-    const columnWidth = Math.ceil(totalWidth / numColumns);
-    const reDiff = bounds.reMax - bounds.reMin;
-    const reDiffPerColumn = reDiff * (columnWidth / totalWidth);
-
-    const imagePromises = [];
-    for (let i = 0; i < numColumns; i++) {
-      const subBounds = {
-        ...bounds,
-        reMin: bounds.reMin + reDiffPerColumn * i,
-        reMax: bounds.reMin + reDiffPerColumn * (i + 1),
-      };
-      imagePromises.push(
-        this.mandelbrotLayer.getImage(subBounds, columnWidth, totalHeight),
-      );
-    }
-
-    return Promise.all(imagePromises);
-  }
-
-  private combineImageColumns(
-    imageCanvases: HTMLCanvasElement[],
-    totalWidth: number,
-    totalHeight: number,
-  ) {
-    const finalCanvas = document.createElement("canvas");
-    finalCanvas.width = totalWidth;
-    finalCanvas.height = totalHeight;
-    const ctx = finalCanvas.getContext("2d");
-
-    let xOffset = 0;
-    imageCanvases.forEach((canvas) => {
-      ctx.drawImage(canvas, xOffset, 0);
-      xOffset += canvas.width;
-    });
-
-    return finalCanvas;
-  }
-
-  private async saveCanvasAsImage(
-    canvas: HTMLCanvasElement,
-    optimize: boolean,
-    onStartOptimizing?: () => void,
-  ) {
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      console.error("Could not get canvas context");
-      return;
-    }
-    const dataUrl = canvas.toDataURL("image/png");
-    const response = await fetch(dataUrl);
-    const rawPngBuffer = await response.arrayBuffer();
-
-    let finalBuffer = rawPngBuffer;
-
-    if (optimize) {
-      onStartOptimizing?.();
-      finalBuffer = (await this.pool.queue((worker) =>
-        worker({
-          type: "optimise",
-          payload: { buffer: rawPngBuffer },
-        }),
-      )) as ArrayBuffer;
-    }
-
-    const blob = new Blob([finalBuffer], { type: "image/png" });
-
-    saveAs(
-      blob,
-      `mandelbrot${Date.now()}_r${this.config.re}_im${this.config.im}_z${
-        this.config.zoom
-      }.png`,
-    );
   }
 
   getShareUrl() {
