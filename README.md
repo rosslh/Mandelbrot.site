@@ -17,21 +17,24 @@
   <img src="https://img.shields.io/badge/License-MIT-blue?style=flat" alt="MIT license">
 </p>
 
+<p align="center">
+  As seen in:
+  <a href="https://news.ycombinator.com/item?id=43375676">Hacker News</a> •
+  <a href="https://www.creativemachine.io/cm-tam/educational-art/benoit-mandelbrot">Creative Machine</a> •
+  <a href="https://www.sciencenews.org/article/fractals-math-science-society-50-years"><em>Science News</em> magazine</a>
+</p>
+
 ## Features
 
-Mandelbrot.site offers a variety of features to enhance your experience:
+Mandelbrot.site allows you to discover the Mandelbrot set through intuitive **zoom controls** using scrolling or region selection, while **viewport coordinates** continuously track your position on the complex plane.
 
-- **Zoom in** by scrolling or selecting a region.
-- Adjust the **detail level** by modifying the iteration count or resolution.
-- Download **high-resolution images** of your current view.
-- Generate URLs to **share** your favorite Mandelbrot set locations.
-- Customize your experience with different **color palettes**.
-- Explore **multibrot sets** by changing the exponent parameter.
-- View and update **viewport coordinates** on the complex plane.
+The visualization experience can be customized by adjusting the **iteration count** or **resolution** settings for varying levels of detail, switching between **color palettes** to reveal different structures, and even exploring **multibrot sets** by changing the exponent parameter.
+
+Beyond exploration, this web app allows you to share discoveries with high-resolution **image downloads** and **shareable URLs** that preserve exact locations and zoom levels, enabling others to access and experience the fractal views you found.
 
 ## Gallery
 
-Explore some stunning images generated with Mandelbrot.site:
+Example images generated with Mandelbrot.site:
 
 <img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-01.png" height="200px" alt="Mandelbrot Example 1"> <img src="https://raw.githubusercontent.com/rosslh/mandelbrot.site/main/example-images/mandelbrot-02.png" height="200px" alt="Mandelbrot Example 2">
 
@@ -39,13 +42,11 @@ Explore some stunning images generated with Mandelbrot.site:
 
 ## Architecture
 
-Mandelbrot.site is built using modern web technologies to deliver a high-performance, interactive tool for exploring fractals. The computational backend is implemented in [Rust](https://github.com/rust-lang/rust), chosen for its performance and safety features. This Rust code is compiled to [WebAssembly](https://webassembly.org/) (Wasm) using the [wasm-pack](https://github.com/rustwasm/wasm-pack) plugin, enabling high-speed computations directly in the browser. On the frontend, the user interface is crafted with [TypeScript](https://github.com/microsoft/TypeScript), enhancing code quality and maintainability. [Leaflet.js](https://github.com/Leaflet/Leaflet) is creatively adapted to render the Mandelbrot set tiles in a zoomable, map-like interface.
+Mandelbrot.site uses a WebAssembly-based architecture for high-performance fractal computation in the browser. The computational backend is implemented in [Rust](https://github.com/rust-lang/rust) for performance and safety. This Rust code is compiled to [WebAssembly](https://webassembly.org/) (Wasm) using the [wasm-pack](https://github.com/rustwasm/wasm-pack) plugin, allowing fast computations directly in the browser. The frontend uses [TypeScript](https://github.com/microsoft/TypeScript) for type safety and [Leaflet.js](https://github.com/Leaflet/Leaflet) to render the Mandelbrot set tiles in a zoomable, map-like interface.
 
-For performance optimization, it employs [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API) via the [threads.js](https://github.com/andywer/threads.js) library. This setup prevents intensive computations from blocking the main browser thread by creating a pool of workers that handle the generation of Mandelbrot set tiles in parallel. A key optimization technique used is "rectangle checking," which saves computation time for areas entirely within the set by checking only the perimeter of a tile.
+Performance is optimized using [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API) via the [threads.js](https://github.com/andywer/threads.js) library. This prevents computations from blocking the main browser thread by creating a pool of workers that generate Mandelbrot set tiles in parallel. The "rectangle checking" optimization reduces computation time for areas entirely within the set by checking only the perimeter of a tile.
 
-It is a [Progressive Web App](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps) (PWA), leveraging [Service Workers](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API) to prioritize a local-first experience. This ensures that users can explore the Mandelbrot set with minimal network dependencies.
-
-This robust architecture allows Mandelbrot.site to provide a seamless and responsive experience for users exploring the intricate details of the Mandelbrot set through an online interface.
+The site is a [Progressive Web App](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps) (PWA), using [Service Workers](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API) for offline functionality and reduced network dependencies.
 
 ## Development
 
@@ -54,8 +55,6 @@ This project requires [Node.js](https://nodejs.org/) and [Rust](https://rust-lan
 A complete guide can be found in [CONTRIBUTING.md](CONTRIBUTING.md#your-first-code-contribution).
 
 ## Contributors
-
-Many thanks to the following contributors who have helped shape this project:
 
 |                                                                                                                    | Name                     | GitHub Profile                                                              |
 | ------------------------------------------------------------------------------------------------------------------ | ------------------------ | --------------------------------------------------------------------------- |
