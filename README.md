@@ -19,9 +19,10 @@
 
 <p align="center">
   As seen in:
-  <a href="https://news.ycombinator.com/item?id=43375676">Hacker News</a> •
+  <a href="https://www.sciencefocus.com/science/the-two-numbers-that-could-solve-maths-biggest-mysteries/">BBC Science Focus</a> •
   <a href="https://www.creativemachine.io/cm-tam/educational-art/benoit-mandelbrot">Creative Machine</a> •
-  <a href="https://www.sciencenews.org/article/fractals-math-science-society-50-years"><em>Science News</em> magazine</a>
+  <a href="https://news.ycombinator.com/item?id=43375676">Hacker News</a> •
+  <a href="https://www.sciencenews.org/article/fractals-math-science-society-50-years">Science News</a>
 </p>
 
 ## Features
