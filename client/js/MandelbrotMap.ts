@@ -128,7 +128,7 @@ class MandelbrotMap extends L.Map {
     const scaleFactor = this.mandelbrotLayer.getTileSize().x / 128;
     const d = 2 ** (z - 2);
     const re = (x / d) * scaleFactor - 4 + this.initialConfig.re;
-    const im = (y / d) * scaleFactor - 4 + this.initialConfig.im;
+    const im = -((y / d) * scaleFactor - 4) + this.initialConfig.im;
     return { re, im };
   }
 
@@ -146,7 +146,7 @@ class MandelbrotMap extends L.Map {
     const scaleFactor = this.mandelbrotLayer.getTileSize().x / 128;
     const d = 2 ** (z - 2);
     const x = ((re + 4 - this.initialConfig.re) * d) / scaleFactor;
-    const y = ((im + 4 - this.initialConfig.im) * d) / scaleFactor;
+    const y = ((this.initialConfig.im - im + 4) * d) / scaleFactor;
     return { x, y };
   }
 
@@ -163,12 +163,12 @@ class MandelbrotMap extends L.Map {
     const sw = this.latLngToTilePosition(bounds.getSouthWest(), this.getZoom());
     const ne = this.latLngToTilePosition(bounds.getNorthEast(), this.getZoom());
 
-    const { re: reMin, im: imMax } = this.tilePositionToComplexParts(
+    const { re: reMin, im: imMin } = this.tilePositionToComplexParts(
       sw.x,
       sw.y,
       this.getZoom(),
     );
-    const { re: reMax, im: imMin } = this.tilePositionToComplexParts(
+    const { re: reMax, im: imMax } = this.tilePositionToComplexParts(
       ne.x,
       ne.y,
       this.getZoom(),

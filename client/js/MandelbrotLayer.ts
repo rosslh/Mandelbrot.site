@@ -130,13 +130,13 @@ class MandelbrotLayer extends L.GridLayer {
   }
 
   private getComplexBoundsOfTile(tilePosition: L.Coords): ComplexBounds {
-    const { re: reMin, im: imMin } = this._map.tilePositionToComplexParts(
+    const { re: reMin, im: imMax } = this._map.tilePositionToComplexParts(
       tilePosition.x,
       tilePosition.y,
       tilePosition.z,
     );
 
-    const { re: reMax, im: imMax } = this._map.tilePositionToComplexParts(
+    const { re: reMax, im: imMin } = this._map.tilePositionToComplexParts(
       tilePosition.x + 1,
       tilePosition.y + 1,
       tilePosition.z,

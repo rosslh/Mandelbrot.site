@@ -529,7 +529,7 @@ pub fn get_mandelbrot_set_image(
     let (palette, should_reverse_colors) = get_color_palette(&color_scheme, reverse_colors);
 
     let re_range = linspace(re_min, re_max, image_width);
-    let im_range = linspace(im_min, im_max, image_height);
+    let im_range = linspace(im_max, im_min, image_height);
 
     if rect_in_set(re_range.clone(), im_range.clone(), max_iterations, exponent) {
         return create_solid_black_image(image_width, image_height);
