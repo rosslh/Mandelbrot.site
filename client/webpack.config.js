@@ -122,7 +122,7 @@ const appConfig = {
         use: [{ loader: "file-loader?name=./static/[name].[ext]" }],
       },
       {
-        test: /\.(webmanifest|xml|toml)$/i,
+        test: /\.(webmanifest|xml)$/i,
         use: [{ loader: "file-loader?name=./[name].[ext]" }],
       },
     ],

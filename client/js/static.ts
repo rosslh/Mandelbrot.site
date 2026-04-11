@@ -14,4 +14,3 @@ import "../static/site.webmanifest";
 import "../static/sitemap.xml";
 import "../static/favicon.ico";
 import "../static/blog-background.png";
-import "../netlify.toml";
