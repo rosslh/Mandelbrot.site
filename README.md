@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/github/check-runs/rosslh/mandelbrot.site/main?style=flat&label=Checks" alt="GitHub branch check runs">
   <img src="https://img.shields.io/uptimerobot/status/m792388109-4c544ded2b0e440130ddd401?up_message=online&style=flat&label=Status" alt="Uptime Robot status">
   <img src="https://img.shields.io/uptimerobot/ratio/m792388109-4c544ded2b0e440130ddd401?style=flat&label=Uptime%20(1mo)" alt="Uptime Robot ratio (30 days)">
-  <img src="https://img.shields.io/badge/License-MIT-blue?style=flat" alt="MIT license">
+  <a href="https://mapledeploy.ca"><img src="https://mapledeploy.ca/api/badge/shields" alt="Hosted in Canada with MapleDeploy"></a>
 </p>
 
 <p align="center">
