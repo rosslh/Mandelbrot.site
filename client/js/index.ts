@@ -1,10 +1,15 @@
 import "./static";
 import MandelbrotMap from "./MandelbrotMap";
+import { initRegionalAttribution } from "./regionalAttribution";
 
 const mapHtmlId = "leaflet";
 const smallScreenWidthPx = 800;
 
 window.addEventListener("load", () => {
+  initRegionalAttribution().catch((err: unknown) => {
+    console.error("Regional attribution failed:", err);
+  });
+
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker
       .register("/service-worker.js")

@@ -318,6 +318,15 @@ button.underline-button {
   text-decoration: underline;
 }
 
+.canadian-hosting-badge:not([hidden]) {
+  display: inline-block;
+  line-height: 0;
+
+  img {
+    display: block;
+  }
+}
+
 #attribution {
   position: absolute;
   bottom: calc(env(safe-area-inset-bottom) + var(--space-8));
