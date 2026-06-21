@@ -1,6 +1,7 @@
 const canadaCountryCode = "CA";
 const countryCodeStorageKey = "mandelbrot.countryCode";
 const githubButtonScriptSrc = "https://buttons.github.io/buttons.js";
+const countryCodeLookupTimeoutMs = 3000;
 
 function normalizeCountryCode(countryCode: string | undefined | null) {
   return countryCode?.trim().toUpperCase() || null;
@@ -23,13 +24,23 @@ function storeCountryCode(countryCode: string) {
 }
 
 async function lookupCountryCodeFromIpApi() {
-  const response = await fetch("https://ipapi.co/country/", {
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => {
+    controller.abort();
+  }, countryCodeLookupTimeoutMs);
 
-  if (!response.ok) return null;
+  try {
+    const response = await fetch("https://ipapi.co/country/", {
+      cache: "no-store",
+      signal: controller.signal,
+    });
 
-  return normalizeCountryCode(await response.text());
+    if (!response.ok) return null;
+
+    return normalizeCountryCode(await response.text());
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 async function getVisitorCountryCode() {

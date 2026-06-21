@@ -68,12 +68,6 @@ const workbox = new WorkboxPlugin.GenerateSW({
   clientsClaim: true,
   skipWaiting: true,
   cleanupOutdatedCaches: true,
-  runtimeCaching: [
-    {
-      urlPattern: /.*/,
-      handler: "StaleWhileRevalidate",
-    },
-  ],
 });
 
 const appConfig = {
@@ -142,7 +136,6 @@ const workerConfig = {
     new WasmPackPlugin({
       crateDirectory: path.resolve(__dirname, "../mandelbrot"),
     }),
-    workbox,
   ],
   module: {
     rules: [
