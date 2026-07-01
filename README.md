@@ -7,7 +7,7 @@
 <h1 align="center">Mandelbrot.site</h1>
 
 <p align="center">
-  <a href="https://mandelbrot.site">Mandelbrot.site</a> is an interactive fractal viewer that runs in your web browser. It offers a fast and intuitive way to explore the Mandelbrot set and share your discoveries. This website is built with Rust, WebAssembly, TypeScript, and Leaflet.js.
+  <a href="https://mandelbrot.site">Mandelbrot.site</a> is an interactive Mandelbrot set explorer that runs in your browser. Zoom, adjust the rendering, save images, and share exact views with a link.
 </p>
 
 <p align="center">
@@ -27,11 +27,10 @@
 
 ## Features
 
-Mandelbrot.site allows you to discover the Mandelbrot set through intuitive **zoom controls** using scrolling or region selection, while **viewport coordinates** continuously track your position on the complex plane.
-
-The visualization experience can be customized by adjusting the **iteration count** or **resolution** settings for varying levels of detail, switching between **color palettes** to reveal different structures, and even exploring **multibrot sets** by changing the exponent parameter.
-
-Beyond exploration, this web app allows you to share discoveries with high-resolution **image downloads** and **shareable URLs** that preserve exact locations and zoom levels, enabling others to access and experience the fractal views you found.
+- Explore the Mandelbrot set with scroll zooming, region selection, and live coordinates.
+- Tune the image with iteration, resolution, palette, and exponent controls.
+- Download high-resolution images of interesting views.
+- Share links that preserve the exact location and zoom level.
 
 ## Gallery
 
@@ -43,15 +42,13 @@ Example images generated with Mandelbrot.site:
 
 ## Architecture
 
-Mandelbrot.site uses a WebAssembly-based architecture for high-performance fractal computation in the browser. The computational backend is implemented in [Rust](https://github.com/rust-lang/rust) for performance and safety. This Rust code is compiled to [WebAssembly](https://webassembly.org/) (Wasm) using the [wasm-pack](https://github.com/rustwasm/wasm-pack) plugin, allowing fast computations directly in the browser. The frontend uses [TypeScript](https://github.com/microsoft/TypeScript) for type safety and [Leaflet.js](https://github.com/Leaflet/Leaflet) to render the Mandelbrot set tiles in a zoomable, map-like interface.
+The app renders fractal tiles in the browser. The computation-heavy Mandelbrot code is written in [Rust](https://github.com/rust-lang/rust), compiled to [WebAssembly](https://webassembly.org/) with [wasm-pack](https://github.com/rustwasm/wasm-pack), and run in parallel with [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API) through [threads.js](https://github.com/andywer/threads.js). The interface is built with [TypeScript](https://github.com/microsoft/TypeScript) and [Leaflet.js](https://github.com/Leaflet/Leaflet), giving the fractal a map-like pan and zoom experience.
 
-Performance is optimized using [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API) via the [threads.js](https://github.com/andywer/threads.js) library. This prevents computations from blocking the main browser thread by creating a pool of workers that generate Mandelbrot set tiles in parallel. The "rectangle checking" optimization reduces computation time for areas entirely within the set by checking only the perimeter of a tile.
-
-The site is a [Progressive Web App](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps) (PWA), using [Service Workers](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API) for offline functionality and reduced network dependencies.
+Mandelbrot.site is also a [Progressive Web App](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps), with service-worker support for offline use and reduced network dependency.
 
 ## Development
 
-This project requires [Node.js](https://nodejs.org/) and [Rust](https://rust-lang.org/) to be installed on your system. Check the [`client/.nvmrc`](client/.nvmrc) file for the recommended Node.js version. Development scripts are available in [`client/package.json`](client/package.json).
+To work on the project, install [Node.js](https://nodejs.org/) and [Rust](https://rust-lang.org/). Use the Node.js version in [`client/.nvmrc`](client/.nvmrc), then run the npm scripts from the `client` directory.
 
 A complete guide can be found in [CONTRIBUTING.md](CONTRIBUTING.md#your-first-code-contribution).
 
