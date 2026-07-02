@@ -4,6 +4,28 @@ import { initRegionalAttribution } from "./regionalAttribution";
 
 const mapHtmlId = "leaflet";
 const smallScreenWidthPx = 800;
+const swReloadFlagKey = "mandelbrot-sw-reloaded";
+const swReloadWindowMs = 10000;
+
+// When a deploy updates the service worker, the first page load after it is
+// still served from the old precache; the new worker (skipWaiting +
+// clientsClaim) takes control moments later. Reload once so the user gets the
+// new assets immediately instead of on their next visit. The time window and
+// the session flag keep this from ever reloading mid-exploration or looping.
+function reloadOnServiceWorkerUpdate() {
+  const pageLoadedAt = Date.now();
+  const wasControlledAtLoad = Boolean(navigator.serviceWorker.controller);
+
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    const withinReloadWindow = Date.now() - pageLoadedAt < swReloadWindowMs;
+    const alreadyReloaded = sessionStorage.getItem(swReloadFlagKey) === "true";
+
+    if (wasControlledAtLoad && withinReloadWindow && !alreadyReloaded) {
+      sessionStorage.setItem(swReloadFlagKey, "true");
+      window.location.reload();
+    }
+  });
+}
 
 window.addEventListener("load", () => {
   initRegionalAttribution().catch((err: unknown) => {
@@ -11,6 +33,7 @@ window.addEventListener("load", () => {
   });
 
   if ("serviceWorker" in navigator) {
+    reloadOnServiceWorkerUpdate();
     navigator.serviceWorker
       .register("/service-worker.js")
       .catch((err: unknown) => {
