@@ -625,7 +625,7 @@ pub fn get_mandelbrot_image_precise(
 ) -> Vec<u8> {
     let effective_zoom = tile_zoom as i64 + zoom_offset as i64;
 
-    let use_perturbation = (zoom_offset > 0 || effective_zoom >= perturbation::DEEP_ZOOM_THRESHOLD)
+    let use_perturbation = effective_zoom >= perturbation::DEEP_ZOOM_THRESHOLD
         && (2..=perturbation::MAX_PERTURBED_EXPONENT).contains(&exponent);
 
     if !use_perturbation {
@@ -634,10 +634,17 @@ pub fn get_mandelbrot_image_precise(
         let origin_re_f64: f64 = origin_re.parse().unwrap_or(0.0);
         let origin_im_f64: f64 = origin_im.parse().unwrap_or(0.0);
 
-        let re_min = origin_re_f64 + perturbation::tile_coordinate_offset(tile_x_min, tile_zoom);
-        let re_max = origin_re_f64 + perturbation::tile_coordinate_offset(tile_x_max, tile_zoom);
-        let im_max = origin_im_f64 - perturbation::tile_coordinate_offset(tile_y_min, tile_zoom);
-        let im_min = origin_im_f64 - perturbation::tile_coordinate_offset(tile_y_max, tile_zoom);
+        let scaled_offset = |tile_coordinate: f64| {
+            float_exp::ldexp(
+                perturbation::tile_coordinate_offset(tile_coordinate, tile_zoom),
+                -(zoom_offset as i64),
+            )
+        };
+
+        let re_min = origin_re_f64 + scaled_offset(tile_x_min);
+        let re_max = origin_re_f64 + scaled_offset(tile_x_max);
+        let im_max = origin_im_f64 - scaled_offset(tile_y_min);
+        let im_min = origin_im_f64 - scaled_offset(tile_y_max);
 
         return get_mandelbrot_set_image(
             re_min,

@@ -339,6 +339,71 @@ fn shallow_path_matches_legacy_renderer() {
 }
 
 #[test]
+fn shallow_path_handles_zoom_offset() {
+    // Below DEEP_ZOOM_THRESHOLD the direct f64 renderer is used even when the
+    // client has re-anchored (zoom_offset > 0); the offsets must then be
+    // scaled by 2^-zoom_offset.
+    let tile_zoom = 12;
+    let zoom_offset = 20_u32;
+    let center = centered_tile_coordinate(tile_zoom).floor();
+
+    let precise = crate::get_mandelbrot_image_precise(
+        DEEP_RE.to_string(),
+        DEEP_IM.to_string(),
+        center,
+        center + 1.0,
+        center,
+        center + 1.0,
+        tile_zoom,
+        zoom_offset,
+        300,
+        2,
+        32,
+        32,
+        "turbo".to_string(),
+        false,
+        0.0,
+        0.0,
+        0.0,
+        crate::ValidColorSpace::Hsl,
+        true,
+        0,
+        300,
+    );
+
+    let origin_re: f64 = DEEP_RE.parse().unwrap();
+    let origin_im: f64 = DEEP_IM.parse().unwrap();
+    let scaled = |value: f64| {
+        crate::float_exp::ldexp(
+            tile_coordinate_offset(value, tile_zoom),
+            -(zoom_offset as i64),
+        )
+    };
+
+    let legacy = crate::get_mandelbrot_set_image(
+        origin_re + scaled(center),
+        origin_re + scaled(center + 1.0),
+        origin_im - scaled(center + 1.0),
+        origin_im - scaled(center),
+        300,
+        2,
+        32,
+        32,
+        "turbo".to_string(),
+        false,
+        0.0,
+        0.0,
+        0.0,
+        crate::ValidColorSpace::Hsl,
+        true,
+        0,
+        300,
+    );
+
+    assert_eq!(precise, legacy);
+}
+
+#[test]
 fn parse_decimal_accepts_long_and_scientific_input() {
     assert!(parse_decimal(DEEP_RE, 512).is_ok());
     assert!(parse_decimal("1.5e-200", 256).is_ok());

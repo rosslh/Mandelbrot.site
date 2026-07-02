@@ -28,8 +28,11 @@ mod perturbation_test;
 
 type BigFloat = FBig<Zero, 2>;
 
-/// Effective zoom level below which plain f64 rendering is exact enough.
-pub const DEEP_ZOOM_THRESHOLD: i64 = 30;
+/// Effective zoom level at which rendering switches to perturbation. One
+/// level below the zoom cap of the pre-perturbation renderer: at zoom 47 the
+/// pixel spacing (2^-52) drops below the f64 ULP of coordinates near
+/// magnitude 2, so the direct renderer starts quantizing pixels.
+pub const DEEP_ZOOM_THRESHOLD: i64 = 47;
 
 /// Effective zoom level above which pixel deltas need an extended exponent
 /// range. Below it, deltas and their squares stay clear of f64 underflow.
