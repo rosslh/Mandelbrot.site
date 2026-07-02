@@ -1,24 +1,23 @@
-import * as L from "leaflet";
 import debounce from "lodash/debounce";
 import throttle from "lodash/throttle";
 import snakeCase from "lodash/snakeCase";
 import type MandelbrotMap from "./MandelbrotMap";
 import { MandelbrotConfig } from "./MandelbrotMap";
+import { isValidDecimalCoordinate } from "./highPrecision";
 import * as api from "./api";
 
 type NumberInput = {
-  id:
-    | "iterations"
-    | "exponent"
-    | "re"
-    | "im"
-    | "zoom"
-    | "paletteMinIter"
-    | "paletteMaxIter";
+  id: "iterations" | "exponent" | "zoom" | "paletteMinIter" | "paletteMaxIter";
   minValue: number;
   maxValue: number;
   resetView?: boolean;
   allowFraction?: boolean;
+};
+
+type CoordinateInput = {
+  id: "re" | "im";
+  minValue: number;
+  maxValue: number;
 };
 
 type SelectInput = {
@@ -223,9 +222,7 @@ class MandelbrotControls {
     const numberInputs: NumberInput[] = [
       { id: "iterations", minValue: 1, maxValue: 10 ** 9 },
       { id: "exponent", minValue: 2, maxValue: 10 ** 9, resetView: true },
-      { id: "re", minValue: -2, maxValue: 2, allowFraction: true },
-      { id: "im", minValue: -2, maxValue: 2, allowFraction: true },
-      { id: "zoom", minValue: 0, maxValue: 48 },
+      { id: "zoom", minValue: 0, maxValue: 10 ** 6 },
       {
         id: "paletteMinIter",
         minValue: -(10 ** 9),
@@ -241,6 +238,13 @@ class MandelbrotControls {
     ];
 
     numberInputs.forEach((input) => this.handleNumberInput(input));
+
+    const coordinateInputs: CoordinateInput[] = [
+      { id: "re", minValue: -2, maxValue: 2 },
+      { id: "im", minValue: -2, maxValue: 2 },
+    ];
+
+    coordinateInputs.forEach((input) => this.handleCoordinateInput(input));
   }
 
   private setupSelectInputs() {
@@ -329,6 +333,29 @@ class MandelbrotControls {
 
       this.updateResetButtonsVisibility();
       this.map.refresh(resetView);
+    }, 1000);
+  }
+
+  private handleCoordinateInput({ id, minValue, maxValue }: CoordinateInput) {
+    const input = document.getElementById(id) as HTMLInputElement;
+    input.value = this.map.config[id];
+    input.oninput = debounce(({ target }) => {
+      const rawValue = String((target as HTMLInputElement).value).trim();
+      // Coordinates are kept as decimal strings so deep-zoom precision
+      // survives; only their approximate magnitude is range checked.
+      const approximateValue = Number.parseFloat(rawValue);
+      const isValid =
+        isValidDecimalCoordinate(rawValue) &&
+        approximateValue >= minValue &&
+        approximateValue <= maxValue;
+
+      const newValue = isValid ? rawValue : this.map.config[id];
+
+      input.value = newValue;
+      this.map.config[id] = newValue;
+
+      this.updateResetButtonsVisibility();
+      this.map.refresh();
     }, 1000);
   }
 
@@ -667,44 +694,40 @@ class MandelbrotControls {
   }
 
   private setCoordinateInputValues() {
-    const tileSize = [
-      this.map.mandelbrotLayer.getTileSize().x,
-      this.map.mandelbrotLayer.getTileSize().y,
-    ];
-    const point = this.map
-      .project(this.map.getCenter(), this.map.getZoom())
-      .unscaleBy(new L.Point(tileSize[0], tileSize[1]));
-
-    const currentPosition = { ...point, z: this.map.getZoom() };
-
     const { re: currentRe, im: currentIm } =
-      this.map.tilePositionToComplexParts(
-        currentPosition.x,
-        currentPosition.y,
-        currentPosition.z,
-      );
-    const currentZoom = currentPosition.z;
-
-    const reDiff = Math.abs(currentRe - this.map.initialConfig.re);
-    const imDiff = Math.abs(currentIm - this.map.initialConfig.im);
-    const zoomDiff = Math.abs(currentZoom - this.map.initialConfig.zoom);
+      this.map.currentCenterCoordinates();
+    const currentZoom = this.map.effectiveZoom;
 
     let finalRe = currentRe;
     let finalIm = currentIm;
     let finalZoom = currentZoom;
 
-    const tolerance = 0.02;
-    if (reDiff <= tolerance && imDiff <= tolerance && zoomDiff <= tolerance) {
-      finalRe = this.map.initialConfig.re;
-      finalIm = this.map.initialConfig.im;
-      finalZoom = this.map.initialConfig.zoom;
+    // Snap to the initial view when close to it, so the reset button hides.
+    // Only meaningful at shallow zooms, where f64 comparison is exact enough.
+    if (this.map.zoomOffset === 0) {
+      const tolerance = 0.02;
+      const reDiff = Math.abs(
+        Number.parseFloat(currentRe) -
+          Number.parseFloat(this.map.initialConfig.re),
+      );
+      const imDiff = Math.abs(
+        Number.parseFloat(currentIm) -
+          Number.parseFloat(this.map.initialConfig.im),
+      );
+      const zoomDiff = Math.abs(currentZoom - this.map.initialConfig.zoom);
+
+      if (reDiff <= tolerance && imDiff <= tolerance && zoomDiff <= tolerance) {
+        finalRe = this.map.initialConfig.re;
+        finalIm = this.map.initialConfig.im;
+        finalZoom = this.map.initialConfig.zoom;
+      }
     }
 
     this.map.config.re = finalRe;
-    (document.getElementById("re") as HTMLInputElement).value = String(finalRe);
+    (document.getElementById("re") as HTMLInputElement).value = finalRe;
 
     this.map.config.im = finalIm;
-    (document.getElementById("im") as HTMLInputElement).value = String(finalIm);
+    (document.getElementById("im") as HTMLInputElement).value = finalIm;
 
     this.map.config.zoom = finalZoom;
     (document.getElementById("zoom") as HTMLInputElement).value =

@@ -28,6 +28,7 @@
 ## Features
 
 - Explore the Mandelbrot set with scroll zooming, region selection, and live coordinates.
+- Zoom far beyond floating-point limits: deep views are rendered with arbitrary-precision perturbation theory.
 - Tune the image with iteration, resolution, palette, and exponent controls.
 - Download high-resolution images of interesting views.
 - Share links that preserve the exact location and zoom level.
@@ -43,6 +44,8 @@ Example images generated with Mandelbrot.site:
 ## Architecture
 
 The app renders fractal tiles in the browser. The computation-heavy Mandelbrot code is written in [Rust](https://github.com/rust-lang/rust), compiled to [WebAssembly](https://webassembly.org/) with [wasm-pack](https://github.com/rustwasm/wasm-pack), and run in parallel with [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API) through [threads.js](https://github.com/andywer/threads.js). The interface is built with [TypeScript](https://github.com/microsoft/TypeScript) and [Leaflet.js](https://github.com/Leaflet/Leaflet), giving the fractal a map-like pan and zoom experience.
+
+Ordinary 64-bit floats run out of precision around zoom level 44, so deep zooms use [perturbation theory](https://en.wikipedia.org/wiki/Plotting_algorithms_for_the_Mandelbrot_set#Perturbation_theory): each view computes one reference orbit with arbitrary-precision arithmetic ([dashu](https://github.com/cmpute/dashu)), and every pixel iterates only its tiny delta from that orbit using fast hardware floats with an extended exponent range, rebasing against the orbit to avoid glitches. Coordinates are tracked as arbitrary-precision decimal strings, and Leaflet's own f64-limited zoom is kept shallow by periodically re-anchoring the map origin to the view center, so the effective zoom depth is unlimited.
 
 Mandelbrot.site is also a [Progressive Web App](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps), with service-worker support for offline use and reduced network dependency.
 

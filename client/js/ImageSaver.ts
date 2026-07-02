@@ -3,9 +3,9 @@ import { FunctionThread, Pool } from "threads";
 import type MandelbrotMap from "./MandelbrotMap";
 import type MandelbrotLayer from "./MandelbrotLayer";
 import {
-  ComplexBounds,
   OptimiseRequest,
   OptimiseResponse,
+  TileRect,
   WorkerRequest,
   WorkerResponse,
 } from "./MandelbrotMap";
@@ -34,7 +34,7 @@ class ImageSaver {
     onStartOptimizing?: () => void,
   ) {
     const bounds = this.adjustBoundsForAspectRatio(
-      this.map.mapBoundsAsComplexParts,
+      this.map.mapBoundsInTileSpace,
       totalWidth,
       totalHeight,
     );
@@ -52,47 +52,47 @@ class ImageSaver {
   }
 
   private adjustBoundsForAspectRatio(
-    bounds: ComplexBounds,
+    bounds: TileRect,
     totalWidth: number,
     totalHeight: number,
-  ): ComplexBounds {
+  ): TileRect {
     const imageAspectRatio = totalWidth / totalHeight;
-    const complexAspectRatio =
-      (bounds.reMax - bounds.reMin) / (bounds.imMax - bounds.imMin);
+    const boundsAspectRatio =
+      (bounds.xMax - bounds.xMin) / (bounds.yMax - bounds.yMin);
 
     const adjustedBounds = { ...bounds };
 
-    if (imageAspectRatio < complexAspectRatio) {
-      const newImHeight = (bounds.reMax - bounds.reMin) / imageAspectRatio;
-      const imCenter = (bounds.imMin + bounds.imMax) / 2;
-      adjustedBounds.imMin = imCenter - newImHeight / 2;
-      adjustedBounds.imMax = imCenter + newImHeight / 2;
-    } else if (imageAspectRatio > complexAspectRatio) {
-      const newReWidth = (bounds.imMax - bounds.imMin) * imageAspectRatio;
-      const reCenter = (bounds.reMin + bounds.reMax) / 2;
-      adjustedBounds.reMin = reCenter - newReWidth / 2;
-      adjustedBounds.reMax = reCenter + newReWidth / 2;
+    if (imageAspectRatio < boundsAspectRatio) {
+      const newHeight = (bounds.xMax - bounds.xMin) / imageAspectRatio;
+      const yCenter = (bounds.yMin + bounds.yMax) / 2;
+      adjustedBounds.yMin = yCenter - newHeight / 2;
+      adjustedBounds.yMax = yCenter + newHeight / 2;
+    } else if (imageAspectRatio > boundsAspectRatio) {
+      const newWidth = (bounds.yMax - bounds.yMin) * imageAspectRatio;
+      const xCenter = (bounds.xMin + bounds.xMax) / 2;
+      adjustedBounds.xMin = xCenter - newWidth / 2;
+      adjustedBounds.xMax = xCenter + newWidth / 2;
     }
 
     return adjustedBounds;
   }
 
   private async generateImageColumns(
-    bounds: ComplexBounds,
+    bounds: TileRect,
     totalWidth: number,
     totalHeight: number,
   ): Promise<HTMLCanvasElement[]> {
     const numColumns = 24;
     const columnWidth = Math.ceil(totalWidth / numColumns);
-    const reDiff = bounds.reMax - bounds.reMin;
-    const reDiffPerColumn = reDiff * (columnWidth / totalWidth);
+    const xDiff = bounds.xMax - bounds.xMin;
+    const xDiffPerColumn = xDiff * (columnWidth / totalWidth);
 
     const imagePromises: Promise<HTMLCanvasElement>[] = [];
     for (let i = 0; i < numColumns; i++) {
       const subBounds = {
         ...bounds,
-        reMin: bounds.reMin + reDiffPerColumn * i,
-        reMax: bounds.reMin + reDiffPerColumn * (i + 1),
+        xMin: bounds.xMin + xDiffPerColumn * i,
+        xMax: bounds.xMin + xDiffPerColumn * (i + 1),
       };
       imagePromises.push(
         this.mandelbrotLayer.getImage(subBounds, columnWidth, totalHeight),
@@ -154,11 +154,15 @@ class ImageSaver {
 
     const blob = new Blob([finalBuffer], { type: "image/png" });
 
+    // Deep-zoom coordinates can be hundreds of digits; keep filenames sane.
+    const truncate = (value: string) =>
+      value.length > 24 ? value.slice(0, 24) : value;
+
     saveAs(
       blob,
-      `mandelbrot${Date.now()}_r${this.map.config.re}_im${
-        this.map.config.im
-      }_z${this.map.config.zoom}.png`,
+      `mandelbrot${Date.now()}_r${truncate(this.map.config.re)}_im${truncate(
+        this.map.config.im,
+      )}_z${this.map.config.zoom}.png`,
     );
   }
 }

@@ -17,11 +17,15 @@ import("../../mandelbrot/pkg")
     wasm.init();
 
     const getTile = (params) =>
-      wasm.get_mandelbrot_set_image(
-        params.bounds.reMin,
-        params.bounds.reMax,
-        params.bounds.imMin,
-        params.bounds.imMax,
+      wasm.get_mandelbrot_image_precise(
+        params.originRe,
+        params.originIm,
+        params.bounds.xMin,
+        params.bounds.xMax,
+        params.bounds.yMin,
+        params.bounds.yMax,
+        params.bounds.zoom,
+        params.zoomOffset,
         params.iterations,
         params.exponent,
         params.imageWidth,

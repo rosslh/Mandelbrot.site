@@ -38,8 +38,8 @@ window.addEventListener("load", () => {
         paletteMaxIter: 200,
         scaleWithIterations: true,
 
-        re: -0.5,
-        im: 0,
+        re: "-0.5",
+        im: "0",
         zoom: initialZoom,
       },
     });

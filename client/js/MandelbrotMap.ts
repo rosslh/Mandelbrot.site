@@ -4,6 +4,11 @@ import MandelbrotLayer from "./MandelbrotLayer";
 import { QueuedTask } from "threads/dist/master/pool-types";
 import MandelbrotControls from "./MandelbrotControls";
 import ImageSaver from "./ImageSaver";
+import {
+  decimalDigitsForZoom,
+  isValidDecimalCoordinate,
+  offsetCoordinate,
+} from "./highPrecision";
 
 export type MandelbrotConfig = {
   iterations: number;
@@ -19,8 +24,10 @@ export type MandelbrotConfig = {
   paletteMinIter: number;
   paletteMaxIter: number;
   scaleWithIterations: boolean;
-  re: number;
-  im: number;
+
+  // Coordinates are decimal strings because deep zooms exceed f64 precision.
+  re: string;
+  im: string;
   zoom: number;
 };
 
@@ -49,11 +56,15 @@ type MapWithResetView = L.Map & {
   _resetView: (center: L.LatLng | [number, number], zoom: number) => void;
 };
 
-export type ComplexBounds = {
-  reMin: number;
-  reMax: number;
-  imMin: number;
-  imMax: number;
+// A rectangle in Leaflet tile coordinates. A tile coordinate `v` at `zoom`
+// maps to the complex offset ((v / 2^(zoom - 2)) * (tileSize / 128) - 4)
+// * 2^-zoomOffset from the world origin.
+export type TileRect = {
+  xMin: number;
+  xMax: number;
+  yMin: number;
+  yMax: number;
+  zoom: number;
 };
 
 type TilePosition = {
@@ -61,10 +72,14 @@ type TilePosition = {
   y: number;
 };
 
-type ComplexParts = {
-  re: number;
-  im: number;
-};
+// Leaflet's internal math is f64, which runs out of precision around zoom 30.
+// To zoom deeper, the world origin is periodically re-anchored to the current
+// view center (tracked as an arbitrary-precision decimal string) and Leaflet's
+// own zoom is reset to a small value; `zoomOffset` accumulates the difference.
+// The effective zoom is `leafletZoom + zoomOffset` and is unbounded.
+const MAX_LEAFLET_ZOOM = 26;
+const MIN_LEAFLET_ZOOM_WITH_OFFSET = 8;
+const REBASED_LEAFLET_ZOOM = 12;
 
 class MandelbrotMap extends L.Map {
   mandelbrotLayer: MandelbrotLayer;
@@ -75,6 +90,8 @@ class MandelbrotMap extends L.Map {
   pool: Pool<TaskThread>;
   imageSaver: ImageSaver;
   queuedTileTasks: QueuedTileTask[] = [];
+  origin: { re: string; im: string };
+  zoomOffset: number;
 
   constructor({
     htmlId,
@@ -85,9 +102,9 @@ class MandelbrotMap extends L.Map {
   }) {
     super(htmlId, {
       attributionControl: false,
-      maxZoom: 48,
-      zoomAnimationThreshold: 48,
-      center: [initialConfig.re, initialConfig.im],
+      maxZoom: 60,
+      zoomAnimationThreshold: 60,
+      center: [0, 0],
     });
 
     this.initializeMap(htmlId, initialConfig);
@@ -96,16 +113,17 @@ class MandelbrotMap extends L.Map {
   private async initializeMap(htmlId: string, initialConfig: MandelbrotConfig) {
     await this.createPool();
     this.mapId = htmlId;
+    this.origin = { re: initialConfig.re, im: initialConfig.im };
+    this.zoomOffset = 0;
     this.mandelbrotLayer = new MandelbrotLayer().addTo(this);
     this.initialConfig = { ...initialConfig };
     this.config = { ...initialConfig };
     this.controls = new MandelbrotControls(this);
     this.imageSaver = new ImageSaver(this, this.pool, this.mandelbrotLayer);
 
-    this.setView(
-      [this.initialConfig.re, this.initialConfig.im],
-      this.initialConfig.zoom,
-    );
+    // The world origin corresponds to latLng (0, 0), the center of Leaflet's
+    // tile universe.
+    this.setView([0, 0], this.initialConfig.zoom);
     this.setConfigFromUrl();
     this.setupEventListeners();
   }
@@ -120,34 +138,20 @@ class MandelbrotMap extends L.Map {
     this.on("move", this.controls.throttleSetCoordinateInputValues);
     this.on("zoomend", () => {
       this.cancelTileTasksOnWrongZoom();
+      this.rebaseOriginIfNeeded();
       this.controls.throttleSetCoordinateInputValues();
     });
   }
 
-  tilePositionToComplexParts(x: number, y: number, z: number): ComplexParts {
-    const scaleFactor = this.mandelbrotLayer.getTileSize().x / 128;
-    const d = 2 ** (z - 2);
-    const re = (x / d) * scaleFactor - 4 + this.initialConfig.re;
-    const im = -((y / d) * scaleFactor - 4) + this.initialConfig.im;
-    return { re, im };
+  get effectiveZoom(): number {
+    return this.getZoom() + this.zoomOffset;
   }
 
-  private handleMapClick = (e: L.LeafletMouseEvent) => {
-    if (e.originalEvent.altKey) {
-      this.setView(e.latlng, this.getZoom());
-    }
-  };
-
-  private complexPartsToTilePosition(
-    re: number,
-    im: number,
-    z: number,
-  ): TilePosition {
+  /** The offset of a tile coordinate from the world origin, before the
+   * additional 2^-zoomOffset deep-zoom scaling. */
+  tileCoordinateOffset(value: number, zoom: number): number {
     const scaleFactor = this.mandelbrotLayer.getTileSize().x / 128;
-    const d = 2 ** (z - 2);
-    const x = ((re + 4 - this.initialConfig.re) * d) / scaleFactor;
-    const y = ((this.initialConfig.im - im + 4) * d) / scaleFactor;
-    return { x, y };
+    return (value / 2 ** (zoom - 2)) * scaleFactor - 4;
   }
 
   private latLngToTilePosition(latLng: L.LatLng, z: number): TilePosition {
@@ -158,39 +162,80 @@ class MandelbrotMap extends L.Map {
     return { x: point.x, y: point.y };
   }
 
-  public get mapBoundsAsComplexParts(): ComplexBounds {
-    const bounds = this.getBounds();
-    const sw = this.latLngToTilePosition(bounds.getSouthWest(), this.getZoom());
-    const ne = this.latLngToTilePosition(bounds.getNorthEast(), this.getZoom());
+  /** The current view center as arbitrary-precision decimal strings. */
+  currentCenterCoordinates(): { re: string; im: string } {
+    const zoom = this.getZoom();
+    const center = this.latLngToTilePosition(this.getCenter(), zoom);
+    const digits = decimalDigitsForZoom(this.effectiveZoom);
 
-    const { re: reMin, im: imMin } = this.tilePositionToComplexParts(
-      sw.x,
-      sw.y,
-      this.getZoom(),
-    );
-    const { re: reMax, im: imMax } = this.tilePositionToComplexParts(
-      ne.x,
-      ne.y,
-      this.getZoom(),
-    );
-
-    return { reMin, reMax, imMin, imMax };
+    return {
+      re: offsetCoordinate(
+        this.origin.re,
+        this.tileCoordinateOffset(center.x, zoom),
+        this.zoomOffset,
+        digits,
+      ),
+      im: offsetCoordinate(
+        this.origin.im,
+        -this.tileCoordinateOffset(center.y, zoom),
+        this.zoomOffset,
+        digits,
+      ),
+    };
   }
 
-  private complexPartsToLatLng(re: number, im: number, z: number): L.LatLng {
-    const tileSize = [
-      this.mandelbrotLayer.getTileSize().x,
-      this.mandelbrotLayer.getTileSize().y,
-    ];
+  public get mapBoundsInTileSpace(): TileRect {
+    const zoom = this.getZoom();
+    const bounds = this.getBounds();
+    const southWest = this.latLngToTilePosition(bounds.getSouthWest(), zoom);
+    const northEast = this.latLngToTilePosition(bounds.getNorthEast(), zoom);
 
-    const { x, y } = this.complexPartsToTilePosition(re, im, z);
+    return {
+      xMin: southWest.x,
+      xMax: northEast.x,
+      yMin: northEast.y,
+      yMax: southWest.y,
+      zoom,
+    };
+  }
 
-    const latLng = this.unproject(
-      L.point(x, y).scaleBy(new L.Point(tileSize[0], tileSize[1])),
-      z,
-    );
+  private handleMapClick = (e: L.LeafletMouseEvent) => {
+    if (e.originalEvent.altKey) {
+      this.setView(e.latlng, this.getZoom());
+    }
+  };
 
-    return latLng;
+  /** Moves the world origin to the current view center so Leaflet's own zoom
+   * and pixel coordinates stay well within f64 precision. */
+  private rebaseOriginIfNeeded() {
+    const leafletZoom = this.getZoom();
+    const needsRebase =
+      leafletZoom > MAX_LEAFLET_ZOOM ||
+      (this.zoomOffset > 0 && leafletZoom < MIN_LEAFLET_ZOOM_WITH_OFFSET);
+
+    if (!needsRebase) {
+      return;
+    }
+
+    const effectiveZoom = Math.round(this.effectiveZoom);
+    this.origin = this.currentCenterCoordinates();
+    this.zoomOffset = Math.max(0, effectiveZoom - REBASED_LEAFLET_ZOOM);
+
+    const mapWithResetView = this as unknown as MapWithResetView;
+    mapWithResetView._resetView([0, 0], effectiveZoom - this.zoomOffset);
+  }
+
+  /** Navigates to the given coordinates by re-anchoring the world origin
+   * there, so the target is exact at any zoom depth. */
+  goToCoordinates(re: string, im: string, zoom: number) {
+    this.origin = { re, im };
+    this.zoomOffset =
+      zoom > MAX_LEAFLET_ZOOM
+        ? Math.max(0, Math.round(zoom) - REBASED_LEAFLET_ZOOM)
+        : 0;
+
+    const mapWithResetView = this as unknown as MapWithResetView;
+    mapWithResetView._resetView([0, 0], zoom - this.zoomOffset);
   }
 
   private async cancelTileTasksOnWrongZoom() {
@@ -214,19 +259,14 @@ class MandelbrotMap extends L.Map {
   async refresh(resetView = false) {
     await this.createPool();
     this.imageSaver = new ImageSaver(this, this.pool, this.mandelbrotLayer);
-    const mapWithResetView = this as unknown as MapWithResetView;
     if (resetView) {
-      mapWithResetView._resetView(
-        [this.initialConfig.re, this.initialConfig.im],
+      this.goToCoordinates(
+        this.initialConfig.re,
+        this.initialConfig.im,
         this.initialConfig.zoom,
       );
     } else {
-      const pointToCenter = this.complexPartsToLatLng(
-        this.config.re,
-        this.config.im,
-        this.config.zoom,
-      );
-      mapWithResetView._resetView(pointToCenter, this.config.zoom);
+      this.goToCoordinates(this.config.re, this.config.im, this.config.zoom);
     }
   }
 
@@ -275,9 +315,15 @@ class MandelbrotMap extends L.Map {
     const paletteMinIter = queryParams.get("pmin");
     const paletteMaxIter = queryParams.get("pmax");
 
-    if (re && im && zoom) {
-      this.config.re = Number(re);
-      this.config.im = Number(im);
+    if (
+      re &&
+      im &&
+      zoom &&
+      isValidDecimalCoordinate(re) &&
+      isValidDecimalCoordinate(im)
+    ) {
+      this.config.re = re;
+      this.config.im = im;
       this.config.zoom = Number(zoom);
 
       if (iterations) {

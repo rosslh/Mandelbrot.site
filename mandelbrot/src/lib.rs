@@ -1,5 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 
+mod float_exp;
+mod perturbation;
 mod utils;
 
 use once_cell::sync::Lazy;
@@ -375,6 +377,40 @@ fn compute_pixel_color(
 ) -> RgbColor {
     let (escape_iterations, z) = calculate_escape_iterations(re, im, max_iterations, exponent);
 
+    color_from_escape_result(
+        escape_iterations,
+        z,
+        max_iterations,
+        exponent,
+        palette,
+        should_reverse_colors,
+        color_space,
+        shift_hue_amount,
+        saturate_amount,
+        lighten_amount,
+        smooth_coloring,
+        min_iterations_threshold,
+        max_iterations_threshold,
+    )
+}
+
+/// Maps an escape-time result to a color. Shared by the direct and the
+/// perturbation-based renderers.
+fn color_from_escape_result(
+    escape_iterations: u32,
+    z: Complex64,
+    max_iterations: u32,
+    exponent: u32,
+    palette: &colorous::Gradient,
+    should_reverse_colors: bool,
+    color_space: &ValidColorSpace,
+    shift_hue_amount: f32,
+    saturate_amount: f32,
+    lighten_amount: f32,
+    smooth_coloring: bool,
+    min_iterations_threshold: f64,
+    max_iterations_threshold: f64,
+) -> RgbColor {
     if escape_iterations == max_iterations {
         [0, 0, 0]
     } else {
@@ -552,6 +588,139 @@ pub fn get_mandelbrot_set_image(
         palette_min_iter,
         palette_max_iter,
     )
+}
+
+/// Renders a Mandelbrot set image at any zoom depth.
+///
+/// The view is described by an arbitrary-precision world origin (decimal
+/// strings) plus a rectangle in Leaflet tile coordinates. A tile coordinate
+/// `v` at `tile_zoom` maps to the complex offset
+/// `((v / 2^(tile_zoom - 2)) * (200 / 128) - 4) * 2^-zoom_offset` from the
+/// origin. Shallow views use the direct f64 renderer; deep views use
+/// perturbation theory with an arbitrary-precision reference orbit, so zoom
+/// depth is not limited by f64 precision.
+#[wasm_bindgen]
+pub fn get_mandelbrot_image_precise(
+    origin_re: String,
+    origin_im: String,
+    tile_x_min: f64,
+    tile_x_max: f64,
+    tile_y_min: f64,
+    tile_y_max: f64,
+    tile_zoom: i32,
+    zoom_offset: u32,
+    max_iterations: u32,
+    exponent: u32,
+    image_width: usize,
+    image_height: usize,
+    color_scheme: String,
+    reverse_colors: bool,
+    shift_hue_amount: f32,
+    saturate_amount: f32,
+    lighten_amount: f32,
+    color_space: ValidColorSpace,
+    smooth_coloring: bool,
+    palette_min_iter: i32,
+    palette_max_iter: i32,
+) -> Vec<u8> {
+    let effective_zoom = tile_zoom as i64 + zoom_offset as i64;
+
+    let use_perturbation = (zoom_offset > 0 || effective_zoom >= perturbation::DEEP_ZOOM_THRESHOLD)
+        && (2..=perturbation::MAX_PERTURBED_EXPONENT).contains(&exponent);
+
+    if !use_perturbation {
+        // Shallow view (or unsupported exponent): f64 has enough precision to
+        // compute the bounds directly.
+        let origin_re_f64: f64 = origin_re.parse().unwrap_or(0.0);
+        let origin_im_f64: f64 = origin_im.parse().unwrap_or(0.0);
+
+        let re_min = origin_re_f64 + perturbation::tile_coordinate_offset(tile_x_min, tile_zoom);
+        let re_max = origin_re_f64 + perturbation::tile_coordinate_offset(tile_x_max, tile_zoom);
+        let im_max = origin_im_f64 - perturbation::tile_coordinate_offset(tile_y_min, tile_zoom);
+        let im_min = origin_im_f64 - perturbation::tile_coordinate_offset(tile_y_max, tile_zoom);
+
+        return get_mandelbrot_set_image(
+            re_min,
+            re_max,
+            im_min,
+            im_max,
+            max_iterations,
+            exponent,
+            image_width,
+            image_height,
+            color_scheme,
+            reverse_colors,
+            shift_hue_amount,
+            saturate_amount,
+            lighten_amount,
+            color_space,
+            smooth_coloring,
+            palette_min_iter,
+            palette_max_iter,
+        );
+    }
+
+    let frame = match perturbation::PerturbedFrame::new(
+        &origin_re,
+        &origin_im,
+        tile_x_min,
+        tile_x_max,
+        tile_y_min,
+        tile_y_max,
+        tile_zoom,
+        zoom_offset,
+        image_width,
+        image_height,
+        max_iterations,
+        exponent,
+        ESCAPE_RADIUS,
+    ) {
+        Ok(frame) => frame,
+        Err(_) => return create_solid_black_image(image_width, image_height),
+    };
+
+    if frame.border_in_set(image_width, image_height) {
+        return create_solid_black_image(image_width, image_height);
+    }
+
+    let (palette, should_reverse_colors) = get_color_palette(&color_scheme, reverse_colors);
+
+    let min_iterations_threshold = f64::from(palette_min_iter);
+    let max_iterations_threshold =
+        f64::from(palette_max_iter).max(min_iterations_threshold + f64::EPSILON);
+
+    let output_size: usize = image_width * image_height * NUM_COLOR_CHANNELS;
+    let mut img: Vec<u8> = vec![0; output_size];
+
+    for row in 0..image_height {
+        for column in 0..image_width {
+            let (escape_iterations, z) = frame.escape_iterations(column, row);
+
+            let pixel = color_from_escape_result(
+                escape_iterations,
+                z,
+                max_iterations,
+                exponent,
+                palette,
+                should_reverse_colors,
+                &color_space,
+                shift_hue_amount,
+                saturate_amount,
+                lighten_amount,
+                smooth_coloring,
+                min_iterations_threshold,
+                max_iterations_threshold,
+            );
+
+            let index = (row * image_width + column) * NUM_COLOR_CHANNELS;
+            img[index] = pixel[0];
+            img[index + 1] = pixel[1];
+            img[index + 2] = pixel[2];
+            img[index + 3] = 255;
+        }
+    }
+
+    img
 }
 
 /// Initializes the module. This function is specifically designed to be called

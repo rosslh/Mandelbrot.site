@@ -47,6 +47,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.2",
+    "decimal.js": "^10.6.0",
     "file-saver": "^2.0.5",
     "leaflet": "1.7.1",
     "lodash": "^4.17.21",

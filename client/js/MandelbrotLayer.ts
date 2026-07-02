@@ -1,21 +1,28 @@
 import debounce from "lodash/debounce";
 import * as L from "leaflet";
 import type MandelbrotMap from "./MandelbrotMap";
-import {
-  ComplexBounds,
-  MandelbrotConfig,
-  WorkerRequest,
-} from "./MandelbrotMap";
+import { TileRect, WorkerRequest } from "./MandelbrotMap";
 
 type Done = (error: null, tile: HTMLCanvasElement) => void;
 
-export type WasmRequestPayload = Omit<
-  MandelbrotConfig,
-  "zoom" | "highDpiTiles" | "re" | "im" | "scaleWithIterations"
-> & {
-  bounds: ComplexBounds;
+export type WasmRequestPayload = {
+  originRe: string;
+  originIm: string;
+  bounds: TileRect;
+  zoomOffset: number;
+  iterations: number;
+  exponent: number;
   imageWidth: number;
   imageHeight: number;
+  colorScheme: string;
+  reverseColors: boolean;
+  lightenAmount: number;
+  saturateAmount: number;
+  shiftHueAmount: number;
+  colorSpace: number;
+  smoothColoring: boolean;
+  paletteMinIter: number;
+  paletteMaxIter: number;
 };
 
 type TileGenerationTask = {
@@ -36,8 +43,34 @@ class MandelbrotLayer extends L.GridLayer {
     });
   }
 
+  private buildRequestPayload(
+    bounds: TileRect,
+    imageWidth: number,
+    imageHeight: number,
+  ): WasmRequestPayload {
+    return {
+      originRe: this._map.origin.re,
+      originIm: this._map.origin.im,
+      bounds,
+      zoomOffset: this._map.zoomOffset,
+      iterations: this._map.config.iterations,
+      exponent: this._map.config.exponent,
+      imageWidth,
+      imageHeight,
+      colorScheme: this._map.config.colorScheme,
+      reverseColors: this._map.config.reverseColors,
+      lightenAmount: this._map.config.lightenAmount,
+      saturateAmount: this._map.config.saturateAmount,
+      shiftHueAmount: this._map.config.shiftHueAmount,
+      colorSpace: this._map.config.colorSpace,
+      smoothColoring: this._map.config.smoothColoring,
+      paletteMinIter: this._map.config.paletteMinIter,
+      paletteMaxIter: this._map.config.paletteMaxIter,
+    };
+  }
+
   getImage(
-    bounds: { reMin: number; reMax: number; imMin: number; imMax: number },
+    bounds: TileRect,
     imageWidth: number,
     imageHeight: number,
   ): Promise<HTMLCanvasElement> {
@@ -57,22 +90,7 @@ class MandelbrotLayer extends L.GridLayer {
         try {
           const request: WorkerRequest = {
             type: "calculate" as const,
-            payload: {
-              bounds,
-              iterations: this._map.config.iterations,
-              exponent: this._map.config.exponent,
-              imageWidth,
-              imageHeight,
-              colorScheme: this._map.config.colorScheme,
-              reverseColors: this._map.config.reverseColors,
-              lightenAmount: this._map.config.lightenAmount,
-              saturateAmount: this._map.config.saturateAmount,
-              shiftHueAmount: this._map.config.shiftHueAmount,
-              colorSpace: this._map.config.colorSpace,
-              smoothColoring: this._map.config.smoothColoring,
-              paletteMinIter: this._map.config.paletteMinIter,
-              paletteMaxIter: this._map.config.paletteMaxIter,
-            },
+            payload: this.buildRequestPayload(bounds, imageWidth, imageHeight),
           };
           const data = (await workerTask(request)) as Uint8Array;
 
@@ -129,27 +147,14 @@ class MandelbrotLayer extends L.GridLayer {
     this.addTo(currentMap);
   }
 
-  private getComplexBoundsOfTile(tilePosition: L.Coords): ComplexBounds {
-    const { re: reMin, im: imMax } = this._map.tilePositionToComplexParts(
-      tilePosition.x,
-      tilePosition.y,
-      tilePosition.z,
-    );
-
-    const { re: reMax, im: imMin } = this._map.tilePositionToComplexParts(
-      tilePosition.x + 1,
-      tilePosition.y + 1,
-      tilePosition.z,
-    );
-
-    const bounds = {
-      reMin,
-      reMax,
-      imMin,
-      imMax,
+  private getTileRect(tilePosition: L.Coords): TileRect {
+    return {
+      xMin: tilePosition.x,
+      xMax: tilePosition.x + 1,
+      yMin: tilePosition.y,
+      yMax: tilePosition.y + 1,
+      zoom: tilePosition.z,
     };
-
-    return bounds;
   }
 
   private generateTile(
@@ -166,7 +171,7 @@ class MandelbrotLayer extends L.GridLayer {
     canvas.width = scaledTileSize;
     canvas.height = scaledTileSize;
 
-    const bounds = this.getComplexBoundsOfTile(tilePosition);
+    const bounds = this.getTileRect(tilePosition);
 
     const id =
       typeof crypto !== "undefined" && crypto
@@ -176,22 +181,11 @@ class MandelbrotLayer extends L.GridLayer {
     const tileTask = this._map.pool.queue(async (workerTask) => {
       const request: WorkerRequest = {
         type: "calculate" as const,
-        payload: {
+        payload: this.buildRequestPayload(
           bounds,
-          iterations: this._map.config.iterations,
-          exponent: this._map.config.exponent,
-          imageWidth: scaledTileSize,
-          imageHeight: scaledTileSize,
-          colorScheme: this._map.config.colorScheme,
-          reverseColors: this._map.config.reverseColors,
-          lightenAmount: this._map.config.lightenAmount,
-          saturateAmount: this._map.config.saturateAmount,
-          shiftHueAmount: this._map.config.shiftHueAmount,
-          colorSpace: this._map.config.colorSpace,
-          smoothColoring: this._map.config.smoothColoring,
-          paletteMinIter: this._map.config.paletteMinIter,
-          paletteMaxIter: this._map.config.paletteMaxIter,
-        },
+          scaledTileSize,
+          scaledTileSize,
+        ),
       };
       const data = (await workerTask(request)) as Uint8Array;
 
