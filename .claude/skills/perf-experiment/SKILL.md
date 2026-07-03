@@ -134,8 +134,8 @@ below).
    wasm size before/after (client/dist `*.wasm`).
 3. Re-run the benchmark with a fresh `baseline` built from the new config to
    confirm the win survived.
-4. Commit with the numbers: geomean delta per pathway, size delta, and the
-   results filename.
+4. Append the entry to `bench/LOG.md` and commit with the numbers: geomean
+   delta per pathway, size delta, and how to reproduce.
 
 ## Workload corpus
 
@@ -147,19 +147,15 @@ tileSize and smoothColoring pairs. User cases (`user-*`) come from a Supabase
 dedupes, buckets by pathway x iteration tercile, samples a few per bucket).
 Keep the corpus small enough that a two-variant run finishes in minutes.
 
-## Findings from the 2026-07 first pass (bench/results/first-pass.json)
+## Experiment log — read it first, then append to it
 
-Read these before re-running flag experiments — the flag space is largely
-exhausted:
-
-- rustc opt-level (1/2/3/s) and wasm-opt level (-Oz/-O3) changes measured
-  within ±1% of each other in Chrome. V8's optimizing compiler flattens most
-  codegen differences in these loops (opt-level **0** was +189%, so the
-  harness is sensitive; the differences genuinely aren't there).
-- simd128 requires `opt-level >= 3` to do anything (LLVM autovectorization is
-  disabled at `s` and did nothing at 2). opt3+simd128: **-9.6% float-exp**,
-  -1.3% perturbation-f64, ~0% direct, +12.8% size. Shipped.
-- wasm-opt `-Oz` vs `-O3` on top of opt3+simd: same speed, ~2 KiB apart.
+**`bench/LOG.md` is the durable record of every experiment.** Check it before
+starting so you don't re-run a settled question (headline so far: the flag
+space without code changes is exhausted — everything non-SIMD measured within
+±1%; opt3+simd128 shipped at −9.6% float-exp). After every experiment —
+win, loss, or inconclusive — append an entry: date, machine, exact flags or
+code change, per-pathway geomean deltas, size delta, verdict. Raw results
+JSONs are gitignored and machine-local; the log is what survives.
 
 ## Experiment backlog (roughly prioritized)
 
