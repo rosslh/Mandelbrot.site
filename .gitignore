@@ -65,6 +65,9 @@
 *.tsbuildinfo
 **/*.rs.bk
 $RECYCLE.BIN/
+bench/artifacts/
+bench/results/
+events_rows.csv
 bower_components
 build/Release
 Cargo.lock

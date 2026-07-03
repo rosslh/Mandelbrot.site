@@ -1,0 +1,17 @@
+{
+  "name": "mandelbrot-bench",
+  "private": true,
+  "type": "module",
+  "description": "WebAssembly-in-Chrome performance benchmarks for Mandelbrot tile generation",
+  "scripts": {
+    "build-variant": "node src/build.mjs",
+    "run": "node src/run.mjs",
+    "compare": "node src/compare.mjs",
+    "pixel-check": "node src/pixel-check.mjs",
+    "ingest": "node src/ingest.mjs"
+  },
+  "devDependencies": {
+    "puppeteer": "24.9.0",
+    "wasm-opt": "1.4.0"
+  }
+}

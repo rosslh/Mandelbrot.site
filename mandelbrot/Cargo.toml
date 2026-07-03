@@ -33,3 +33,8 @@ default = ["console_error_panic_hook"]
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-Oz", "--enable-mutable-globals"]
+
+# Used by bench/ variant builds, which run their own wasm-opt pass with
+# per-variant flags. Does not affect production (webpack uses --release).
+[package.metadata.wasm-pack.profile.profiling]
+wasm-opt = false

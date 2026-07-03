@@ -1,0 +1,354 @@
+{
+  "version": 1,
+  "comment": "Benchmark workload corpus. Pathway is derived from zoom: <47 direct, 47-249 perturbation-f64, >=250 float-exp. Synthetic deep cases use exact boundary points (cardioid cusp 0.25, dendrite i, needle tip -2) so coordinates stay exact at any depth. User cases come from bench/src/ingest.mjs.",
+  "defaults": {
+    "exponent": 2,
+    "colorScheme": "turbo",
+    "reverseColors": false,
+    "shiftHueAmount": 0,
+    "saturateAmount": 0,
+    "lightenAmount": 0,
+    "colorSpace": 2,
+    "smoothColoring": true,
+    "paletteMinIter": 0,
+    "tileSize": 200
+  },
+  "cases": [
+    {
+      "id": "syn-direct-z3-home",
+      "source": "synthetic",
+      "re": "-0.5",
+      "im": "0",
+      "zoom": 3,
+      "iterations": 200,
+      "note": "Default home view"
+    },
+    {
+      "id": "syn-direct-z10-seahorse",
+      "source": "synthetic",
+      "re": "-0.7436438870371587",
+      "im": "0.1318259042053119",
+      "zoom": 10,
+      "iterations": 500,
+      "note": "Seahorse valley, boundary-rich"
+    },
+    {
+      "id": "syn-direct-z30-seahorse",
+      "source": "synthetic",
+      "re": "-0.7436438870371587",
+      "im": "0.1318259042053119",
+      "zoom": 30,
+      "iterations": 1500,
+      "note": "Deepest practical f64 zoom before perturbation threshold"
+    },
+    {
+      "id": "syn-direct-z8-interior",
+      "source": "synthetic",
+      "re": "-0.5",
+      "im": "0",
+      "zoom": 8,
+      "iterations": 1500,
+      "note": "Fully interior tile; exercises the rect_in_set short-circuit"
+    },
+    {
+      "id": "syn-direct-z5-multibrot3",
+      "source": "synthetic",
+      "re": "0.3849",
+      "im": "0",
+      "zoom": 5,
+      "iterations": 500,
+      "overrides": {
+        "exponent": 3
+      },
+      "note": "Cubic multibrot near its real-axis cusp; general escape loop"
+    },
+    {
+      "id": "syn-pf64-z100-multibrot3",
+      "source": "synthetic",
+      "re": "0",
+      "im": "0",
+      "zoom": 100,
+      "iterations": 1500,
+      "overrides": {
+        "exponent": 3
+      },
+      "note": "General-exponent perturbation (Horner) loop, fully interior"
+    },
+    {
+      "id": "syn-pf64-z60-cusp",
+      "source": "synthetic",
+      "re": "0.25",
+      "im": "0",
+      "zoom": 60,
+      "iterations": 500,
+      "note": "Cardioid cusp just past the perturbation threshold"
+    },
+    {
+      "id": "syn-pf64-z100-dendrite",
+      "source": "synthetic",
+      "re": "0",
+      "im": "1",
+      "zoom": 100,
+      "iterations": 1500,
+      "note": "Misiurewicz dendrite; mixed escape times"
+    },
+    {
+      "id": "syn-pf64-z100-dendrite-400px",
+      "source": "synthetic",
+      "re": "0",
+      "im": "1",
+      "zoom": 100,
+      "iterations": 1500,
+      "overrides": {
+        "tileSize": 400
+      },
+      "note": "tileSize scaling pair for syn-pf64-z100-dendrite"
+    },
+    {
+      "id": "syn-pf64-z100-dendrite-nosmooth",
+      "source": "synthetic",
+      "re": "0",
+      "im": "1",
+      "zoom": 100,
+      "iterations": 1500,
+      "overrides": {
+        "smoothColoring": false
+      },
+      "note": "smoothColoring cost pair for syn-pf64-z100-dendrite"
+    },
+    {
+      "id": "syn-pf64-z150-cusp",
+      "source": "synthetic",
+      "re": "0.25",
+      "im": "0",
+      "zoom": 150,
+      "iterations": 5000,
+      "note": "Near-parabolic: most pixels run full max_iterations"
+    },
+    {
+      "id": "syn-pf64-z200-needle",
+      "source": "synthetic",
+      "re": "-2",
+      "im": "0",
+      "zoom": 200,
+      "iterations": 1500,
+      "note": "Needle tip; reference orbit sits at |z|=2"
+    },
+    {
+      "id": "syn-fexp-z300-dendrite",
+      "source": "synthetic",
+      "re": "0",
+      "im": "1",
+      "zoom": 300,
+      "iterations": 1500,
+      "note": "Extended-exponent deltas, mixed escape times"
+    },
+    {
+      "id": "syn-fexp-z300-cusp",
+      "source": "synthetic",
+      "re": "0.25",
+      "im": "0",
+      "zoom": 300,
+      "iterations": 3000,
+      "note": "Extended-exponent, all pixels at max_iterations"
+    },
+    {
+      "id": "syn-fexp-z500-needle",
+      "source": "synthetic",
+      "re": "-2",
+      "im": "0",
+      "zoom": 500,
+      "iterations": 3000,
+      "note": "Very deep needle zoom"
+    },
+    {
+      "id": "syn-fexp-z500-cusp-hi",
+      "source": "synthetic",
+      "re": "0.25",
+      "im": "0",
+      "zoom": 500,
+      "iterations": 10000,
+      "note": "Heaviest case: full max_iterations on every pixel"
+    },
+    {
+      "id": "user-z0-06283db6",
+      "source": "user",
+      "re": "2.8125",
+      "im": "-1.25",
+      "zoom": 0,
+      "iterations": 900,
+      "overrides": {
+        "exponent": 5
+      },
+      "note": "direct/high-iter"
+    },
+    {
+      "id": "user-z0-29487536",
+      "source": "user",
+      "re": "3.5",
+      "im": "-2.0468750000000004",
+      "zoom": 0,
+      "iterations": 200,
+      "note": "direct/low-iter"
+    },
+    {
+      "id": "user-z0-8c898eb5",
+      "source": "user",
+      "re": "-3.25",
+      "im": "3.9999999999982956",
+      "zoom": 0,
+      "iterations": 254,
+      "note": "direct/mid-iter"
+    },
+    {
+      "id": "user-z10-c5c187be",
+      "source": "user",
+      "re": "-0.6405275799334049",
+      "im": "-0.401486929506063",
+      "zoom": 10,
+      "iterations": 200,
+      "note": "direct/low-iter"
+    },
+    {
+      "id": "user-z15-cc35d2c9",
+      "source": "user",
+      "re": "-0.24461574549786747",
+      "im": "0.8838829040760174",
+      "zoom": 15,
+      "iterations": 800,
+      "note": "direct/mid-iter"
+    },
+    {
+      "id": "user-z20-d0989824",
+      "source": "user",
+      "re": "0.25301945209503174",
+      "im": "-0.00028127431869506836",
+      "zoom": 20,
+      "iterations": 1600,
+      "note": "direct/high-iter"
+    },
+    {
+      "id": "user-z46-25e95432",
+      "source": "user",
+      "re": "-0.6173597732160516",
+      "im": "-0.4045964293189659",
+      "zoom": 46,
+      "iterations": 6400,
+      "note": "direct/high-iter"
+    },
+    {
+      "id": "user-z46-8b68dd5a",
+      "source": "user",
+      "re": "-0.35316309295142023",
+      "im": "1.086760506849422",
+      "zoom": 46,
+      "iterations": 200,
+      "overrides": {
+        "exponent": 6
+      },
+      "note": "direct/low-iter"
+    },
+    {
+      "id": "user-z46-c24110d7",
+      "source": "user",
+      "re": "-0.691218754826016",
+      "im": "0.3479960700262912",
+      "zoom": 46,
+      "iterations": 400,
+      "note": "direct/mid-iter"
+    },
+    {
+      "id": "user-z47-29403cc2",
+      "source": "user",
+      "re": "-0.19851392584029703",
+      "im": "-1.0999806021988747",
+      "zoom": 47,
+      "iterations": 800,
+      "note": "perturbation-f64/mid-iter"
+    },
+    {
+      "id": "user-z47-366205b7",
+      "source": "user",
+      "re": "0.6913935035696124",
+      "im": "-0.505937053643061",
+      "zoom": 47,
+      "iterations": 200,
+      "overrides": {
+        "exponent": 7
+      },
+      "note": "perturbation-f64/low-iter"
+    },
+    {
+      "id": "user-z47-f37e5416",
+      "source": "user",
+      "re": "-0.5496041100592572",
+      "im": "-0.627270971070018",
+      "zoom": 47,
+      "iterations": 2001,
+      "note": "perturbation-f64/high-iter"
+    },
+    {
+      "id": "user-z48-15d70019",
+      "source": "user",
+      "re": "-0.7563561801300023",
+      "im": "-0.06321457224170057",
+      "zoom": 48,
+      "iterations": 800,
+      "note": "perturbation-f64/mid-iter"
+    },
+    {
+      "id": "user-z48-22bba2c0",
+      "source": "user",
+      "re": "0.35464082784355266",
+      "im": "-0.5219029276928122",
+      "zoom": 48,
+      "iterations": 500,
+      "note": "perturbation-f64/mid-iter"
+    },
+    {
+      "id": "user-z48-ccbd4f51",
+      "source": "user",
+      "re": "-0.5521237057520008",
+      "im": "-0.6257350281858378",
+      "zoom": 48,
+      "iterations": 200,
+      "note": "perturbation-f64/low-iter"
+    },
+    {
+      "id": "user-z48-d0ddf3dd",
+      "source": "user",
+      "re": "-0.8288522349647183",
+      "im": "-0.18903007374364744",
+      "zoom": 48,
+      "iterations": 20000,
+      "note": "perturbation-f64/high-iter"
+    },
+    {
+      "id": "user-z48-d692d8e0",
+      "source": "user",
+      "re": "-1.7401534966541048",
+      "im": "-0.02803387560274384",
+      "zoom": 48,
+      "iterations": 9000,
+      "note": "perturbation-f64/high-iter"
+    },
+    {
+      "id": "user-z85-c163744e",
+      "source": "user",
+      "re": "-0.758020648905594882055313761604286693",
+      "im": "-0.076342380269949609648412912019177464",
+      "zoom": 85,
+      "iterations": 200,
+      "note": "perturbation-f64/low-iter"
+    },
+    {
+      "id": "user-z259-3898a95f",
+      "source": "user",
+      "re": "-1.7400623825793399052208441670658256382966417204361718668798613188202595326994356178513819",
+      "im": "0.0281753397792110489924115211443195096875390767429906085704117981640017204417954754911743",
+      "zoom": 259,
+      "iterations": 1600,
+      "note": "float-exp/high-iter"
+    }
+  ]
+}

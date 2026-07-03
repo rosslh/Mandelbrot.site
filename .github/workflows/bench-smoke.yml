@@ -1,0 +1,29 @@
+name: Bench smoke
+# Manual-only: keeps the benchmark harness from rotting. Shared runners are
+# too noisy for perf gating, so this never blocks anything.
+on:
+  workflow_dispatch:
+jobs:
+  bench-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - uses: actions/setup-node@v2
+        with:
+          node-version-file: ./client/.nvmrc
+      - name: Install bench dependencies
+        working-directory: ./bench
+        run: npm ci
+      - name: Build baseline variant
+        working-directory: ./bench
+        run: node src/build.mjs baseline
+      - name: Run smoke benchmark
+        working-directory: ./bench
+        run: node src/run.mjs --variants baseline --filter syn --samples 3 --warmup 1
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: bench/results/
