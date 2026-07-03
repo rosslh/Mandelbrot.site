@@ -81,6 +81,16 @@ const MAX_LEAFLET_ZOOM = 26;
 const MIN_LEAFLET_ZOOM_WITH_OFFSET = 8;
 const REBASED_LEAFLET_ZOOM = 12;
 
+// Size the tile-render pool to leave one logical core free. An unsized
+// `threads` Pool defaults to `navigator.hardwareConcurrency` and pins every
+// core at 100% while rendering, starving the rest of the system (video decode
+// in other tabs stutters, fans spin up). Reserving a core keeps the OS
+// scheduler able to service other work at a negligible cost to render latency.
+function renderPoolSize(): number {
+  const cores = navigator.hardwareConcurrency || 4;
+  return Math.max(1, cores - 1);
+}
+
 class MandelbrotMap extends L.Map {
   mandelbrotLayer: MandelbrotLayer;
   mapId: string;
@@ -253,7 +263,7 @@ class MandelbrotMap extends L.Map {
       await this.pool.terminate(true);
     }
     const { Worker, spawn } = await import("threads");
-    this.pool = Pool(() => spawn(new Worker("./worker.js")));
+    this.pool = Pool(() => spawn(new Worker("./worker.js")), renderPoolSize());
   }
 
   async refresh(resetView = false) {
