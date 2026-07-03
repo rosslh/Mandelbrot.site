@@ -8,7 +8,6 @@ const fs = require("fs");
 const camelCase = require("lodash/camelCase");
 const fromPairs = require("lodash/fromPairs");
 const Dotenv = require("dotenv-webpack");
-const WorkboxPlugin = require("workbox-webpack-plugin");
 
 const dist = path.resolve(__dirname, "dist");
 
@@ -64,12 +63,9 @@ const privacyPolicyPlugin = new HtmlWebpackPlugin({
 
 const blogPostPlugins = getBlogPostPlugins();
 
-const workbox = new WorkboxPlugin.GenerateSW({
-  clientsClaim: true,
-  skipWaiting: true,
-  cleanupOutdatedCaches: true,
-});
-
+// The service worker is generated after the build by `generate-sw.js`, which
+// globs the complete `dist` so the app bundle and the worker/WASM (emitted by a
+// separate webpack compilation) are precached together as one consistent set.
 const appConfig = {
   entry: "./js/index.ts",
   plugins: [
@@ -81,7 +77,6 @@ const appConfig = {
     ...blogPostPlugins,
     privacyPolicyPlugin,
     new MiniCssExtractPlugin(),
-    workbox,
   ],
   module: {
     rules: [
