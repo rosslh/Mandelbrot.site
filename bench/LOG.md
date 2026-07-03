@@ -59,3 +59,42 @@ Firefox 89 (older browsers fail wasm validation).
 New production config: root Cargo.toml `opt-level = 3`; `.cargo/config.toml`
 `-C target-feature=+simd128` (wasm target only); mandelbrot/Cargo.toml
 `wasm-opt = ["-O3", "--enable-simd", "--enable-mutable-globals"]`.
+
+## 2026-07-02 — SHIPPED: manual f64x2 pixel pairing (backlog #1, code change)
+
+Machine: mac arm64 (M-series), Chrome for Testing 136, macOS 14. No flag
+changes — Rust code change only, built with production settings.
+
+Escape loops now iterate two pixels at once, one per f64x2 lane
+(`core::arch::wasm32`), freezing escaped lanes with a mask while the other
+lane keeps iterating:
+
+- lib.rs: `calculate_escape_iterations_quadratic_pair` + paired pixel loop in
+  `render_mandelbrot_set`; `rect_in_set` border checks paired (two border
+  points per call).
+- perturbation.rs: `perturbed_escape_iterations_f64_pair` — per-lane orbit
+  indices stay scalar (rebasing makes them diverge; wasm has no gather), delta
+  step and rebase test are vectorized, rebase applied via mask select. Escaped
+  lanes keep stepping on garbage values (output is frozen separately); the
+  rebase-at-orbit-end rule keeps their indices in bounds. `border_in_set`
+  paired.
+- Scalar fallbacks: exponent != 2, float-exp pathway, non-wasm targets,
+  trailing odd pixel.
+
+Full 35-case corpus, 10 samples (results/*baseline_simd-pair.json):
+
+| pathway | geomean | notes |
+|---|---|---|
+| direct | **−22.2%** | up to −38% on iteration-heavy tiles; interior/multibrot flat |
+| perturbation-f64 | **−9.5%** | −7 to −13% warm and cold; multibrot flat |
+| float-exp | −0.3% | untouched, as expected |
+| overall | **−13.7%** | |
+
+Size: bench artifact 271.0 → 275.4 KiB (+1.6%); production wasm
+272.1 → 276.5 KiB. Correctness: lane arithmetic is IEEE-identical to the
+scalar loops (`a*b + b*a` rounds to exactly `2*(a*b)`), pixel-check
+byte-identical on all 35 cases, cargo test 53/53.
+
+Verdict: shipped. Not attempted: ComplexExp (float-exp) lane pairing — the
+extended-exponent ops are struct-heavy and autovectorization already captured
+~10% there; stays on the backlog.

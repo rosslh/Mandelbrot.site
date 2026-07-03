@@ -284,6 +284,165 @@ fn perturbed_escape_iterations_f64(
     (iterations, z)
 }
 
+/// In-flight state of a two-pixel SIMD perturbation batch: pixel deltas and
+/// full values live one pixel per f64x2 lane, while reference-orbit positions
+/// stay scalar because rebasing lets them diverge between lanes.
+#[cfg(target_arch = "wasm32")]
+struct PairState {
+    index: [usize; 2],
+    dz_re: core::arch::wasm32::v128,
+    dz_im: core::arch::wasm32::v128,
+    z_re: core::arch::wasm32::v128,
+    z_im: core::arch::wasm32::v128,
+}
+
+/// One perturbation step for both lanes (quadratic case): advances the deltas,
+/// recombines with the reference orbit, and rebases lanes whose delta stopped
+/// being small. Escaped lanes keep stepping on garbage values (their output is
+/// frozen by the caller); the rebase-at-orbit-end rule keeps their indices in
+/// bounds regardless.
+#[cfg(target_arch = "wasm32")]
+fn pair_step(
+    orbit: &[(f64, f64)],
+    dc_re: core::arch::wasm32::v128,
+    dc_im: core::arch::wasm32::v128,
+    last_index: usize,
+    state: &mut PairState,
+) {
+    use core::arch::wasm32::*;
+
+    let z_ref_first = orbit[state.index[0]];
+    let z_ref_second = orbit[state.index[1]];
+    let doubled_re = f64x2_add(
+        f64x2_mul(f64x2_splat(2.0), f64x2(z_ref_first.0, z_ref_second.0)),
+        state.dz_re,
+    );
+    let doubled_im = f64x2_add(
+        f64x2_mul(f64x2_splat(2.0), f64x2(z_ref_first.1, z_ref_second.1)),
+        state.dz_im,
+    );
+
+    let new_dz_re = f64x2_add(
+        f64x2_sub(
+            f64x2_mul(doubled_re, state.dz_re),
+            f64x2_mul(doubled_im, state.dz_im),
+        ),
+        dc_re,
+    );
+    let new_dz_im = f64x2_add(
+        f64x2_add(
+            f64x2_mul(doubled_re, state.dz_im),
+            f64x2_mul(doubled_im, state.dz_re),
+        ),
+        dc_im,
+    );
+
+    state.index[0] += 1;
+    state.index[1] += 1;
+
+    let z_next_first = orbit[state.index[0]];
+    let z_next_second = orbit[state.index[1]];
+    let new_z_re = f64x2_add(f64x2(z_next_first.0, z_next_second.0), new_dz_re);
+    let new_z_im = f64x2_add(f64x2(z_next_first.1, z_next_second.1), new_dz_im);
+
+    let z_norm_sqr = f64x2_add(f64x2_mul(new_z_re, new_z_re), f64x2_mul(new_z_im, new_z_im));
+    let dz_norm_sqr = f64x2_add(
+        f64x2_mul(new_dz_re, new_dz_re),
+        f64x2_mul(new_dz_im, new_dz_im),
+    );
+
+    let at_orbit_end = i64x2(
+        -((state.index[0] == last_index) as i64),
+        -((state.index[1] == last_index) as i64),
+    );
+    let rebase = v128_or(at_orbit_end, f64x2_lt(z_norm_sqr, dz_norm_sqr));
+
+    state.dz_re = v128_bitselect(new_z_re, new_dz_re, rebase);
+    state.dz_im = v128_bitselect(new_z_im, new_dz_im, rebase);
+    if i64x2_extract_lane::<0>(rebase) != 0 {
+        state.index[0] = 0;
+    }
+    if i64x2_extract_lane::<1>(rebase) != 0 {
+        state.index[1] = 0;
+    }
+
+    state.z_re = new_z_re;
+    state.z_im = new_z_im;
+}
+
+/// Escape iterations for two pixels at once using f64 deltas with rebasing,
+/// one pixel per 128-bit SIMD lane (quadratic case). Lane arithmetic is
+/// IEEE-identical to `perturbed_escape_iterations_f64`, so results match it
+/// bit-for-bit; lanes that escape are frozen while the other keeps iterating.
+#[cfg(target_arch = "wasm32")]
+fn perturbed_escape_iterations_f64_pair(
+    orbit: &[(f64, f64)],
+    dc_first: Complex64,
+    dc_second: Complex64,
+    max_iterations: u32,
+    escape_radius_squared: f64,
+) -> [(u32, Complex64); 2] {
+    use core::arch::wasm32::*;
+
+    let last_index = orbit.len() - 1;
+    let dc_re = f64x2(dc_first.re, dc_second.re);
+    let dc_im = f64x2(dc_first.im, dc_second.im);
+    let radius_squared = f64x2_splat(escape_radius_squared);
+
+    let mut state = PairState {
+        index: [0; 2],
+        dz_re: f64x2_splat(0.0),
+        dz_im: f64x2_splat(0.0),
+        z_re: f64x2_splat(0.0),
+        z_im: f64x2_splat(0.0),
+    };
+
+    // Pre-step, mirroring the scalar version: afterwards z equals each
+    // pixel's own c.
+    pair_step(orbit, dc_re, dc_im, last_index, &mut state);
+
+    let mut z_out_re = state.z_re;
+    let mut z_out_im = state.z_im;
+    // Alive lanes are all-ones, so subtracting the mask adds 1 per live lane.
+    let mut alive = i64x2_splat(-1);
+    let mut lane_iterations = i64x2_splat(0);
+    let mut remaining = max_iterations;
+
+    while remaining > 0 {
+        let norm_sqr = f64x2_add(
+            f64x2_mul(z_out_re, z_out_re),
+            f64x2_mul(z_out_im, z_out_im),
+        );
+        alive = v128_and(alive, f64x2_lt(norm_sqr, radius_squared));
+        if !v128_any_true(alive) {
+            break;
+        }
+
+        pair_step(orbit, dc_re, dc_im, last_index, &mut state);
+        z_out_re = v128_bitselect(state.z_re, z_out_re, alive);
+        z_out_im = v128_bitselect(state.z_im, z_out_im, alive);
+        lane_iterations = i64x2_sub(lane_iterations, alive);
+        remaining -= 1;
+    }
+
+    [
+        (
+            i64x2_extract_lane::<0>(lane_iterations) as u32,
+            Complex64::new(
+                f64x2_extract_lane::<0>(z_out_re),
+                f64x2_extract_lane::<0>(z_out_im),
+            ),
+        ),
+        (
+            i64x2_extract_lane::<1>(lane_iterations) as u32,
+            Complex64::new(
+                f64x2_extract_lane::<1>(z_out_re),
+                f64x2_extract_lane::<1>(z_out_im),
+            ),
+        ),
+    ]
+}
+
 /// Escape iterations for one pixel using extended-exponent deltas.
 fn perturbed_escape_iterations_float_exp(
     orbit: &[(f64, f64)],
@@ -443,20 +602,68 @@ impl PerturbedFrame {
         }
     }
 
-    fn pixel_in_set(&self, column: usize, row: usize) -> bool {
-        self.escape_iterations(column, row).0 == self.max_iterations
+    /// Escape iterations for two pixels sharing one call, batched into SIMD
+    /// lanes where a batched implementation exists (wasm32, f64 deltas,
+    /// exponent 2).
+    #[cfg(target_arch = "wasm32")]
+    pub fn escape_iterations_pair(
+        &self,
+        first: (usize, usize),
+        second: (usize, usize),
+    ) -> [(u32, Complex64); 2] {
+        if self.use_float_exp || self.exponent != 2 {
+            return [
+                self.escape_iterations(first.0, first.1),
+                self.escape_iterations(second.0, second.1),
+            ];
+        }
+
+        let dc = |(column, row): (usize, usize)| {
+            let re_offset = self.first_column_offset + self.column_step * column as f64;
+            let im_offset = self.first_row_offset + self.row_step * row as f64;
+            Complex64::new(
+                ldexp(re_offset, -self.zoom_offset),
+                ldexp(im_offset, -self.zoom_offset),
+            )
+        };
+
+        perturbed_escape_iterations_f64_pair(
+            &self.orbit.values,
+            dc(first),
+            dc(second),
+            self.max_iterations,
+            self.escape_radius_squared,
+        )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn escape_iterations_pair(
+        &self,
+        first: (usize, usize),
+        second: (usize, usize),
+    ) -> [(u32, Complex64); 2] {
+        [
+            self.escape_iterations(first.0, first.1),
+            self.escape_iterations(second.0, second.1),
+        ]
+    }
+
+    fn pixels_in_set_pair(&self, first: (usize, usize), second: (usize, usize)) -> bool {
+        self.escape_iterations_pair(first, second)
+            .iter()
+            .all(|&(iterations, _)| iterations == self.max_iterations)
     }
 
     /// Whether every border pixel is inside the set. The set is simply
     /// connected, so a fully-interior border implies a fully-interior image.
     pub fn border_in_set(&self, image_width: usize, image_height: usize) -> bool {
         for column in 0..image_width {
-            if !self.pixel_in_set(column, 0) || !self.pixel_in_set(column, image_height - 1) {
+            if !self.pixels_in_set_pair((column, 0), (column, image_height - 1)) {
                 return false;
             }
         }
         for row in 0..image_height {
-            if !self.pixel_in_set(0, row) || !self.pixel_in_set(image_width - 1, row) {
+            if !self.pixels_in_set_pair((0, row), (image_width - 1, row)) {
                 return false;
             }
         }

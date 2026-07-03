@@ -30,7 +30,7 @@ Rendering pathway is selected on `effective_zoom = tile_zoom + zoom_offset`
   `-C target-feature=+simd128` (.cargo/config.toml, wasm target only) +
   `wasm-opt -O3 --enable-simd` (mandelbrot/Cargo.toml). This was measured at
   -9.6% on float-exp tiles vs the previous size-tuned config
-  (opt-level=s/-Oz); the wasm is ~271 KiB and every visitor downloads it, so
+  (opt-level=s/-Oz); the wasm is ~277 KiB and every visitor downloads it, so
   **every speed claim must also report the size delta** (compare output
   includes it). simd128 sets the browser floor at Safari 16.4 / Chrome 91 /
   Firefox 89 - do not add wasm features beyond simd128 without flagging the
@@ -159,10 +159,10 @@ JSONs are gitignored and machine-local; the log is what survives.
 
 ## Experiment backlog (roughly prioritized)
 
-1. Manual SIMD batching (2 pixels per lane) with `core::arch::wasm32` in the
-   escape loops (lib.rs, perturbation.rs) — autovectorization already captured
-   ~10% on float-exp; hand-written f64x2 may unlock direct/pf64 too.
-   Snapshot-gated code change, medium-high effort.
+1. ~~Manual SIMD batching (2 pixels per lane) in the escape loops~~ SHIPPED
+   2026-07-02 for direct (−22.2%) and pf64 (−9.5%); see LOG.md. Remaining
+   half: ComplexExp (float-exp) lane pairing — struct-heavy ops,
+   autovectorization already captured ~10% there; likely small upside.
 2. Smooth-coloring cost: already measurable via the
    `syn-pf64-z100-dendrite[-nosmooth]` pair; optimize only if it exceeds
    5–10% of tile time.
