@@ -32,7 +32,7 @@ rayon = "1.10.0"
 default = ["console_error_panic_hook"]
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ["-Oz", "--enable-mutable-globals"]
+wasm-opt = ["-O3", "--enable-simd", "--enable-mutable-globals"]
 
 # Used by bench/ variant builds, which run their own wasm-opt pass with
 # per-variant flags. Does not affect production (webpack uses --release).

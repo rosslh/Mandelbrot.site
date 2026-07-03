@@ -1,0 +1,10 @@
+# SIMD128 for wasm builds: ~10% faster deep-zoom (float-exp) tiles when
+# combined with opt-level 3 (see bench/). Raises the browser floor to
+# Safari 16.4 / Chrome 91 / Firefox 89 - older browsers fail wasm validation.
+# Native builds (cargo test) are unaffected.
+#
+# NOTE: a RUSTFLAGS env var replaces this entirely; bench variant builds that
+# pass --rustflags must include -C target-feature=+simd128 themselves to stay
+# comparable to production.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128"]

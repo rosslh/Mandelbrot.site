@@ -2,8 +2,11 @@
 
 members = ["mandelbrot"]
 
+# opt-level 3 (not "s") because LLVM only autovectorizes the escape loops at
+# 2+; combined with simd128 (.cargo/config.toml) it cuts deep-zoom tile times
+# ~10% for +31 KiB of wasm. Measured in bench/ (results/simd-confirm.json).
 [profile.release]
-opt-level = "s"
+opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
