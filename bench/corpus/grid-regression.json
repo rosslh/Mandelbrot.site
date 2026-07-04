@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "comment": "Full-viewport tile-grid regression cases for moderate zoom / high iteration configs. Each case is expanded by run-grid.mjs into every tile of the visible grid for the given viewport, replicating the Leaflet layout in client/js/MandelbrotLayer.ts (200px tiles centered on the origin point). grid-z36-i51200-report is the user-reported URL; the others are the nearest direct/high-iter and perturbation/high-iter points from the main corpus (corpus.json).",
+  "defaults": {
+    "exponent": 2,
+    "colorScheme": "turbo",
+    "reverseColors": false,
+    "shiftHueAmount": 0,
+    "saturateAmount": 0,
+    "lightenAmount": 0,
+    "colorSpace": 2,
+    "smoothColoring": true,
+    "paletteMinIter": 0,
+    "tileSize": 200
+  },
+  "cases": [
+    {
+      "id": "grid-z36-i51200-report",
+      "source": "user-report",
+      "re": "0.271743159228663032475",
+      "im": "-0.004861827620970871336",
+      "zoom": 36,
+      "iterations": 51200,
+      "note": "Reported URL: mandelbrot.site/?re=...&z=36&i=51200; direct pathway, very high iterations"
+    },
+    {
+      "id": "grid-z46-i6400-25e95432",
+      "source": "corpus:user-z46-25e95432",
+      "re": "-0.6173597732160516",
+      "im": "-0.4045964293189659",
+      "zoom": 46,
+      "iterations": 6400,
+      "note": "Closest corpus neighbor: direct/high-iter just under the perturbation threshold"
+    },
+    {
+      "id": "grid-z20-i1600-d0989824",
+      "source": "corpus:user-z20-d0989824",
+      "re": "0.25301945209503174",
+      "im": "-0.00028127431869506836",
+      "zoom": 20,
+      "iterations": 1600,
+      "note": "Corpus direct/high-iter at moderate zoom, near the cusp"
+    },
+    {
+      "id": "grid-z48-i20000-d0ddf3dd",
+      "source": "corpus:user-z48-d0ddf3dd",
+      "re": "-0.8288522349647183",
+      "im": "-0.18903007374364744",
+      "zoom": 48,
+      "iterations": 20000,
+      "note": "Corpus perturbation-f64/high-iter just past the threshold; exercises paired delta loop"
+    }
+  ]
+}

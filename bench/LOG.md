@@ -98,3 +98,39 @@ byte-identical on all 35 cases, cargo test 53/53.
 Verdict: shipped. Not attempted: ComplexExp (float-exp) lane pairing — the
 extended-exponent ops are struct-heavy and autovectorization already captured
 ~10% there; stays on the backlog.
+
+## 2026-07-04 — Regression check: full-grid render, moderate zoom / high iter
+
+Machine: mac arm64 (M-series), Chrome for Testing 136, macOS 14.
+
+User-reported suspicion of a regression at ~z35 / ~50k iterations after the
+recent optimizations. New harness: `src/run-grid.mjs` +
+`corpus/grid-regression.json` measures the summed wasm time for the ENTIRE
+visible tile grid (200px Leaflet tiles around the view center, 1600x900
+viewport → 9x5 = 45 tiles), replicating MandelbrotLayer's layout. Scope was
+wasm-level changes only (the render-pool cap in 32a1c7d was deliberately
+excluded; pool size held constant).
+
+Variants: `old` = pre-optimization source+flags from b47adc6 (scalar loops,
+opt-level=s, wasm-opt -Oz, no simd128, 242.8 KiB); `baseline` = scalar code +
+shipped flags (2210aea, 271.0 KiB); `head` = shipped SIMD pairing + flags
+(275.4 KiB). 1 cold + 1 warmup + 3 measured grid passes, interleaved;
+per-tile hashes deterministic.
+
+| case | pathway | old | head | head vs old |
+|---|---|---|---|---|
+| grid-z36-i51200-report (reported URL) | direct | 43435 ms | 26655 ms | **−38.6%** (cold −36.9%) |
+| grid-z46-i6400 | direct | 8003 ms | 5322 ms | −33.5% |
+| grid-z20-i1600 | direct | 3842 ms | 2615 ms | −31.9% |
+| grid-z48-i20000 | perturbation-f64 | 18352 ms | 16779 ms | −8.6% |
+
+baseline vs old: −0.5% geomean (flags alone are neutral outside float-exp,
+as expected). head vs old geomean: −29.0%. No single tile regressed —
+worst per-tile movers for head were all −26% to −35%. Grid-total spread
+(MAD) was ≤25 ms on totals of 2.6–44 s, far below the 3% floor.
+
+Verdict: **no wasm-level regression**; the reported config is ~1.6x faster
+than before the optimizations. If whole-grid wall time regressed for a user,
+the remaining in-scope-excluded suspect is the pool cap
+(hardwareConcurrency−1 workers, 32a1c7d), which adds ~1/(cores−1) wall time
+on uniform heavy grids — measure separately if reports persist.
