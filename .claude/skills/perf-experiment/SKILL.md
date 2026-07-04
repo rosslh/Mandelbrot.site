@@ -6,10 +6,29 @@ description: Run WebAssembly-in-Chrome performance experiments for Mandelbrot ti
 # Mandelbrot wasm performance experiments
 
 All benchmarking lives in `bench/` (own package.json; run `npm ci` there once).
-It measures the production entry point `get_mandelbrot_image_precise`
-(mandelbrot/src/lib.rs) in real headless Chrome (pinned Chrome for Testing via
-puppeteer), on the main thread, with the exact argument shape the production
-worker uses (client/js/worker.js).
+There are three runners, in decreasing order of realism:
+
+1. **`src/run-e2e.mjs` — THE STANDARD TEST; every experiment's final verdict
+   must come from this.** Drives the actual built client (webpack bundle,
+   real wasm, real Leaflet, real `threads` pool, real service worker) in
+   Chrome via puppeteer, loads a shareable URL per corpus case
+   (corpus/grid-regression.json), and measures wall-clock time from
+   navigation to the last visible tile's done callback. Variants are complete
+   client builds made by `src/build-dist.mjs <name> [--ref <git-ref>]`, so a
+   comparison includes every shipped difference (client JS such as pool
+   sizing, service worker, wasm). To isolate one change, build both dists
+   from trees differing only in that change.
+2. `src/run-grid.mjs` — wasm-level, full visible tile grid on a real worker
+   pool (pool size held constant across variants); use to iterate on wasm
+   changes with grid-level realism but without client-build turnaround.
+3. `src/run.mjs` — wasm-level, single tile per case, main thread; fastest
+   iteration and pathway isolation across the full corpus
+   (corpus/corpus.json). Calls `get_mandelbrot_image_precise` with the exact
+   argument shape the production worker uses (client/js/worker.js).
+
+The wasm-level runners (2, 3) exist because they are fast and isolate the
+wasm; they are not the ship gate. A change ships only after run-e2e confirms
+it on real client builds.
 
 ## Architecture you must know before interpreting numbers
 
@@ -38,13 +57,28 @@ Rendering pathway is selected on `effective_zoom = tile_zoom + zoom_offset`
 
 ## Workflow
 
+Iterate with the wasm-level runners, then confirm with the standard e2e test:
+
 ```sh
 cd bench
 npm ci                                   # once
 node src/build.mjs baseline              # no flags = exact production settings
 node src/build.mjs myexp --opt-level s --wasm-opt "-Oz --enable-simd --enable-mutable-globals"
-node src/run.mjs --variants baseline,myexp
+node src/run.mjs --variants baseline,myexp        # fast iteration
+node src/run-grid.mjs --variants baseline,myexp   # grid realism (worker pool)
+
+# Final verdict — real client builds, end to end:
+node src/build-dist.mjs base-dist --ref HEAD      # or a pre-change ref
+node src/build-dist.mjs exp-dist                  # current tree (applies your change)
+node src/run-e2e.mjs --variants base-dist,exp-dist
 ```
+
+run-e2e measures navigation → last tile done on the real client (includes
+bundle parse, worker spawn, wasm compile/tier-up — cold passes catch Liftoff
+tiering penalties that warm wasm-level numbers hide). Its cases live in
+corpus/grid-regression.json; `--viewport WxH` (default 1600x900), `--rounds`,
+`--warmup`, `--filter` as usual. Each variant's dist is served on its own
+origin; off-localhost requests are blocked so no telemetry fires.
 
 - `run.mjs` writes JSON to `bench/results/` and prints the comparison
   (per-case medians, per-pathway + overall geomean, size delta, cold times).
@@ -132,10 +166,14 @@ below).
    in sync so a no-flag build stays a true baseline.
 2. Rebuild production: `cd client && npm run build`; record the production
    wasm size before/after (client/dist `*.wasm`).
-3. Re-run the benchmark with a fresh `baseline` built from the new config to
-   confirm the win survived.
-4. Append the entry to `bench/LOG.md` and commit with the numbers: geomean
-   delta per pathway, size delta, and how to reproduce.
+3. **Confirm end to end (mandatory):** `node src/build-dist.mjs pre --ref
+   <sha-before-change> && node src/build-dist.mjs post && node src/run-e2e.mjs
+   --variants pre,post`. The win must survive on real client builds,
+   including cold passes. A wasm-level win that disappears or regresses cold
+   starts here does not ship without a written justification in LOG.md.
+4. Append the entry to `bench/LOG.md` and commit with the numbers: e2e
+   deltas (warm and cold), wasm-level geomean delta per pathway, size delta,
+   and how to reproduce.
 
 ## Workload corpus
 

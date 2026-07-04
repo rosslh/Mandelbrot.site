@@ -134,3 +134,97 @@ than before the optimizations. If whole-grid wall time regressed for a user,
 the remaining in-scope-excluded suspect is the pool cap
 (hardwareConcurrency−1 workers, 32a1c7d), which adds ~1/(cores−1) wall time
 on uniform heavy grids — measure separately if reports persist.
+
+## 2026-07-04 — Re-run with real worker pool (wall-clock makespan)
+
+Same machine/cases/variants. run-grid.mjs reworked to match production:
+one pool of real Web Workers per variant (7 workers on 8 logical cores =
+renderPoolSize(), held constant across variants), tiles dispatched FIFO
+center-out like Leaflet queues them, pixel buffers posted back via
+structured clone like `threads` does. Headline metric is wall-clock
+makespan (first dispatch → last tile done); summed per-tile wasm time
+kept as secondary. 1 cold + 1 warmup + 5 measured passes
+(results/grid-wallclock-old_baseline_head.json).
+
+| case | old wall | head wall | head vs old | cold |
+|---|---|---|---|---|
+| grid-z36-i51200-report | 8722 ms | 5350 ms | **−38.7%** | **+24.6%** (see below) |
+| grid-z46-i6400 | 1421 ms | 943 ms | −33.6% | −33.8% |
+| grid-z20-i1600 | 728 ms | 494 ms | −32.2% | −32.0% |
+| grid-z48-i20000 | 3436 ms | 3094 ms | −10.0% | −10.2% |
+
+Wall-clock deltas match the sequential CPU-sum deltas within ~1 point
+(overall geomean −29.4% vs −29.0%): 7-way contention inflates per-tile
+times ~15% on both sides equally, so single-threaded wins carry over to
+wall clock. baseline (flags-only) again −0.5% geomean. Worst per-tile
+movers under head all negative on every case.
+
+**New finding — cold-start tiering penalty:** head's very first grid pass
+of the session on the z36/i51200 case took 11074 ms vs 5350 ms warm
+(old: 8884 cold ≈ 8722 warm; baseline: no penalty). The paired-SIMD hot
+loop runs much slower under Liftoff until TurboFan tiers it up, and each
+of the 7 fresh workers pays that independently on its first heavy tiles.
+Later cases show no penalty (workers already tiered), so in production
+this costs one page load's first render (~+25% vs old at this config),
+after which renders are ~1.6x faster. Possible mitigation for the
+backlog: prime each worker at spawn with a tiny offscreen render to
+trigger tiering before user tiles arrive.
+
+Verdict: no regression in steady-state wall clock; first-render cold
+start at very high iteration counts is the one measurable cost.
+
+## 2026-07-04 — END-TO-END harness (now the standard test) finds the real regression
+
+New standard configuration, per project decision: **all future perf verdicts
+come from `src/run-e2e.mjs`**, which drives the actual built client
+(`src/build-dist.mjs`, real webpack bundle + wasm + Leaflet + threads pool +
+service worker) in Chrome and measures navigation → last visible tile done
+(MutationObserver on `.leaflet-tile-loaded`). Each variant dist is served on
+its own origin; DNS for everything except 127.0.0.1 is stubbed out
+(`--host-resolver-rules`), so no telemetry or external fetches. Wasm-level
+runners (run.mjs, run-grid.mjs) remain for iteration only.
+Gotcha for future harness work: puppeteer request interception never sees
+dedicated-worker requests and stalls the threads pool — block at DNS level.
+
+E2E old (b47adc6 full build) vs head (11b3447 full build), 5 rounds
+(results/e2e-regression-old_head.json):
+
+| case | old | head | delta | cold |
+|---|---|---|---|---|
+| grid-z36-i51200-report | 8827 ms | 10573 ms | **+19.8%** | +9.4% |
+| grid-z46-i6400 | 1704 ms | 1508 ms | −11.5% | −12.5% |
+| grid-z20-i1600 | 1068 ms | 982 ms | −8.1% | −7.0% |
+| grid-z48-i20000 | 3478 ms | 3323 ms | −4.5% | −2.1% |
+
+**The user-reported regression at z36/i51200 is real end-to-end** (+15–20%
+across runs, high round-to-round variance ±100–400 ms) even though the same
+build is −38.7% on tiered-up wasm (grid runner). Decomposition
+(results/e2e-z36-pool-decomposition.json) with a head build whose pool cap
+is reverted (8 workers instead of 7):
+
+| variant | z36 median |
+|---|---|
+| old (8 workers, scalar wasm) | 8871 ms |
+| head (7 workers, paired-SIMD wasm) | 10185 ms (+14.8%) |
+| head-fullpool (8 workers, paired-SIMD wasm) | 11007 ms (+24.1%) |
+
+So the pool cap is NOT the cause — the 8th worker makes it worse. The
+regression is per-page-load wasm warmup: every navigation respawns the
+pool, each worker compiles/instantiates the module fresh, and the
+paired-SIMD hot loop runs under Liftoff (whose SIMD codegen is poor) until
+TurboFan tiers it up — while 7–8 workers grinding 51k-iteration tiles
+saturate the cores TurboFan's background compile threads need. Old's scalar
+loop is much closer to its tiered speed under Liftoff, so it barely pays.
+Lighter configs tier up early in the pass and still win end-to-end. Warm
+passes are not faster than cold: the wasm comes back through the service
+worker on revisits, which (in this setup) bypasses V8's optimized-code
+cache, so every visit pays the penalty. Caveat: bench server sends
+`Cache-Control: no-store`; production CDN headers might let V8's wasm code
+cache kick in for non-SW paths — unverified.
+
+Verdict: steady-state exploration (pan/zoom after load) is ~1.5–1.6x faster
+than pre-optimization, but page loads at very high iteration counts
+regressed ~15–20%. Mitigation to test next: warm the hot loop at worker
+spawn (tiny high-iteration render during pool init / the 350 ms tile
+debounce window) so tier-up completes before real tiles arrive; measure
+with run-e2e.
