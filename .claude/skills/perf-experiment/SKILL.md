@@ -197,21 +197,26 @@ JSONs are gitignored and machine-local; the log is what survives.
 
 ## Experiment backlog (roughly prioritized)
 
-1. Manual SIMD batching (2 pixels per lane) in the escape loops: shipped
-   2026-07-02 (direct −22.2%, pf64 −9.5% at wasm level), **REVERTED
-   2026-07-04** — run-e2e found +15–20% navigation-to-rendered at very high
-   iteration counts because the paired hot loop runs under Liftoff on every
-   page load until TurboFan tiers it up (see LOG.md). Do not re-land without
-   an e2e-verified warmup/tier-up mitigation. ComplexExp (float-exp) lane
-   pairing was never attempted and is moot until then.
-2. Smooth-coloring cost: already measurable via the
+1. ~~Manual SIMD batching (2 pixels per lane) in the escape loops~~ SHIPPED
+   2026-07-04 together with a worker tier-up warmup (worker.js renders two
+   tiny boundary tiles at spawn) after a revert/re-land cycle: without the
+   warmup, the paired loop runs under Liftoff on every page load and e2e
+   regressed +18% at high iteration counts; with it, −16.8% e2e overall
+   (z36/i51200: −38%). See LOG.md 2026-07-04. **Standing rule: hand-written
+   SIMD hot loops ship only with a tier-up warmup and an e2e cold-pass
+   check.** Remaining half: ComplexExp (float-exp) lane pairing — likely
+   small upside, and deep-zoom loads are orbit-dominated anyway (see #2).
+2. Orbit cache sharing across worker threads — **promoted**: e2e shows
+   deep-zoom page loads are dominated by per-worker reference-orbit
+   recomputation (z259 grid load ≈ 15.5 s in every variant). Sharing one
+   orbit across the pool (or precomputing it before workers spawn) is the
+   highest-leverage deep-zoom item.
+3. Smooth-coloring cost: already measurable via the
    `syn-pf64-z100-dendrite[-nosmooth]` pair; optimize only if it exceeds
    5–10% of tile time.
-3. dashu precision headroom (perturbation.rs: `(zoom + 64) -> 32-bit`
+4. dashu precision headroom (perturbation.rs: `(zoom + 64) -> 32-bit`
    granularity): affects cold times only; correctness-sensitive.
-4. `panic = "abort"` in release profile: trivial; verify wasm-bindgen still
+5. `panic = "abort"` in release profile: trivial; verify wasm-bindgen still
    works.
-5. Orbit cache sharing across worker threads: high effort; only if cold times
-   dominate real corpora.
-6. ComplexExp micro-optimizations (float_exp.rs): only if float-exp dominates
-   the user corpus.
+5. ComplexExp micro-optimizations (float_exp.rs): only if float-exp dominates
+   the user corpus, and orbit sharing (#2) comes first.

@@ -49,6 +49,15 @@
       "zoom": 48,
       "iterations": 20000,
       "note": "Corpus perturbation-f64/high-iter just past the threshold; exercises paired delta loop"
+    },
+    {
+      "id": "grid-z259-i1600-3898a95f",
+      "source": "corpus:user-z259-3898a95f",
+      "re": "-1.7400623825793399052208441670658256382966417204361718668798613188202595326994356178513819",
+      "im": "0.0281753397792110489924115211443195096875390767429906085704117981640017204417954754911743",
+      "zoom": 259,
+      "iterations": 1600,
+      "note": "Corpus float-exp/high-iter: covers the pathway the opt3+simd128 flag change targets"
     }
   ]
 }

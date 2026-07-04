@@ -237,4 +237,72 @@ opt-level 3 + simd128 flag config (bbea8b5) stays: it showed no e2e
 regression and carries the float-exp win. cargo test 53/53 after revert.
 The pairing code is preserved in git history (e38df5b); re-landing is
 blocked on an e2e-verified tier-up mitigation (worker warmup experiment,
-next entry).
+next entry). [Re-landed later the same day with the warmup — see the
+matrix entry below.]
+
+## 2026-07-04 — E2E replication of prior wasm-level experiments
+
+Corpus gained grid-z259-i1600 (float-exp, real user point) so all three
+pathways have e2e coverage. Run: old (b47adc6 build) vs reverted (2c6334b
+build = scalar + opt3/simd128 + pool cap) vs reverted2 (byte-identical A/A
+copy), 5 rounds (results/e2e-replication-old_reverted_AA.json).
+
+- **A/A (harness validation replication):** reverted vs reverted2 within
+  ±0.6% on every case, no false significants. E2E noise floor is <1% —
+  the 3% significance floor holds at this level too. Sensitivity is
+  demonstrated by the known-different builds (+18%/−38% detected).
+- **opt3+simd128 (flag-change replication):** old vs reverted is
+  +1.4–1.8% overall geomean. The −9.6% wasm-level float-exp win shrinks
+  to −3.4–3.7% e2e (z259), because deep-zoom page loads are dominated by
+  per-worker reference-orbit computation, not delta loops (z259 grid:
+  ~15.5 s). z46/z48 show +5.7%* — but this is a complete-build
+  comparison: reverted also carries the pool cap (7 vs 8 workers), which
+  costs throughput-bound mid-weight grids ~5% while helping the
+  compile-contended z36 case. Verdict: the flag change is roughly e2e
+  neutral on its own; it stays for the float-exp win and because pairing
+  requires simd128 anyway. NOT replicated per-variant: the 7-build
+  non-SIMD flag matrix (all were ±1% at wasm level; e2e would cost 7
+  client builds to re-answer a settled question).
+- **Pairing (e38df5b) replication:** the two entries above — e2e is what
+  exposed the regression the wasm-level runners missed.
+- Observation for the backlog: at z259 the page load is ~15.5 s in every
+  variant — per-worker orbit recomputation dominates deep-zoom loads.
+  Orbit cache sharing (backlog #5) is the highest-leverage deep-zoom item
+  by far.
+
+## 2026-07-04 — SHIPPED: pairing re-landed + worker tier-up warmup
+
+Experiment: worker.js runs two 64x64, 1000-iteration renders of the
+seahorse valley (boundary-rich, exponent 2, direct pathway — exercises the
+paired quadratic loop without the rect_in_set interior short-circuit)
+right after wasm init, before expose(). This consumes V8's dynamic
+tier-up budget during pool spawn, so TurboFan code replaces Liftoff
+before the user's first tiles render.
+
+Full 2x2 matrix (pairing x warmup), one session, 5 rounds
+(results/e2e-matrix-pairing-x-warmup.json), deltas vs old:
+
+| case | reverted | reverted-warm | pair-warm |
+|---|---|---|---|
+| z36 i51200 | −2.4% | −2.2% | **−38.1%** (cold −39.6%) |
+| z46 i6400 | +5.7%* | +6.2%* | **−19.6%** |
+| z20 i1600 | +2.0% | +3.0% | **−14.9%** |
+| z48 i20000 | +5.7%* | +5.9%* | −2.5% |
+| z259 i1600 | −3.7%* | −3.5%* | −3.4%* |
+| overall | +1.4% | +1.8% | **−16.8%** |
+
+Conclusions:
+- **Warmup alone does nothing** (reverted-warm ≡ reverted within noise):
+  the scalar/autovectorized loops already run near tiered speed under
+  Liftoff. The penalty is specific to hand-written f64x2 pairing.
+- **Pairing + warmup wins everywhere**, including the case that
+  originally regressed (8.8 s → 5.5 s) and the light cases (warmup cost
+  is unmeasurable, ≤ a few ms per load).
+- Earlier confirmation run (results/e2e-warmup-old_head_pairwarm.json):
+  head (pairing, no warmup) +18.3% on z36 — reproducing the regression —
+  vs pair-warm −38.7% in the same session.
+
+Shipped: paired Rust code restored (identical to e38df5b) + warmup in
+client/js/worker.js. cargo test 53/53. Production wasm back to 276.5 KiB.
+Rule for the future, now encoded in the skill: hand-written SIMD hot
+loops must ship with a tier-up warmup and an e2e cold-pass check.

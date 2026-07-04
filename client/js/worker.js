@@ -16,6 +16,45 @@ import("../../mandelbrot/pkg")
   .then(async (wasm) => {
     wasm.init();
 
+    // Warm the SIMD escape loops before accepting tiles. V8 runs wasm under
+    // Liftoff until TurboFan tiers it up, and Liftoff executes the f64x2
+    // pixel-pair loops several times slower than tiered code; without this,
+    // every page load renders its first tiles at Liftoff speed in every
+    // worker (measured +18% navigation-to-rendered at high iteration counts,
+    // bench/LOG.md 2026-07-04). Two small boundary-rich renders consume the
+    // tier-up budget during pool spawn instead. Must stay on the exponent-2
+    // path (the paired loop) and avoid interior tiles (the rect_in_set
+    // short-circuit would skip the escape loop).
+    try {
+      for (let i = 0; i < 2; i++) {
+        wasm.get_mandelbrot_image_precise(
+          "-0.7436438870371587",
+          "0.1318259042053119",
+          655,
+          656,
+          655,
+          656,
+          10,
+          0,
+          1000,
+          2,
+          64,
+          64,
+          "turbo",
+          false,
+          0,
+          0,
+          0,
+          2,
+          true,
+          0,
+          1000,
+        );
+      }
+    } catch (warmupError) {
+      console.warn("wasm warmup failed:", warmupError);
+    }
+
     const getTile = (params) =>
       wasm.get_mandelbrot_image_precise(
         params.originRe,
