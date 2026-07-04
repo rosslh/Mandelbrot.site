@@ -197,10 +197,13 @@ JSONs are gitignored and machine-local; the log is what survives.
 
 ## Experiment backlog (roughly prioritized)
 
-1. ~~Manual SIMD batching (2 pixels per lane) in the escape loops~~ SHIPPED
-   2026-07-02 for direct (−22.2%) and pf64 (−9.5%); see LOG.md. Remaining
-   half: ComplexExp (float-exp) lane pairing — struct-heavy ops,
-   autovectorization already captured ~10% there; likely small upside.
+1. Manual SIMD batching (2 pixels per lane) in the escape loops: shipped
+   2026-07-02 (direct −22.2%, pf64 −9.5% at wasm level), **REVERTED
+   2026-07-04** — run-e2e found +15–20% navigation-to-rendered at very high
+   iteration counts because the paired hot loop runs under Liftoff on every
+   page load until TurboFan tiers it up (see LOG.md). Do not re-land without
+   an e2e-verified warmup/tier-up mitigation. ComplexExp (float-exp) lane
+   pairing was never attempted and is moot until then.
 2. Smooth-coloring cost: already measurable via the
    `syn-pf64-z100-dendrite[-nosmooth]` pair; optimize only if it exceeds
    5–10% of tile time.

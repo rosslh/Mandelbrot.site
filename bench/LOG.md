@@ -228,3 +228,13 @@ regressed ~15–20%. Mitigation to test next: warm the hot loop at worker
 spawn (tiny high-iteration render during pool init / the 350 ms tile
 debounce window) so tier-up completes before real tiles arrive; measure
 with run-e2e.
+
+## 2026-07-04 — REVERTED: manual f64x2 pixel pairing (e38df5b)
+
+mandelbrot/src/lib.rs and perturbation.rs restored to their pre-pairing
+state (2210aea) because of the e2e page-load regression above. The
+opt-level 3 + simd128 flag config (bbea8b5) stays: it showed no e2e
+regression and carries the float-exp win. cargo test 53/53 after revert.
+The pairing code is preserved in git history (e38df5b); re-landing is
+blocked on an e2e-verified tier-up mitigation (worker warmup experiment,
+next entry).

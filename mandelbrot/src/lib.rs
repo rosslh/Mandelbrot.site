@@ -127,95 +127,6 @@ fn calculate_escape_iterations_general(
     (iter, z)
 }
 
-/// Escape-time iteration for two pixels at once, one per 128-bit SIMD lane
-/// (quadratic case). Escaped lanes are frozen with a mask while the other lane
-/// keeps iterating. The lane arithmetic is IEEE-identical to the scalar loop
-/// (`a*b + b*a` rounds to exactly `2*(a*b)`), so results match
-/// `calculate_escape_iterations_quadratic` bit-for-bit.
-#[cfg(target_arch = "wasm32")]
-fn calculate_escape_iterations_quadratic_pair(
-    c_first: Complex64,
-    c_second: Complex64,
-    max_iterations: u32,
-    escape_radius_squared: f64,
-) -> [(u32, Complex64); 2] {
-    use core::arch::wasm32::*;
-
-    let c_re = f64x2(c_first.re, c_second.re);
-    let c_im = f64x2(c_first.im, c_second.im);
-    let radius_squared = f64x2_splat(escape_radius_squared);
-
-    let mut z_re = c_re;
-    let mut z_im = c_im;
-    // Alive lanes are all-ones, so subtracting the mask adds 1 per live lane.
-    let mut alive = i64x2_splat(-1);
-    let mut lane_iterations = i64x2_splat(0);
-    let mut remaining = max_iterations;
-
-    while remaining > 0 {
-        let norm_sqr = f64x2_add(f64x2_mul(z_re, z_re), f64x2_mul(z_im, z_im));
-        alive = v128_and(alive, f64x2_lt(norm_sqr, radius_squared));
-        if !v128_any_true(alive) {
-            break;
-        }
-
-        let next_re = f64x2_add(f64x2_sub(f64x2_mul(z_re, z_re), f64x2_mul(z_im, z_im)), c_re);
-        let next_im = f64x2_add(f64x2_mul(f64x2_splat(2.0), f64x2_mul(z_re, z_im)), c_im);
-        z_re = v128_bitselect(next_re, z_re, alive);
-        z_im = v128_bitselect(next_im, z_im, alive);
-        lane_iterations = i64x2_sub(lane_iterations, alive);
-        remaining -= 1;
-    }
-
-    [
-        (
-            i64x2_extract_lane::<0>(lane_iterations) as u32,
-            Complex64::new(f64x2_extract_lane::<0>(z_re), f64x2_extract_lane::<0>(z_im)),
-        ),
-        (
-            i64x2_extract_lane::<1>(lane_iterations) as u32,
-            Complex64::new(f64x2_extract_lane::<1>(z_re), f64x2_extract_lane::<1>(z_im)),
-        ),
-    ]
-}
-
-/// Escape iterations for a pair of pixels sharing one call, batched into SIMD
-/// lanes where a batched implementation exists (wasm32, exponent 2).
-#[cfg(target_arch = "wasm32")]
-fn calculate_escape_iterations_pair(
-    first: (f64, f64),
-    second: (f64, f64),
-    max_iterations: u32,
-    exponent: u32,
-) -> [(u32, Complex64); 2] {
-    if exponent == 2 {
-        calculate_escape_iterations_quadratic_pair(
-            Complex64::new(first.0, first.1),
-            Complex64::new(second.0, second.1),
-            max_iterations,
-            ESCAPE_RADIUS.powi(2),
-        )
-    } else {
-        [
-            calculate_escape_iterations(first.0, first.1, max_iterations, exponent),
-            calculate_escape_iterations(second.0, second.1, max_iterations, exponent),
-        ]
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn calculate_escape_iterations_pair(
-    first: (f64, f64),
-    second: (f64, f64),
-    max_iterations: u32,
-    exponent: u32,
-) -> [(u32, Complex64); 2] {
-    [
-        calculate_escape_iterations(first.0, first.1, max_iterations, exponent),
-        calculate_escape_iterations(second.0, second.1, max_iterations, exponent),
-    ]
-}
-
 /// Calculates the number of iterations it takes for a complex number to escape the set,
 /// based on the given coordinates, maximum iterations, escape radius, and exponent.
 ///
@@ -242,24 +153,18 @@ fn calculate_escape_iterations(
     }
 }
 
-/// Checks if a point is within the Mandelbrot set. Production code goes
-/// through `points_in_set_pair` instead to use the SIMD-batched loop.
-#[cfg(test)]
+/// Checks if a point is within the Mandelbrot set.
+///
+/// # Parameters
+/// - `re`: The real part of the complex number.
+/// - `im`: The imaginary part of the complex number.
+/// - `max_iterations`: The maximum number of iterations to perform.
+/// - `exponent`: The exponent used in the escape time algorithm.
+///
+/// # Returns
+/// `true` if the point is within the Mandelbrot set, `false` otherwise.
 fn point_in_set(re: f64, im: f64, max_iterations: u32, exponent: u32) -> bool {
     calculate_escape_iterations(re, im, max_iterations, exponent).0 == max_iterations
-}
-
-/// Checks whether both of two points are within the Mandelbrot set, batching
-/// them into SIMD lanes where a batched implementation exists.
-fn points_in_set_pair(
-    first: (f64, f64),
-    second: (f64, f64),
-    max_iterations: u32,
-    exponent: u32,
-) -> bool {
-    calculate_escape_iterations_pair(first, second, max_iterations, exponent)
-        .iter()
-        .all(|&(iterations, _)| iterations == max_iterations)
 }
 
 /// Checks if a rectangle, defined by ranges of real and imaginary values, is completely within the Mandelbrot set.
@@ -290,22 +195,35 @@ fn rect_in_set(
         im_range.clone().next_back().unwrap(),
     );
 
+    // Check the four corners of the rectangle
+    let corners = [
+        (re_min, im_min),
+        (re_min, im_max),
+        (re_max, im_min),
+        (re_max, im_max),
+    ];
+
     // If any corner is not in the set, the rectangle is not entirely in the set
-    if !points_in_set_pair((re_min, im_min), (re_min, im_max), max_iterations, exponent)
-        || !points_in_set_pair((re_max, im_min), (re_max, im_max), max_iterations, exponent)
+    if corners
+        .iter()
+        .any(|&(re, im)| !point_in_set(re, im, max_iterations, exponent))
     {
         return false;
     }
 
     // Check the borders of the rectangle
     for re in re_range {
-        if !points_in_set_pair((re, im_min), (re, im_max), max_iterations, exponent) {
+        if !point_in_set(re, im_min, max_iterations, exponent)
+            || !point_in_set(re, im_max, max_iterations, exponent)
+        {
             return false;
         }
     }
 
     for im in im_range {
-        if !points_in_set_pair((re_min, im), (re_max, im), max_iterations, exponent) {
+        if !point_in_set(re_min, im, max_iterations, exponent)
+            || !point_in_set(re_max, im, max_iterations, exponent)
+        {
             return false;
         }
     }
@@ -588,44 +506,9 @@ fn render_mandelbrot_set(
     let re_values: Vec<f64> = re_range.collect();
 
     for (x, im) in im_range.enumerate() {
-        let mut y = 0;
-        while y + 1 < re_values.len() {
-            let results = calculate_escape_iterations_pair(
-                (re_values[y], im),
-                (re_values[y + 1], im),
-                max_iterations,
-                exponent,
-            );
-
-            for (lane, &(escape_iterations, z)) in results.iter().enumerate() {
-                let pixel = color_from_escape_result(
-                    escape_iterations,
-                    z,
-                    max_iterations,
-                    exponent,
-                    palette,
-                    should_reverse_colors,
-                    color_space,
-                    shift_hue_amount,
-                    saturate_amount,
-                    lighten_amount,
-                    smooth_coloring,
-                    min_iterations_threshold,
-                    max_iterations_threshold,
-                );
-
-                let index = (x * image_width + y + lane) * NUM_COLOR_CHANNELS;
-                img[index] = pixel[0];
-                img[index + 1] = pixel[1];
-                img[index + 2] = pixel[2];
-            }
-
-            y += 2;
-        }
-
-        if y < re_values.len() {
+        for (y, &re) in re_values.iter().enumerate() {
             let pixel = compute_pixel_color(
-                re_values[y],
+                re,
                 im,
                 max_iterations,
                 exponent,
@@ -817,40 +700,30 @@ pub fn get_mandelbrot_image_precise(
     let mut img: Vec<u8> = vec![0; output_size];
 
     for row in 0..image_height {
-        let mut column = 0;
-        while column < image_width {
-            // Batch pairs of pixels into SIMD lanes; a trailing odd pixel is
-            // paired with itself.
-            let second_column = (column + 1).min(image_width - 1);
-            let results = frame.escape_iterations_pair((column, row), (second_column, row));
+        for column in 0..image_width {
+            let (escape_iterations, z) = frame.escape_iterations(column, row);
 
-            for (lane, &(escape_iterations, z)) in
-                results.iter().take(second_column - column + 1).enumerate()
-            {
-                let pixel = color_from_escape_result(
-                    escape_iterations,
-                    z,
-                    max_iterations,
-                    exponent,
-                    palette,
-                    should_reverse_colors,
-                    &color_space,
-                    shift_hue_amount,
-                    saturate_amount,
-                    lighten_amount,
-                    smooth_coloring,
-                    min_iterations_threshold,
-                    max_iterations_threshold,
-                );
+            let pixel = color_from_escape_result(
+                escape_iterations,
+                z,
+                max_iterations,
+                exponent,
+                palette,
+                should_reverse_colors,
+                &color_space,
+                shift_hue_amount,
+                saturate_amount,
+                lighten_amount,
+                smooth_coloring,
+                min_iterations_threshold,
+                max_iterations_threshold,
+            );
 
-                let index = (row * image_width + column + lane) * NUM_COLOR_CHANNELS;
-                img[index] = pixel[0];
-                img[index + 1] = pixel[1];
-                img[index + 2] = pixel[2];
-                img[index + 3] = 255;
-            }
-
-            column += 2;
+            let index = (row * image_width + column) * NUM_COLOR_CHANNELS;
+            img[index] = pixel[0];
+            img[index + 1] = pixel[1];
+            img[index + 2] = pixel[2];
+            img[index + 3] = 255;
         }
     }
 
