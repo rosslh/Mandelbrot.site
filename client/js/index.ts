@@ -1,5 +1,6 @@
 import "./static";
 import MandelbrotMap from "./MandelbrotMap";
+import { firstTileRenderedEvent } from "./MandelbrotLayer";
 import { initRegionalAttribution } from "./regionalAttribution";
 
 const mapHtmlId = "leaflet";
@@ -7,6 +8,11 @@ const smallScreenWidthPx = 800;
 const swReloadFlagKey = "mandelbrot-sw-reloaded";
 const swReloadWindowMs = 10000;
 const cacheRecoveryFlagKey = "mandelbrot-cache-recovered";
+
+// Captured before setConfigFromUrl strips the share parameters from the URL,
+// so the recovery and update reloads below land back on the shared view
+// instead of the bare origin.
+const initialHref = window.location.href;
 
 // A cached app bundle paired with a mismatched (network-served) worker/WASM
 // chunk fails in recognizable ways: a code-split chunk won't load, or the
@@ -25,6 +31,10 @@ function looksLikeStaleCacheFailure(reason: unknown): boolean {
       message,
     ) ||
     /Worker initialization failed|Unknown worker request type/i.test(message) ||
+    // threads.js spawn failure: a stale worker script that is too broken to
+    // call expose() only ever surfaces as this init timeout, never as one of
+    // the more specific signatures above.
+    /init message from worker|Worker init message/i.test(message) ||
     /WebAssembly|wasm|magic word|importScripts/i.test(message)
   );
 }
@@ -47,7 +57,7 @@ async function recoverFromStaleCache(): Promise<void> {
       await Promise.all(keys.map((key) => caches.delete(key)));
     }
   } finally {
-    window.location.reload();
+    window.location.replace(initialHref);
   }
 }
 
@@ -79,13 +89,30 @@ function reloadOnServiceWorkerUpdate() {
 
     if (wasControlledAtLoad && withinReloadWindow && !alreadyReloaded) {
       sessionStorage.setItem(swReloadFlagKey, "true");
-      window.location.reload();
+      window.location.replace(initialHref);
     }
   });
 }
 
+// The reload and recovery flags are one-shot to prevent loops, but left set
+// they would also block recovery from a future deploy or cache failure in the
+// same tab. A successfully rendered tile proves the current asset set works
+// end-to-end (app bundle, worker, and WASM agree), so it is the safe point to
+// re-arm both.
+function rearmRecoveryOnFirstRenderedTile() {
+  window.addEventListener(
+    firstTileRenderedEvent,
+    () => {
+      sessionStorage.removeItem(swReloadFlagKey);
+      sessionStorage.removeItem(cacheRecoveryFlagKey);
+    },
+    { once: true },
+  );
+}
+
 window.addEventListener("load", () => {
   watchForStaleCacheFailures();
+  rearmRecoveryOnFirstRenderedTile();
 
   initRegionalAttribution().catch((err: unknown) => {
     console.error("Regional attribution failed:", err);

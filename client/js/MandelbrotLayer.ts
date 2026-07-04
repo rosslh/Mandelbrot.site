@@ -5,6 +5,19 @@ import { TileRect, WorkerRequest } from "./MandelbrotMap";
 
 type Done = (error: null, tile: HTMLCanvasElement) => void;
 
+// Fired (once per page load) when the first map tile finishes rendering.
+// index.ts listens for this as proof that the served asset set is healthy and
+// its one-shot cache-recovery guards can be re-armed.
+export const firstTileRenderedEvent = "mandelbrot:first-tile-rendered";
+
+let firstTileRendered = false;
+
+function announceFirstTileRendered() {
+  if (firstTileRendered) return;
+  firstTileRendered = true;
+  window.dispatchEvent(new Event(firstTileRenderedEvent));
+}
+
 export type WasmRequestPayload = {
   originRe: string;
   originIm: string;
@@ -195,6 +208,7 @@ class MandelbrotLayer extends L.GridLayer {
         scaledTileSize,
       );
       context.putImageData(imageData, 0, 0);
+      announceFirstTileRendered();
       this._map.queuedTileTasks = this._map.queuedTileTasks.filter(
         (task) => task.id !== id,
       );
