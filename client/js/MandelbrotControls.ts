@@ -378,7 +378,11 @@ class MandelbrotControls {
       return;
     }
 
-    this.map.tileCache.clear();
+    // Invalidating (not just clearing) also keeps old-cap tiles that are
+    // still rendering from repopulating the cache before the debounced
+    // refresh runs, which would overwrite this provisional ceiling with a
+    // fit to the previous iteration cap.
+    this.map.invalidateTileCache();
 
     this.map.config.paletteMaxIter = newIterations;
     this.map.config.paletteMinIter = Math.min(

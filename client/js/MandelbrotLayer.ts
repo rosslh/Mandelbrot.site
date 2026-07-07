@@ -207,6 +207,9 @@ class MandelbrotLayer extends L.GridLayer {
         : Date.now().toString();
 
     const tileTask = this._map.pool.queue(async (workerTask) => {
+      // The render parameters are read here, when a worker picks the task
+      // up, so remember which generation they belong to.
+      const generation = this._map.renderGeneration;
       const request: WorkerRequest = {
         type: "calculate" as const,
         payload: this.buildRequestPayload(
@@ -224,7 +227,10 @@ class MandelbrotLayer extends L.GridLayer {
         scaledTileSize,
       );
       context.putImageData(imageData, 0, 0);
-      if (response.values) {
+      // A generation bump mid-flight means this tile's escape data describes
+      // superseded render parameters: still paint it (its neighbors look the
+      // same), but keep it out of the cache.
+      if (response.values && generation === this._map.renderGeneration) {
         this._map.tileCache.record(
           tilePosition,
           response.minIter,

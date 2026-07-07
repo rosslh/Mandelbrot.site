@@ -146,6 +146,11 @@ class MandelbrotMap extends L.Map {
   // Increments whenever a recolor pass or full re-render starts, so stale
   // in-flight recolor results are dropped instead of painting mixed palettes.
   private recolorGeneration = 0;
+  // Increments whenever the render parameters change (a refresh, an
+  // iteration-cap edit): tiles requested under an older generation still
+  // paint, but their escape data describes superseded settings and must not
+  // enter the cache, where it would skew palette detection.
+  renderGeneration = 0;
   // Set when a color setting changes while tiles are still rendering: those
   // tiles were requested with the old colors, so repaint once they all land.
   private recolorPendingOnLoad = false;
@@ -219,6 +224,9 @@ class MandelbrotMap extends L.Map {
     // Apply the auto-fitted palette range at zoom boundaries: the new zoom's
     // tiles all render from scratch anyway, so the update costs nothing.
     this.on("zoomstart", () => {
+      // A recolor pass fitted to the outgoing zoom must not keep painting
+      // the retained tiles shown during the transition.
+      this.recolorGeneration += 1;
       this.applyDetectedPaletteRange();
     });
     this.on("zoomend", () => {
@@ -307,9 +315,13 @@ class MandelbrotMap extends L.Map {
 
   /** In auto palette mode, applies the iteration range detected from the
    * on-screen tiles to the config and inputs, so the next render or recolor
-   * uses it. Returns whether the applied values changed. */
+   * uses it. Only fits from a settled view: while tiles are still rendering
+   * the cache is a biased sample (fast-escaping exterior tiles land first),
+   * so mid-load callers keep the last settled fit and the load handler —
+   * which runs after the loading flag clears — applies the complete one.
+   * Returns whether the applied values changed. */
   applyDetectedPaletteRange(): boolean {
-    if (!this.config.paletteAutoAdjust) {
+    if (!this.config.paletteAutoAdjust || this.layerLoading) {
       return false;
     }
 
@@ -557,6 +569,15 @@ class MandelbrotMap extends L.Map {
     });
   }
 
+  /** Drops the cached escape data and marks in-flight tile renders stale:
+   * their results still paint, but no longer record into the cache, so tiles
+   * computed under the superseded render parameters cannot repopulate it and
+   * feed palette detection. */
+  invalidateTileCache() {
+    this.renderGeneration += 1;
+    this.tileCache.clear();
+  }
+
   private async createPool() {
     if (this.pool) {
       await this.pool.terminate(true);
@@ -570,7 +591,7 @@ class MandelbrotMap extends L.Map {
     // Every tile re-renders below: cached escape data is stale (it may
     // describe a different iteration cap), and in-flight recolor results
     // must not paint over the fresh tiles.
-    this.tileCache.clear();
+    this.invalidateTileCache();
     this.recolorGeneration += 1;
     this.recolorPendingOnLoad = false;
     await this.createPool();
