@@ -104,17 +104,22 @@ class MandelbrotLayer extends L.GridLayer {
       canvas.width = imageWidth;
       canvas.height = imageHeight;
 
+      // Snapshot the render parameters now rather than when the pool gets to
+      // this task: auto palette adjustment mutates the config as background
+      // tiles finish, and an export whose columns straddle such a refit comes
+      // out with two different color mappings.
+      const request: WorkerRequest = {
+        type: "calculate" as const,
+        payload: this.buildRequestPayload(
+          bounds,
+          imageWidth,
+          imageHeight,
+          false,
+        ),
+      };
+
       this._map.pool.queue(async (workerTask) => {
         try {
-          const request: WorkerRequest = {
-            type: "calculate" as const,
-            payload: this.buildRequestPayload(
-              bounds,
-              imageWidth,
-              imageHeight,
-              false,
-            ),
-          };
           const response = (await workerTask(request)) as MandelbrotResponse;
 
           const imageData = new ImageData(
