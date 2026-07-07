@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "comment": "Focused corpus for the set-adjacent regime (2026-07-07 direction): direct pathway, zoom < 40, >25k iterations, tiles dominated by exterior pixels escaping at high-but-not-max counts, with some interior mixed in. Compositions from 100x100 probes (scratchpad probe.mjs, 2026-07-07). hi-trapped kept as a pure-throughput regression control.",
+  "defaults": {
+    "exponent": 2,
+    "colorScheme": "turbo",
+    "reverseColors": false,
+    "shiftHueAmount": 0,
+    "saturateAmount": 0,
+    "lightenAmount": 0,
+    "colorSpace": 2,
+    "smoothColoring": true,
+    "paletteMinIter": 0,
+    "tileSize": 200
+  },
+  "cases": [
+    {
+      "id": "hi-border-z36-rep-u1",
+      "source": "derived:grid-z36-i51200-report",
+      "re": "0.271743159228663032475",
+      "im": "-0.004861827530021401159",
+      "zoom": 36,
+      "iterations": 51200,
+      "note": "One tile above the reported point: ~12% interior, escapers mean ~1.8k / max ~50k — escaper-band anchor, heterogeneous escape counts"
+    },
+    {
+      "id": "hi-border-z36-rep-r075",
+      "source": "derived:grid-z36-i51200-report",
+      "re": "0.271743159296875135108",
+      "im": "-0.004861827620970871336",
+      "zoom": 36,
+      "iterations": 51200,
+      "note": "3/4 tile right of the reported point: high-escape band (escaper p90 ~6.6k, max ~51k) beside interior blob (~69%)"
+    },
+    {
+      "id": "hi-band-z39-efar",
+      "source": "derived:grid-z36-i51200-report",
+      "re": "0.2717431593014226",
+      "im": "-0.004861827620970871336",
+      "zoom": 39,
+      "iterations": 51200,
+      "note": "East of the rep minibrot at z39: 44% interior, escapers mean ~6.7k, p90 ~16.7k, 10% of pixels >10k — most near-max-escaper-dominated tile found"
+    },
+    {
+      "id": "hi-band-z38-nedge",
+      "source": "derived:grid-z36-i51200-report",
+      "re": "0.271743159228663032475",
+      "im": "-0.0048618275800436095",
+      "zoom": 38,
+      "iterations": 51200,
+      "note": "North edge of the rep minibrot at z38: ~90% interior + escaper tail mean ~11k / p90 ~28k — 'some inside is fine' case"
+    },
+    {
+      "id": "hi-border-z30-seahorse",
+      "source": "synthetic",
+      "re": "-0.7436438870371587",
+      "im": "0.1318259042053119",
+      "zoom": 30,
+      "iterations": 51200,
+      "note": "Seahorse spiral, 0% interior, escapers mean ~1.1k: every pixel escapes, measures per-iteration throughput + any check overhead"
+    },
+    {
+      "id": "hi-mixed-z12-valley",
+      "source": "synthetic",
+      "re": "-0.75",
+      "im": "0.02",
+      "zoom": 12,
+      "iterations": 30000,
+      "note": "Seahorse valley: ~33% cardioid/bulb interior walls + slow-escape channel with set-adjacent escapers up to ~46k"
+    },
+    {
+      "id": "hi-trapped-z21-cusp",
+      "source": "synthetic",
+      "re": "0.250001",
+      "im": "0",
+      "zoom": 21,
+      "iterations": 51200,
+      "note": "Cusp channel d=1e-6: since 78ec740 this resolves instantly via rect_in_set + border periodicity — kept as a fast-path regression control"
+    }
+  ]
+}

@@ -33,6 +33,26 @@ const PERIODICITY_FIRST_SAVE: u32 = 8;
 // n = save + k*p is divisible by the stride and detection stays guaranteed.
 const PERIODICITY_CHECK_STRIDE: u32 = 4;
 
+// Number of f64x2 vectors the streaming escape kernel keeps in flight
+// (2 pixels per vector). Each vector is an independent FP dependency chain.
+#[cfg(target_arch = "wasm32")]
+const STREAM_CHAINS: usize = 4;
+
+// Iterations between bookkeeping passes (retire/refill, budget, periodicity)
+// in the streaming kernel. Saves land at per-lane multiples of the stride, so
+// cycle detection stays guaranteed as with PERIODICITY_CHECK_STRIDE.
+#[cfg(target_arch = "wasm32")]
+const STREAM_STRIDE: u32 = 16;
+
+// Mariani–Silver subdivision: rects whose width or height is at or below
+// this compute all their pixels directly instead of testing their border.
+#[cfg(target_arch = "wasm32")]
+const MARIANI_LEAF: usize = 8;
+
+// Sentinel iteration count for pixels not yet computed during subdivision.
+#[cfg(target_arch = "wasm32")]
+const UNCOMPUTED: u32 = u32::MAX;
+
 /// True when `c = re + im*i` lies inside (or on) the main cardioid or the
 /// period-2 bulb. Closed-form membership: such points never escape, so the
 /// escape loop would run out its full iteration budget on them.
@@ -494,6 +514,408 @@ fn calculate_escape_iterations_quadratic_quad(
         }
     }
     results
+}
+
+/// Lane state for the streaming escape kernel: `CHAINS` f64x2 vectors
+/// (2 pixels each), plus per-lane bookkeeping. `slots` maps each lane to the
+/// pixel index it is iterating, or `IDLE_SLOT` when the point queue is
+/// exhausted.
+#[cfg(target_arch = "wasm32")]
+struct StreamLanes<const CHAINS: usize> {
+    z_re: [core::arch::wasm32::v128; CHAINS],
+    z_im: [core::arch::wasm32::v128; CHAINS],
+    c_re: [core::arch::wasm32::v128; CHAINS],
+    c_im: [core::arch::wasm32::v128; CHAINS],
+    /// All-ones for lanes still iterating; alive is a subset of occupied.
+    alive: [core::arch::wasm32::v128; CHAINS],
+    /// All-ones for lanes holding a pixel that has not been retired yet.
+    occupied: [core::arch::wasm32::v128; CHAINS],
+    /// Per-lane iteration counts (i64 lanes, incremented while alive).
+    iters: [core::arch::wasm32::v128; CHAINS],
+    // Brent-style periodicity state, per lane (see
+    // calculate_escape_iterations_quadratic).
+    saved_re: [core::arch::wasm32::v128; CHAINS],
+    saved_im: [core::arch::wasm32::v128; CHAINS],
+    next_save: [core::arch::wasm32::v128; CHAINS],
+    slots: [[usize; 2]; CHAINS],
+}
+
+#[cfg(target_arch = "wasm32")]
+const IDLE_SLOT: usize = usize::MAX;
+
+#[cfg(target_arch = "wasm32")]
+fn f64x2_with_lane(v: core::arch::wasm32::v128, sub: usize, x: f64) -> core::arch::wasm32::v128 {
+    use core::arch::wasm32::*;
+    if sub == 0 {
+        f64x2_replace_lane::<0>(v, x)
+    } else {
+        f64x2_replace_lane::<1>(v, x)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn f64x2_lane(v: core::arch::wasm32::v128, sub: usize) -> f64 {
+    use core::arch::wasm32::*;
+    if sub == 0 {
+        f64x2_extract_lane::<0>(v)
+    } else {
+        f64x2_extract_lane::<1>(v)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn i64x2_with_lane(v: core::arch::wasm32::v128, sub: usize, x: i64) -> core::arch::wasm32::v128 {
+    use core::arch::wasm32::*;
+    if sub == 0 {
+        i64x2_replace_lane::<0>(v, x)
+    } else {
+        i64x2_replace_lane::<1>(v, x)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn i64x2_lane(v: core::arch::wasm32::v128, sub: usize) -> i64 {
+    use core::arch::wasm32::*;
+    if sub == 0 {
+        i64x2_extract_lane::<0>(v)
+    } else {
+        i64x2_extract_lane::<1>(v)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<const CHAINS: usize> StreamLanes<CHAINS> {
+    fn new() -> Self {
+        use core::arch::wasm32::*;
+        let zero_f = f64x2_splat(0.0);
+        let zero_i = i64x2_splat(0);
+        StreamLanes {
+            z_re: [zero_f; CHAINS],
+            z_im: [zero_f; CHAINS],
+            c_re: [zero_f; CHAINS],
+            c_im: [zero_f; CHAINS],
+            alive: [zero_i; CHAINS],
+            occupied: [zero_i; CHAINS],
+            iters: [zero_i; CHAINS],
+            saved_re: [zero_f; CHAINS],
+            saved_im: [zero_f; CHAINS],
+            next_save: [zero_i; CHAINS],
+            slots: [[IDLE_SLOT; 2]; CHAINS],
+        }
+    }
+
+    /// Starts iterating `point` (pixel `index`) on the given lane.
+    fn load(&mut self, chain: usize, sub: usize, index: usize, point: (f64, f64)) {
+        let (re, im) = point;
+        self.c_re[chain] = f64x2_with_lane(self.c_re[chain], sub, re);
+        self.c_im[chain] = f64x2_with_lane(self.c_im[chain], sub, im);
+        self.z_re[chain] = f64x2_with_lane(self.z_re[chain], sub, re);
+        self.z_im[chain] = f64x2_with_lane(self.z_im[chain], sub, im);
+        self.saved_re[chain] = f64x2_with_lane(self.saved_re[chain], sub, re);
+        self.saved_im[chain] = f64x2_with_lane(self.saved_im[chain], sub, im);
+        self.alive[chain] = i64x2_with_lane(self.alive[chain], sub, -1);
+        self.occupied[chain] = i64x2_with_lane(self.occupied[chain], sub, -1);
+        self.iters[chain] = i64x2_with_lane(self.iters[chain], sub, 0);
+        self.next_save[chain] = i64x2_with_lane(
+            self.next_save[chain],
+            sub,
+            i64::from(PERIODICITY_FIRST_SAVE),
+        );
+        self.slots[chain][sub] = index;
+    }
+
+    /// Marks a lane idle once the point queue is exhausted.
+    fn clear(&mut self, chain: usize, sub: usize) {
+        self.alive[chain] = i64x2_with_lane(self.alive[chain], sub, 0);
+        self.occupied[chain] = i64x2_with_lane(self.occupied[chain], sub, 0);
+        self.slots[chain][sub] = IDLE_SLOT;
+    }
+}
+
+/// Pulls the next point that actually needs iterating; points inside the main
+/// cardioid or period-2 bulb are resolved to `max_iterations` on the spot.
+#[cfg(target_arch = "wasm32")]
+fn next_streamable_point(
+    points: &[(f64, f64)],
+    results: &mut [(u32, Complex64)],
+    next_point: &mut usize,
+    max_iterations: u32,
+) -> Option<usize> {
+    while *next_point < points.len() {
+        let index = *next_point;
+        *next_point += 1;
+        let (re, im) = points[index];
+        if in_main_cardioid_or_bulb(re, im) {
+            results[index] = (max_iterations, Complex64::new(re, im));
+        } else {
+            return Some(index);
+        }
+    }
+    None
+}
+
+/// Streaming escape-time kernel (quadratic case): keeps `CHAINS` f64x2
+/// vectors of pixels in flight and refills a lane as soon as its pixel
+/// escapes, is detected periodic, or exhausts the iteration budget — so no
+/// lane idles waiting for a slow neighbor, unlike the fixed-batch kernels.
+/// Retirement, budget, and periodicity bookkeeping run only every
+/// `PERIODICITY_CHECK_STRIDE` iterations; escaped lanes freeze their z and
+/// iteration count exactly at the escape step via the alive mask, so results
+/// are bit-identical to the scalar loop.
+#[cfg(target_arch = "wasm32")]
+fn stream_escape_quadratic<const CHAINS: usize>(
+    points: &[(f64, f64)],
+    max_iterations: u32,
+    escape_radius_squared: f64,
+    results: &mut [(u32, Complex64)],
+) {
+    use core::arch::wasm32::*;
+
+    let mut lanes = StreamLanes::<CHAINS>::new();
+    let mut next_point = 0usize;
+    let mut live_lanes = 0usize;
+
+    for chain in 0..CHAINS {
+        for sub in 0..2 {
+            if let Some(index) =
+                next_streamable_point(points, results, &mut next_point, max_iterations)
+            {
+                lanes.load(chain, sub, index, points[index]);
+                live_lanes += 1;
+            }
+        }
+    }
+    if live_lanes == 0 {
+        return;
+    }
+
+    let radius_squared = f64x2_splat(escape_radius_squared);
+    let two = f64x2_splat(2.0);
+    let max_iterations_minus_one = i64x2_splat(i64::from(max_iterations) - 1);
+
+    loop {
+        for _ in 0..STREAM_STRIDE {
+            for chain in 0..CHAINS {
+                let z_re = lanes.z_re[chain];
+                let z_im = lanes.z_im[chain];
+                let norm_sqr = f64x2_add(f64x2_mul(z_re, z_re), f64x2_mul(z_im, z_im));
+                let alive = v128_and(lanes.alive[chain], f64x2_lt(norm_sqr, radius_squared));
+                let next_re = f64x2_add(
+                    f64x2_sub(f64x2_mul(z_re, z_re), f64x2_mul(z_im, z_im)),
+                    lanes.c_re[chain],
+                );
+                let next_im = f64x2_add(f64x2_mul(two, f64x2_mul(z_re, z_im)), lanes.c_im[chain]);
+                lanes.z_re[chain] = v128_bitselect(next_re, z_re, alive);
+                lanes.z_im[chain] = v128_bitselect(next_im, z_im, alive);
+                lanes.iters[chain] = i64x2_sub(lanes.iters[chain], alive);
+                lanes.alive[chain] = alive;
+            }
+        }
+
+        for chain in 0..CHAINS {
+            // A lane is finished when it escaped (occupied but no longer
+            // alive), ran out its budget, or exactly revisited a saved z.
+            let out_of_budget = i64x2_gt(lanes.iters[chain], max_iterations_minus_one);
+            let cycled = v128_and(
+                v128_and(
+                    f64x2_eq(lanes.z_re[chain], lanes.saved_re[chain]),
+                    f64x2_eq(lanes.z_im[chain], lanes.saved_im[chain]),
+                ),
+                lanes.alive[chain],
+            );
+            let finished = v128_or(
+                v128_andnot(lanes.occupied[chain], lanes.alive[chain]),
+                v128_and(lanes.alive[chain], v128_or(out_of_budget, cycled)),
+            );
+
+            if v128_any_true(finished) {
+                for sub in 0..2 {
+                    if i64x2_lane(finished, sub) == 0 {
+                        continue;
+                    }
+                    let index = lanes.slots[chain][sub];
+                    let escaped = i64x2_lane(lanes.alive[chain], sub) == 0;
+                    // Alive-but-finished lanes are periodic or out of budget:
+                    // both report max_iterations (out-of-budget lanes may have
+                    // overshot by up to stride-1 masked steps, hence the min).
+                    let escape_iterations = if escaped {
+                        (i64x2_lane(lanes.iters[chain], sub) as u32).min(max_iterations)
+                    } else {
+                        max_iterations
+                    };
+                    let z = Complex64::new(
+                        f64x2_lane(lanes.z_re[chain], sub),
+                        f64x2_lane(lanes.z_im[chain], sub),
+                    );
+                    results[index] = (escape_iterations, z);
+
+                    match next_streamable_point(points, results, &mut next_point, max_iterations)
+                    {
+                        Some(next_index) => {
+                            lanes.load(chain, sub, next_index, points[next_index])
+                        }
+                        None => {
+                            lanes.clear(chain, sub);
+                            live_lanes -= 1;
+                        }
+                    }
+                }
+            }
+
+            // Periodicity saves land at per-lane iteration counts that are
+            // multiples of the stride (8, 16, 32, ... plus masked-step skew of
+            // 0), keeping detection guaranteed as in the scalar loop.
+            let save_due = v128_andnot(
+                lanes.alive[chain],
+                i64x2_gt(lanes.next_save[chain], lanes.iters[chain]),
+            );
+            lanes.saved_re[chain] =
+                v128_bitselect(lanes.z_re[chain], lanes.saved_re[chain], save_due);
+            lanes.saved_im[chain] =
+                v128_bitselect(lanes.z_im[chain], lanes.saved_im[chain], save_due);
+            lanes.next_save[chain] = v128_bitselect(
+                i64x2_shl(lanes.next_save[chain], 1),
+                lanes.next_save[chain],
+                save_due,
+            );
+        }
+
+        if live_lanes == 0 {
+            break;
+        }
+    }
+}
+
+/// Renders the full pixel grid via Mariani–Silver subdivision. Each wave
+/// streams the pending rects' uncomputed border-ring pixels through the
+/// lane-refilling kernel in one call; a rect whose entire ring reports
+/// `max_iterations` fills its inside as interior without computing it, and
+/// any other rect splits into quadrants for the next wave. Rects at or below
+/// `MARIANI_LEAF` compute all their pixels directly. Every pixel is computed
+/// at most once, so escaper-only tiles pay only bookkeeping.
+///
+/// The fill assumes a ring of max-iteration pixels never encloses a pixel
+/// that escapes within budget — exact in the continuum (maximum principle on
+/// the Green's function), and breakable only by sub-pixel exterior channels:
+/// the same assumption `rect_in_set` already makes at tile level.
+#[cfg(target_arch = "wasm32")]
+fn stream_tile_subdivided(
+    re_values: &[f64],
+    im_values: &[f64],
+    max_iterations: u32,
+    results: &mut [(u32, Complex64)],
+) {
+    #[derive(Clone, Copy)]
+    struct Rect {
+        x0: usize,
+        y0: usize,
+        x1: usize, // exclusive
+        y1: usize, // exclusive
+    }
+
+    fn is_leaf(rect: &Rect) -> bool {
+        rect.x1 - rect.x0 <= MARIANI_LEAF || rect.y1 - rect.y0 <= MARIANI_LEAF
+    }
+
+    let width = re_values.len();
+    let height = im_values.len();
+
+    let mut pending = vec![Rect {
+        x0: 0,
+        y0: 0,
+        x1: width,
+        y1: height,
+    }];
+    let mut wave_points: Vec<(f64, f64)> = Vec::new();
+    let mut wave_pixels: Vec<usize> = Vec::new();
+    let mut wave_results: Vec<(u32, Complex64)> = Vec::new();
+
+    while !pending.is_empty() {
+        wave_points.clear();
+        wave_pixels.clear();
+
+        {
+            let mut schedule = |x: usize, y: usize| {
+                let pixel_index = y * width + x;
+                if results[pixel_index].0 == UNCOMPUTED {
+                    wave_points.push((re_values[x], im_values[y]));
+                    wave_pixels.push(pixel_index);
+                }
+            };
+
+            for rect in &pending {
+                let leaf = is_leaf(rect);
+                for y in rect.y0..rect.y1 {
+                    if leaf || y == rect.y0 || y == rect.y1 - 1 {
+                        for x in rect.x0..rect.x1 {
+                            schedule(x, y);
+                        }
+                    } else {
+                        schedule(rect.x0, y);
+                        if rect.x1 - rect.x0 > 1 {
+                            schedule(rect.x1 - 1, y);
+                        }
+                    }
+                }
+            }
+        }
+
+        wave_results.clear();
+        wave_results.resize(wave_points.len(), (0, Complex64::new(0.0, 0.0)));
+        stream_escape_quadratic::<STREAM_CHAINS>(
+            &wave_points,
+            max_iterations,
+            ESCAPE_RADIUS.powi(2),
+            &mut wave_results,
+        );
+        for (position, &pixel_index) in wave_pixels.iter().enumerate() {
+            results[pixel_index] = wave_results[position];
+        }
+
+        let mut next: Vec<Rect> = Vec::new();
+        for rect in &pending {
+            if is_leaf(rect) {
+                continue;
+            }
+
+            let mut ring_interior = true;
+            'ring: for y in rect.y0..rect.y1 {
+                if y == rect.y0 || y == rect.y1 - 1 {
+                    for x in rect.x0..rect.x1 {
+                        if results[y * width + x].0 != max_iterations {
+                            ring_interior = false;
+                            break 'ring;
+                        }
+                    }
+                } else if results[y * width + rect.x0].0 != max_iterations
+                    || results[y * width + rect.x1 - 1].0 != max_iterations
+                {
+                    ring_interior = false;
+                    break;
+                }
+            }
+
+            if ring_interior {
+                for y in (rect.y0 + 1)..(rect.y1 - 1) {
+                    for x in (rect.x0 + 1)..(rect.x1 - 1) {
+                        let pixel_index = y * width + x;
+                        if results[pixel_index].0 == UNCOMPUTED {
+                            results[pixel_index] =
+                                (max_iterations, Complex64::new(0.0, 0.0));
+                        }
+                    }
+                }
+            } else {
+                let x_mid = (rect.x0 + rect.x1) / 2;
+                let y_mid = (rect.y0 + rect.y1) / 2;
+                next.push(Rect { x0: rect.x0, y0: rect.y0, x1: x_mid, y1: y_mid });
+                next.push(Rect { x0: x_mid, y0: rect.y0, x1: rect.x1, y1: y_mid });
+                next.push(Rect { x0: rect.x0, y0: y_mid, x1: x_mid, y1: rect.y1 });
+                next.push(Rect { x0: x_mid, y0: y_mid, x1: rect.x1, y1: rect.y1 });
+            }
+        }
+        pending = next;
+    }
 }
 
 /// Escape iterations for a pair of pixels sharing one call, batched into SIMD
@@ -1066,6 +1488,30 @@ fn render_mandelbrot_set(
         img[index + 1] = pixel[1];
         img[index + 2] = pixel[2];
     };
+
+    // Quadratic tiles render via Mariani–Silver subdivision over the
+    // lane-refilling stream kernel; other exponents fall through to the
+    // fixed-batch loop below.
+    #[cfg(target_arch = "wasm32")]
+    {
+        if exponent == 2 {
+            let im_values: Vec<f64> = im_range.collect();
+            let mut results =
+                vec![(UNCOMPUTED, Complex64::new(0.0, 0.0)); re_values.len() * im_values.len()];
+            stream_tile_subdivided(&re_values, &im_values, max_iterations, &mut results);
+
+            for (pixel_index, &(escape_iterations, z)) in results.iter().enumerate() {
+                write_pixel(pixel_index, escape_iterations, z);
+            }
+
+            drop(write_pixel);
+            return RenderedTile {
+                image: img,
+                values,
+                stats,
+            };
+        }
+    }
 
     for (x, im) in im_range.enumerate() {
         let mut y = 0;

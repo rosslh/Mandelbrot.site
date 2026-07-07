@@ -381,3 +381,102 @@ untested — quad's uniform −47% suggests ILP headroom may remain; (b) the
 perturbation-f64 delta loop got no interior/quad treatment (its pixels rarely
 run full budget at z47+ except near minibrots — measure before touching);
 (c) orbit cache sharing remains the top deep-zoom item.
+
+## 2026-07-07 — SHIPPED: lane-refill stream kernel + Mariani–Silver subdivision (direct pathway)
+
+Machine: mac arm64 (M-series), Chrome for Testing, macOS 14. Code change
+only, production flags throughout.
+
+Target regime (user-directed refinement of 2026-07-06): tiles dominated by
+EXTERIOR set-adjacent pixels escaping at high-but-not-max counts, some
+interior mixed in. New focused corpus corpus/hi-border.json (7 cases):
+the two hi-border z36 anchors, two new minibrot-halo cases found by probing
+~30 candidates around the rep minibrot (hi-band-z39-efar: 44% interior,
+escaper mean 6.7k/p90 16.7k, most near-max-dominated tile found;
+hi-band-z38-nedge: 90% interior + escaper tail mean 11k/p90 28k), seahorse
+(0% interior throughput control), valley, trapped-cusp (now resolves
+instantly via rect_in_set + border periodicity — fast-path control only).
+Probe finding: near-max escapers are inherently a thin band; no tile is
+majority >25k escapers — heavy-tailed escaper work is the realistic shape.
+
+**Change 1 — lane-refill streaming kernel (lib.rs `stream_escape_quadratic`):**
+replaces the fixed quad batches for wasm32/exponent-2 tiles. STREAM_CHAINS=4
+f64x2 vectors (8 pixels) stay permanently busy; a lane is retired and
+refilled the moment its pixel escapes / goes periodic / exhausts budget, so
+no lane idles waiting for a slow neighbor (fixed batches pay max-of-batch —
+expensive exactly when a near-max escaper sits beside fast escapers). All
+bookkeeping (retire/refill, budget compare, periodicity save/compare — the
+save schedule fully vectorized per-lane via mask selects) runs every
+STREAM_STRIDE=16 steps; escaped lanes freeze iter/z exactly via the alive
+mask, so results are bit-identical. Parameter sweep: chains 2/4/6/8 →
+4 optimal (2 much worse: bookkeeping without ILP to hide it, refill2 LOST
++4-17% on escaper tiles at stride 4; 6/8 flat-to-worse — register spills);
+stride 4→8 −18% uniform, 8→16 another −5-9%, 32 past the knee (delayed
+periodicity hurts interior-heavy tiles). Net refill4-s16 vs base: **−44.2%
+geomean, −35 to −64% every case.**
+
+**Change 2 — Mariani–Silver subdivision (lib.rs `stream_tile_subdivided`):**
+wave-based worklist over sub-rects; each wave streams all pending rects'
+uncomputed border-ring pixels through the refill kernel in ONE call, then
+per rect: ring all max_iterations → fill inside as interior (no compute);
+else split into quadrants; dims ≤ MARIANI_LEAF compute directly. Every pixel
+computed at most once, so escaper-only tiles pay only bookkeeping (seahorse
+delta identical with/without). Fill exactness: in the continuum a max-iter
+ring cannot enclose an in-budget escaper (maximum principle on the Green's
+function); only sub-pixel channels break it — the same assumption
+rect_in_set already makes at tile level. Leaf sweep: 16 much worse, 4
+fastest (−10% vs 8), 2 ≈ 4. **Shipped leaf 8, not 4:** leaf 4's finer fills
+misfilled 6 more single-pixel escaper specks on 2 realistic focused cases
+(r075: 1px, efar: 5px); leaf 8 diffs only on the degenerate trapped-cusp
+control (2 isolated specks on the channel centerline, each fully surrounded
+by max-iter pixels in the baseline output; a third speck survived by landing
+on a ring). Accepted deliberately: same artifact class the tile-level
+rect_in_set already produces resolution-dependently (the same tile is
+solid-blacked entirely at 100x100), iteration stats unchanged, and all 35
+standard-corpus cases byte-identical (official pixel-check) including
+dendrite/filament views and every user case.
+
+Wasm-level (run.mjs, hi-border corpus, 10 samples), final config
+(chains 4 / stride 16 / leaf 8) vs clean-tree base:
+
+| case | refill only | + Mariani |
+|---|---|---|
+| hi-border-z36-rep-u1 | −43.8% | −57.6% |
+| hi-border-z36-rep-r075 | −40.2% | −75.8% |
+| hi-band-z39-efar | −42.0% | −74.7% |
+| hi-band-z38-nedge | −37.5% | −87.2% |
+| hi-border-z30-seahorse | −34.9% | −34.4% |
+| hi-mixed-z12-valley | −63.9% | −63.1% |
+| geomean (7 cases) | −44.2% | **−65.4%** |
+
+Full standard corpus: direct **−13.8%** geomean, perturbation-f64 +0.6%,
+float-exp +0.1% (untouched). Known cost: two z0 whole-set user views
++18-24% — but those are ~3 ms tiles (+0.5-0.7 ms of wave/gather overhead);
+multibrot (exponent ≠ 2) keeps the old fixed-batch path.
+
+Correctness: cargo test 59/59; pixel-check all 35 standard cases
+byte-identical; focused-corpus diffs limited to the justified specks above
+(values buffers and min/max iteration stats otherwise identical).
+
+E2E (run-e2e.mjs, complete builds pre=HEAD@d7dd95d / post=this change):
+- Standard grid corpus: z36/i51200 **−47.2%** (cold −46.9%), z46 −22.2%,
+  z20 −16.4%, z48 pf64 +0.0%, z259 float-exp +0.2%. Overall **−19.2%.**
+- Focused grid corpus: report grid −47.5% (cold −47.5%), rep-up4 −9.5%,
+  valley −16.5%. Overall **−26.5%.**
+- Cold tracks warm everywhere: the existing worker tier-up warmup renders
+  64x64 exponent-2 tiles through the new kernel, satisfying the standing
+  SIMD-warmup rule with no new Liftoff penalty.
+
+Size: bench artifact 283.2 → 290.5 KiB (+2.6%); production module wasm
+284.3 → 291.6 KiB.
+
+Reproduce: `node src/run.mjs --variants base-border,mariani8 --corpus
+corpus/hi-border.json --filter hi- --budget-ms 30000`; e2e as usual, plus
+`--corpus corpus/hi-iter-direct-grid.json` for the focused grid.
+
+Verdict: shipped. Follow-ups: (a) z0 small-tile wave/gather overhead is the
+only measured regression — micro-opt the point-gather path if whole-set
+loads ever matter; (b) exponent ≠ 2 could reuse the stream kernel with a
+general-exponent step; (c) the perturbation-f64 delta loop could get the
+same refill treatment (its batches also pay max-of-pair) — measure first;
+(d) orbit cache sharing remains the top deep-zoom item.
