@@ -24,6 +24,29 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 const ESCAPE_RADIUS: f64 = 3.0;
 type RgbColor = [u8; 3];
 
+// First Brent-periodicity save point; the save interval doubles from here.
+const PERIODICITY_FIRST_SAVE: u32 = 8;
+
+// Periodicity is only checked every stride-th iteration to keep the check off
+// the hot path. Saves happen at multiples of the stride (8, 16, 32, ...), so
+// once the orbit sits exactly on a cycle of period p, some later iteration
+// n = save + k*p is divisible by the stride and detection stays guaranteed.
+const PERIODICITY_CHECK_STRIDE: u32 = 4;
+
+/// True when `c = re + im*i` lies inside (or on) the main cardioid or the
+/// period-2 bulb. Closed-form membership: such points never escape, so the
+/// escape loop would run out its full iteration budget on them.
+fn in_main_cardioid_or_bulb(re: f64, im: f64) -> bool {
+    let re_offset = re - 0.25;
+    let im_sq = im * im;
+    let q = re_offset * re_offset + im_sq;
+    if q * (q + re_offset) <= 0.25 * im_sq {
+        return true;
+    }
+    let re_plus_one = re + 1.0;
+    re_plus_one * re_plus_one + im_sq <= 0.0625
+}
+
 /// Running min/max of the escaped-pixel iteration counts observed while
 /// rendering a tile. Interior pixels are rendered black regardless of the
 /// palette, so they are not tracked; `range` stays `None` for tiles entirely
@@ -130,12 +153,31 @@ fn calculate_escape_iterations_quadratic(
     max_iterations: u32,
     escape_radius_squared: f64,
 ) -> (u32, Complex64) {
+    if in_main_cardioid_or_bulb(c.re, c.im) {
+        return (max_iterations, c);
+    }
+
     let mut z = c;
     let mut iter = 0;
+
+    // Brent-style periodicity: if z exactly revisits a saved value, the orbit
+    // is numerically periodic and can never escape.
+    let mut saved = z;
+    let mut next_save = PERIODICITY_FIRST_SAVE;
 
     while z.norm_sqr() < escape_radius_squared && iter < max_iterations {
         z = z * z + c;
         iter += 1;
+
+        if iter % PERIODICITY_CHECK_STRIDE == 0 {
+            if z == saved {
+                return (max_iterations, z);
+            }
+            if iter == next_save {
+                saved = z;
+                next_save = next_save.saturating_mul(2);
+            }
+        }
     }
 
     (iter, z)
@@ -160,9 +202,24 @@ fn calculate_escape_iterations_general(
     let mut z = c;
     let mut iter = 0;
 
+    // Brent-style periodicity, as in the quadratic loop. There is no
+    // closed-form interior test for general exponents.
+    let mut saved = z;
+    let mut next_save = PERIODICITY_FIRST_SAVE;
+
     while z.norm() < escape_radius && iter < max_iterations {
         z = z.powu(exponent) + c;
         iter += 1;
+
+        if iter % PERIODICITY_CHECK_STRIDE == 0 {
+            if z == saved {
+                return (max_iterations, z);
+            }
+            if iter == next_save {
+                saved = z;
+                next_save = next_save.saturating_mul(2);
+            }
+        }
     }
 
     (iter, z)
@@ -182,6 +239,14 @@ fn calculate_escape_iterations_quadratic_pair(
 ) -> [(u32, Complex64); 2] {
     use core::arch::wasm32::*;
 
+    let interior = [
+        in_main_cardioid_or_bulb(c_first.re, c_first.im),
+        in_main_cardioid_or_bulb(c_second.re, c_second.im),
+    ];
+    if interior[0] && interior[1] {
+        return [(max_iterations, c_first), (max_iterations, c_second)];
+    }
+
     let c_re = f64x2(c_first.re, c_second.re);
     let c_im = f64x2(c_first.im, c_second.im);
     let radius_squared = f64x2_splat(escape_radius_squared);
@@ -189,9 +254,19 @@ fn calculate_escape_iterations_quadratic_pair(
     let mut z_re = c_re;
     let mut z_im = c_im;
     // Alive lanes are all-ones, so subtracting the mask adds 1 per live lane.
-    let mut alive = i64x2_splat(-1);
+    let mut alive = i64x2(
+        if interior[0] { 0 } else { -1 },
+        if interior[1] { 0 } else { -1 },
+    );
     let mut lane_iterations = i64x2_splat(0);
     let mut remaining = max_iterations;
+
+    // Brent-style periodicity state (see calculate_escape_iterations_quadratic).
+    let mut saved_re = z_re;
+    let mut saved_im = z_im;
+    let mut steps_done = 0u32;
+    let mut next_save = PERIODICITY_FIRST_SAVE;
+    let mut periodic = [false, false];
 
     while remaining > 0 {
         let norm_sqr = f64x2_add(f64x2_mul(z_re, z_re), f64x2_mul(z_im, z_im));
@@ -209,9 +284,34 @@ fn calculate_escape_iterations_quadratic_pair(
         z_im = v128_bitselect(next_im, z_im, alive);
         lane_iterations = i64x2_sub(lane_iterations, alive);
         remaining -= 1;
+
+        steps_done += 1;
+        if steps_done % PERIODICITY_CHECK_STRIDE == 0 {
+            let cycled = v128_and(
+                v128_and(f64x2_eq(z_re, saved_re), f64x2_eq(z_im, saved_im)),
+                alive,
+            );
+            if v128_any_true(cycled) {
+                if i64x2_extract_lane::<0>(cycled) != 0 {
+                    periodic[0] = true;
+                }
+                if i64x2_extract_lane::<1>(cycled) != 0 {
+                    periodic[1] = true;
+                }
+                alive = v128_andnot(alive, cycled);
+                if !v128_any_true(alive) {
+                    break;
+                }
+            }
+            if steps_done == next_save {
+                saved_re = z_re;
+                saved_im = z_im;
+                next_save = next_save.saturating_mul(2);
+            }
+        }
     }
 
-    [
+    let lane_results = [
         (
             i64x2_extract_lane::<0>(lane_iterations) as u32,
             Complex64::new(f64x2_extract_lane::<0>(z_re), f64x2_extract_lane::<0>(z_im)),
@@ -220,7 +320,180 @@ fn calculate_escape_iterations_quadratic_pair(
             i64x2_extract_lane::<1>(lane_iterations) as u32,
             Complex64::new(f64x2_extract_lane::<1>(z_re), f64x2_extract_lane::<1>(z_im)),
         ),
+    ];
+
+    [
+        if interior[0] || periodic[0] {
+            (max_iterations, lane_results[0].1)
+        } else {
+            lane_results[0]
+        },
+        if interior[1] || periodic[1] {
+            (max_iterations, lane_results[1].1)
+        } else {
+            lane_results[1]
+        },
     ]
+}
+
+/// Escape-time iteration for four pixels at once across two f64x2 vectors,
+/// giving the CPU two independent dependency chains per step to overlap
+/// (quadratic case). Lane arithmetic is IEEE-identical to the scalar loop,
+/// as in the pair kernel.
+#[cfg(target_arch = "wasm32")]
+fn calculate_escape_iterations_quadratic_quad(
+    c: [Complex64; 4],
+    max_iterations: u32,
+    escape_radius_squared: f64,
+) -> [(u32, Complex64); 4] {
+    use core::arch::wasm32::*;
+
+    let interior = [
+        in_main_cardioid_or_bulb(c[0].re, c[0].im),
+        in_main_cardioid_or_bulb(c[1].re, c[1].im),
+        in_main_cardioid_or_bulb(c[2].re, c[2].im),
+        in_main_cardioid_or_bulb(c[3].re, c[3].im),
+    ];
+    if interior.iter().all(|&lane| lane) {
+        return [
+            (max_iterations, c[0]),
+            (max_iterations, c[1]),
+            (max_iterations, c[2]),
+            (max_iterations, c[3]),
+        ];
+    }
+
+    let c_re_a = f64x2(c[0].re, c[1].re);
+    let c_im_a = f64x2(c[0].im, c[1].im);
+    let c_re_b = f64x2(c[2].re, c[3].re);
+    let c_im_b = f64x2(c[2].im, c[3].im);
+    let radius_squared = f64x2_splat(escape_radius_squared);
+    let two = f64x2_splat(2.0);
+
+    let mut z_re_a = c_re_a;
+    let mut z_im_a = c_im_a;
+    let mut z_re_b = c_re_b;
+    let mut z_im_b = c_im_b;
+    let dead_or_alive = |is_interior: bool| if is_interior { 0i64 } else { -1i64 };
+    let mut alive_a = i64x2(dead_or_alive(interior[0]), dead_or_alive(interior[1]));
+    let mut alive_b = i64x2(dead_or_alive(interior[2]), dead_or_alive(interior[3]));
+    let mut lane_iterations_a = i64x2_splat(0);
+    let mut lane_iterations_b = i64x2_splat(0);
+    let mut remaining = max_iterations;
+
+    // Brent-style periodicity state (see calculate_escape_iterations_quadratic).
+    let mut saved_re_a = z_re_a;
+    let mut saved_im_a = z_im_a;
+    let mut saved_re_b = z_re_b;
+    let mut saved_im_b = z_im_b;
+    let mut steps_done = 0u32;
+    let mut next_save = PERIODICITY_FIRST_SAVE;
+    let mut periodic = [false; 4];
+
+    while remaining > 0 {
+        let norm_sqr_a = f64x2_add(f64x2_mul(z_re_a, z_re_a), f64x2_mul(z_im_a, z_im_a));
+        let norm_sqr_b = f64x2_add(f64x2_mul(z_re_b, z_re_b), f64x2_mul(z_im_b, z_im_b));
+        alive_a = v128_and(alive_a, f64x2_lt(norm_sqr_a, radius_squared));
+        alive_b = v128_and(alive_b, f64x2_lt(norm_sqr_b, radius_squared));
+        if !v128_any_true(v128_or(alive_a, alive_b)) {
+            break;
+        }
+
+        let next_re_a = f64x2_add(
+            f64x2_sub(f64x2_mul(z_re_a, z_re_a), f64x2_mul(z_im_a, z_im_a)),
+            c_re_a,
+        );
+        let next_im_a = f64x2_add(f64x2_mul(two, f64x2_mul(z_re_a, z_im_a)), c_im_a);
+        let next_re_b = f64x2_add(
+            f64x2_sub(f64x2_mul(z_re_b, z_re_b), f64x2_mul(z_im_b, z_im_b)),
+            c_re_b,
+        );
+        let next_im_b = f64x2_add(f64x2_mul(two, f64x2_mul(z_re_b, z_im_b)), c_im_b);
+        z_re_a = v128_bitselect(next_re_a, z_re_a, alive_a);
+        z_im_a = v128_bitselect(next_im_a, z_im_a, alive_a);
+        z_re_b = v128_bitselect(next_re_b, z_re_b, alive_b);
+        z_im_b = v128_bitselect(next_im_b, z_im_b, alive_b);
+        lane_iterations_a = i64x2_sub(lane_iterations_a, alive_a);
+        lane_iterations_b = i64x2_sub(lane_iterations_b, alive_b);
+        remaining -= 1;
+
+        steps_done += 1;
+        if steps_done % PERIODICITY_CHECK_STRIDE == 0 {
+            let cycled_a = v128_and(
+                v128_and(f64x2_eq(z_re_a, saved_re_a), f64x2_eq(z_im_a, saved_im_a)),
+                alive_a,
+            );
+            let cycled_b = v128_and(
+                v128_and(f64x2_eq(z_re_b, saved_re_b), f64x2_eq(z_im_b, saved_im_b)),
+                alive_b,
+            );
+            if v128_any_true(v128_or(cycled_a, cycled_b)) {
+                if i64x2_extract_lane::<0>(cycled_a) != 0 {
+                    periodic[0] = true;
+                }
+                if i64x2_extract_lane::<1>(cycled_a) != 0 {
+                    periodic[1] = true;
+                }
+                if i64x2_extract_lane::<0>(cycled_b) != 0 {
+                    periodic[2] = true;
+                }
+                if i64x2_extract_lane::<1>(cycled_b) != 0 {
+                    periodic[3] = true;
+                }
+                alive_a = v128_andnot(alive_a, cycled_a);
+                alive_b = v128_andnot(alive_b, cycled_b);
+                if !v128_any_true(v128_or(alive_a, alive_b)) {
+                    break;
+                }
+            }
+            if steps_done == next_save {
+                saved_re_a = z_re_a;
+                saved_im_a = z_im_a;
+                saved_re_b = z_re_b;
+                saved_im_b = z_im_b;
+                next_save = next_save.saturating_mul(2);
+            }
+        }
+    }
+
+    let lane_results = [
+        (
+            i64x2_extract_lane::<0>(lane_iterations_a) as u32,
+            Complex64::new(
+                f64x2_extract_lane::<0>(z_re_a),
+                f64x2_extract_lane::<0>(z_im_a),
+            ),
+        ),
+        (
+            i64x2_extract_lane::<1>(lane_iterations_a) as u32,
+            Complex64::new(
+                f64x2_extract_lane::<1>(z_re_a),
+                f64x2_extract_lane::<1>(z_im_a),
+            ),
+        ),
+        (
+            i64x2_extract_lane::<0>(lane_iterations_b) as u32,
+            Complex64::new(
+                f64x2_extract_lane::<0>(z_re_b),
+                f64x2_extract_lane::<0>(z_im_b),
+            ),
+        ),
+        (
+            i64x2_extract_lane::<1>(lane_iterations_b) as u32,
+            Complex64::new(
+                f64x2_extract_lane::<1>(z_re_b),
+                f64x2_extract_lane::<1>(z_im_b),
+            ),
+        ),
+    ];
+
+    let mut results = lane_results;
+    for lane in 0..4 {
+        if interior[lane] || periodic[lane] {
+            results[lane] = (max_iterations, lane_results[lane].1);
+        }
+    }
+    results
 }
 
 /// Escape iterations for a pair of pixels sharing one call, batched into SIMD
@@ -258,6 +531,44 @@ fn calculate_escape_iterations_pair(
         calculate_escape_iterations(first.0, first.1, max_iterations, exponent),
         calculate_escape_iterations(second.0, second.1, max_iterations, exponent),
     ]
+}
+
+/// Escape iterations for four pixels sharing one call, batched across two
+/// f64x2 vectors where a batched implementation exists (wasm32, exponent 2).
+#[cfg(target_arch = "wasm32")]
+fn calculate_escape_iterations_quad(
+    points: [(f64, f64); 4],
+    max_iterations: u32,
+    exponent: u32,
+) -> [(u32, Complex64); 4] {
+    if exponent == 2 {
+        calculate_escape_iterations_quadratic_quad(
+            [
+                Complex64::new(points[0].0, points[0].1),
+                Complex64::new(points[1].0, points[1].1),
+                Complex64::new(points[2].0, points[2].1),
+                Complex64::new(points[3].0, points[3].1),
+            ],
+            max_iterations,
+            ESCAPE_RADIUS.powi(2),
+        )
+    } else {
+        let first = calculate_escape_iterations_pair(points[0], points[1], max_iterations, exponent);
+        let second =
+            calculate_escape_iterations_pair(points[2], points[3], max_iterations, exponent);
+        [first[0], first[1], second[0], second[1]]
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn calculate_escape_iterations_quad(
+    points: [(f64, f64); 4],
+    max_iterations: u32,
+    exponent: u32,
+) -> [(u32, Complex64); 4] {
+    let first = calculate_escape_iterations_pair(points[0], points[1], max_iterations, exponent);
+    let second = calculate_escape_iterations_pair(points[2], points[3], max_iterations, exponent);
+    [first[0], first[1], second[0], second[1]]
 }
 
 /// Calculates the number of iterations it takes for a complex number to escape the set,
@@ -306,6 +617,14 @@ fn points_in_set_pair(
         .all(|&(iterations, _)| iterations == max_iterations)
 }
 
+/// Checks whether all four points are within the Mandelbrot set, batching
+/// them across two f64x2 vectors where a batched implementation exists.
+fn points_in_set_quad(points: [(f64, f64); 4], max_iterations: u32, exponent: u32) -> bool {
+    calculate_escape_iterations_quad(points, max_iterations, exponent)
+        .iter()
+        .all(|&(iterations, _)| iterations == max_iterations)
+}
+
 /// Checks if a rectangle, defined by ranges of real and imaginary values, is completely within the Mandelbrot set.
 /// This is determined using a specified maximum number of iterations, escape radius, and exponent for the escape time
 /// algorithm. The Mandelbrot set is simply connected, meaning if the rectangle's border is in the set, the entire
@@ -335,23 +654,54 @@ fn rect_in_set(
     );
 
     // If any corner is not in the set, the rectangle is not entirely in the set
-    if !points_in_set_pair((re_min, im_min), (re_min, im_max), max_iterations, exponent)
-        || !points_in_set_pair((re_max, im_min), (re_max, im_max), max_iterations, exponent)
-    {
+    if !points_in_set_quad(
+        [
+            (re_min, im_min),
+            (re_min, im_max),
+            (re_max, im_min),
+            (re_max, im_max),
+        ],
+        max_iterations,
+        exponent,
+    ) {
         return false;
     }
 
-    // Check the borders of the rectangle
-    for re in re_range {
-        if !points_in_set_pair((re, im_min), (re, im_max), max_iterations, exponent) {
-            return false;
+    // Check the borders of the rectangle, two border-crossing point pairs per
+    // batched call.
+    let border_in_set = |values: itertools_num::Linspace<f64>,
+                         point_pair_at: &dyn Fn(f64) -> [(f64, f64); 2]|
+     -> bool {
+        let values: Vec<f64> = values.collect();
+        let mut index = 0;
+        while index + 1 < values.len() {
+            let first = point_pair_at(values[index]);
+            let second = point_pair_at(values[index + 1]);
+            if !points_in_set_quad(
+                [first[0], first[1], second[0], second[1]],
+                max_iterations,
+                exponent,
+            ) {
+                return false;
+            }
+            index += 2;
         }
+        while index < values.len() {
+            let pair = point_pair_at(values[index]);
+            if !points_in_set_pair(pair[0], pair[1], max_iterations, exponent) {
+                return false;
+            }
+            index += 1;
+        }
+        true
+    };
+
+    if !border_in_set(re_range, &|re| [(re, im_min), (re, im_max)]) {
+        return false;
     }
 
-    for im in im_range {
-        if !points_in_set_pair((re_min, im), (re_max, im), max_iterations, exponent) {
-            return false;
-        }
+    if !border_in_set(im_range, &|im| [(re_min, im), (re_max, im)]) {
+        return false;
     }
 
     true
@@ -719,6 +1069,24 @@ fn render_mandelbrot_set(
 
     for (x, im) in im_range.enumerate() {
         let mut y = 0;
+        while y + 3 < re_values.len() {
+            let results = calculate_escape_iterations_quad(
+                [
+                    (re_values[y], im),
+                    (re_values[y + 1], im),
+                    (re_values[y + 2], im),
+                    (re_values[y + 3], im),
+                ],
+                max_iterations,
+                exponent,
+            );
+
+            for (lane, &(escape_iterations, z)) in results.iter().enumerate() {
+                write_pixel(x * image_width + y + lane, escape_iterations, z);
+            }
+
+            y += 4;
+        }
         while y + 1 < re_values.len() {
             let results = calculate_escape_iterations_pair(
                 (re_values[y], im),

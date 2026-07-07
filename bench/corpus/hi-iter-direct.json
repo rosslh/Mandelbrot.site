@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "comment": "Focused corpus: direct pathway (zoom < 40) at very high iteration counts (>25k). Prioritizes views with many border pixels (high-but-not-max escape counts) per 2026-07-06 experiment direction; interior/f64-trapped views kept as secondary coverage. Composition percentages come from 64x64 probes of the tile extent (scratchpad probes, 2026-07-06).",
+  "defaults": {
+    "exponent": 2,
+    "colorScheme": "turbo",
+    "reverseColors": false,
+    "shiftHueAmount": 0,
+    "saturateAmount": 0,
+    "lightenAmount": 0,
+    "colorSpace": 2,
+    "smoothColoring": true,
+    "paletteMinIter": 0,
+    "tileSize": 200
+  },
+  "cases": [
+    {
+      "id": "hi-border-z36-rep-u1",
+      "source": "derived:grid-z36-i51200-report",
+      "re": "0.271743159228663032475",
+      "im": "-0.004861827530021401159",
+      "zoom": 36,
+      "iterations": 51200,
+      "note": "One tile above the reported point: ~6% interior, escapers mean ~1.7k / max ~43k — border-pixel-heavy, escaped work dominates"
+    },
+    {
+      "id": "hi-border-z36-rep-r075",
+      "source": "derived:grid-z36-i51200-report",
+      "re": "0.271743159296875135108",
+      "im": "-0.004861827620970871336",
+      "zoom": 36,
+      "iterations": 51200,
+      "note": "3/4 tile right of the reported point: high-escape band (escaper p90 ~8.4k, max ~48k) beside interior blob (~74%)"
+    },
+    {
+      "id": "hi-border-z30-seahorse",
+      "source": "synthetic",
+      "re": "-0.7436438870371587",
+      "im": "0.1318259042053119",
+      "zoom": 30,
+      "iterations": 51200,
+      "note": "Seahorse spiral, 0% interior, escapers mean ~1.1k: every pixel escapes, measures per-iteration throughput + any check overhead"
+    },
+    {
+      "id": "hi-mixed-z12-valley",
+      "source": "synthetic",
+      "re": "-0.75",
+      "im": "0.02",
+      "zoom": 12,
+      "iterations": 30000,
+      "note": "Seahorse valley: ~33% cardioid/bulb interior walls + slow-escape channel (escaper max ~46k at 51200)"
+    },
+    {
+      "id": "hi-interior-z36-rep",
+      "source": "user-report",
+      "re": "0.271743159228663032475",
+      "im": "-0.004861827620970871336",
+      "zoom": 36,
+      "iterations": 51200,
+      "note": "Reported URL tile: ~98% interior (minibrot), Brent-detectable p50 ~8.4k; escapers mean ~6k"
+    },
+    {
+      "id": "hi-trapped-z21-cusp",
+      "source": "synthetic",
+      "re": "0.250001",
+      "im": "0",
+      "zoom": 21,
+      "iterations": 51200,
+      "note": "Cusp channel d=1e-6: 100% of pixels run full max_iterations (f64-trapped near-parabolic crawl), only ~1/3 exactly periodic and late — worst-case throughput tile"
+    }
+  ]
+}

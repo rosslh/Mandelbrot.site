@@ -306,3 +306,78 @@ Shipped: paired Rust code restored (identical to e38df5b) + warmup in
 client/js/worker.js. cargo test 53/53. Production wasm back to 276.5 KiB.
 Rule for the future, now encoded in the skill: hand-written SIMD hot
 loops must ship with a tier-up warmup and an e2e cold-pass check.
+
+## 2026-07-06 — SHIPPED: quad batching + interior checks (direct pathway, sub-40 zoom / >25k iterations)
+
+Machine: mac arm64 (M-series), Chrome for Testing, macOS 14. Code change
+only, production flags throughout.
+
+Target regime (user-directed): direct pathway, zoom < 40, iterations > 25k,
+prioritizing views with many border pixels (high-but-not-max escape counts).
+New focused corpora: corpus/hi-iter-direct.json (6 single-tile cases) and
+corpus/hi-iter-direct-grid.json (3 e2e grid cases), compositions verified by
+offline 64x64 probes.
+
+**Corpus findings worth keeping:**
+- The reported z36/i51200 tile is ~98% interior (minibrot); grid-wide the
+  view is 13.5% interior pixels carrying ~90% of the total work.
+- The near-parabolic "channels" users park on (cusp exterior d<=1e-6, seahorse
+  valley pinch) are **f64-trapped**: every pixel runs the full budget without
+  escaping, and most orbits never become exactly periodic within it. These are
+  pure throughput workloads; genuinely high-but-not-max escaper bands live
+  next to minibrot/interior boundaries (mean 1-6k, p90 up to ~14k at i51200).
+
+**Change (mandelbrot/src/lib.rs):**
+1. Quad batching: the quadratic escape loop iterates 4 pixels per step across
+   two f64x2 vectors (two independent FP dependency chains), with pair/scalar
+   remainder handling; rect_in_set corner + border probes batched 4-wide too.
+2. Interior checks: closed-form main-cardioid/period-2-bulb membership before
+   the loop, plus exact-equality Brent periodicity inside all escape loops
+   (saves at 8,16,32,...; checked every 4th iteration — stride keeps the check
+   off the hot path, and detection stays guaranteed because saves land on
+   stride multiples). Detected pixels return max_iterations, exactly what the
+   timed-out loop would return, so output is unchanged.
+
+Wasm-level (run.mjs, focused corpus, 10 samples), deltas vs clean-tree base:
+
+| case | interior | quad | both+stride |
+|---|---|---|---|
+| hi-border-z36-rep-u1 | −6.8% | −45.5% | **−48.6%** |
+| hi-border-z36-rep-r075 | −46.8% | −48.3% | **−71.8%** |
+| hi-border-z30-seahorse | +3.1% | −46.4% | **−44.9%** |
+| hi-mixed-z12-valley | −90.0% | −47.3% | **−92.6%** |
+| hi-interior-z36-rep | −73.8% | −48.8% | **−86.1%** |
+| hi-trapped-z21-cusp | −99.9% | −49.1% | **−99.9%** |
+| geomean | −85.3% | −47.6% | **−91.3%** |
+
+Quad batching alone is a uniform ~−47% (ILP win, helps every workload
+including trapped/escaper tiles); interior checks crush interior/mixed tiles;
+the 4-iteration check stride cut the periodicity overhead on pure-escaper
+tiles from ~+10% (vs quad-only) to ~+2%.
+
+Correctness: byte-identical output across all variants on the focused corpus
+and all 35 standard-corpus cases (pixel-check); cargo test 59/59. Exactness
+argument: cardioid/bulb membership and exact-cycle detection only fire for
+points that provably never escape.
+
+E2E (run-e2e.mjs, complete client builds pre=689e024 / post=this change):
+- Focused grid corpus: rep-up4 (border-heavy) −20.1% (cold −22.1%), report
+  grid −70.4% (5573 → 1649 ms, cold −70.1%), valley −84.6%. Overall −66.9%.
+- Standard grid-regression corpus: z36 −70.2%, z46 −26.3%, z20 −19.3%,
+  z48 perturbation +0.3% (untouched; a one-shot cold +11.3% did not reproduce:
+  two reruns gave cold −0.8%/−0.2%), z259 float-exp −0.2%. Overall −29.2%.
+- Cold passes track warm everywhere: the existing worker tier-up warmup
+  (two 64x64 seahorse renders at spawn) already exercises the quad kernel
+  (64 % 4 == 0), so no new Liftoff penalty.
+
+Size: production module wasm 280.6 → 284.3 KiB (+1.3%).
+
+Reproduce: `node src/run.mjs --variants base-hi,hi-final --corpus
+corpus/hi-iter-direct.json --filter hi- --budget-ms 30000`; e2e as usual with
+`--corpus corpus/hi-iter-direct-grid.json`.
+
+Verdict: shipped. Follow-ups noted: (a) 8-wide (four-vector) batching
+untested — quad's uniform −47% suggests ILP headroom may remain; (b) the
+perturbation-f64 delta loop got no interior/quad treatment (its pixels rarely
+run full budget at z47+ except near minibrots — measure before touching);
+(c) orbit cache sharing remains the top deep-zoom item.

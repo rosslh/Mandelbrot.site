@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "comment": "Grid/e2e companion to hi-iter-direct.json: full-viewport cases for the direct pathway at >25k iterations, prioritizing border-pixel-heavy (high-but-not-max) views. Used with run-grid.mjs / run-e2e.mjs via --corpus.",
+  "defaults": {
+    "exponent": 2,
+    "colorScheme": "turbo",
+    "reverseColors": false,
+    "shiftHueAmount": 0,
+    "saturateAmount": 0,
+    "lightenAmount": 0,
+    "colorSpace": 2,
+    "smoothColoring": true,
+    "paletteMinIter": 0,
+    "tileSize": 200
+  },
+  "cases": [
+    {
+      "id": "grid-hi-z36-rep-up4",
+      "source": "derived:grid-z36-i51200-report",
+      "re": "0.271743159228663032475",
+      "im": "-0.004861827257172990627",
+      "zoom": 36,
+      "iterations": 51200,
+      "note": "Reported view shifted 4 tiles up: grid is mostly the escaper band (border-pixel-heavy, escapers ~0.7-1.7k mean, occasional ~43k)"
+    },
+    {
+      "id": "grid-hi-z36-report",
+      "source": "user-report",
+      "re": "0.271743159228663032475",
+      "im": "-0.004861827620970871336",
+      "zoom": 36,
+      "iterations": 51200,
+      "note": "The reported URL grid: ~13.5% interior pixels carrying ~90% of the work; anchor case for this regime"
+    },
+    {
+      "id": "grid-hi-z12-valley",
+      "source": "synthetic",
+      "re": "-0.75",
+      "im": "0.02",
+      "zoom": 12,
+      "iterations": 30000,
+      "note": "Seahorse valley grid: cardioid/bulb interior walls + slow-escape channel, mixed composition"
+    }
+  ]
+}
