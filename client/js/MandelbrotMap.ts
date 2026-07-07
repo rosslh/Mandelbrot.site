@@ -343,6 +343,18 @@ class MandelbrotMap extends L.Map {
     );
   }
 
+  /** Applies a color-only settings change (scheme, reversal, hue/saturation/
+   * lightness sliders, color space) by recoloring the on-screen tiles in
+   * place — these settings don't affect escape values, so no re-render is
+   * needed in either palette mode. Tiles still rendering were requested with
+   * the old colors; they are repainted when the layer finishes loading. */
+  applyColorSettings() {
+    if (this.mandelbrotLayer.isLoading()) {
+      this.recolorPendingOnLoad = true;
+    }
+    this.recolorVisibleTiles();
+  }
+
   /** Applies an explicit palette-range action (a reset, or enabling
    * auto-adjust) without re-rendering: in auto mode fit to the on-screen
    * tiles, then repaint in place. */

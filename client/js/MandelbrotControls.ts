@@ -37,6 +37,10 @@ type ResetButtonConfig = {
   configKeys: Array<keyof MandelbrotConfig>;
   specialHandling?: () => void;
   checkDiff?: () => boolean;
+  // Applies the reset visually. Defaults to a full re-render; sections whose
+  // settings only affect coloring repaint the tiles in place instead.
+  // Receives the keys that actually differed before the reset.
+  apply?: (changedKeys: Array<keyof MandelbrotConfig>) => void;
 };
 
 const DETAILS_STATE_STORAGE_KEY = "mandelbrot-details-state";
@@ -61,6 +65,15 @@ class MandelbrotControls {
       {
         buttonId: "resetColorScheme",
         configKeys: ["colorScheme", "reverseColors", "smoothColoring"],
+        apply: (changedKeys) => {
+          // Smooth coloring is baked into the cached escape values, so
+          // resetting it needs a re-render; the other keys only recolor.
+          if (changedKeys.includes("smoothColoring")) {
+            this.map.refresh();
+          } else {
+            this.map.applyColorSettings();
+          }
+        },
       },
       {
         buttonId: "resetPaletteRange",
@@ -73,6 +86,9 @@ class MandelbrotControls {
           ).value = String(this.map.config.iterations);
           this.syncAutoAdjustUi();
         },
+        // The range only affects coloring: fit (auto) or apply the reset
+        // values (manual) via an in-place repaint.
+        apply: () => this.map.refitPaletteAndRecolor(),
         checkDiff: () => {
           if (
             this.map.config.paletteAutoAdjust !==
@@ -99,11 +115,13 @@ class MandelbrotControls {
           "saturateAmount",
           "lightenAmount",
         ],
+        // All color-only settings: repaint in place, no re-render.
+        apply: () => this.map.applyColorSettings(),
       },
       {
         buttonId: "resetCoordinates",
         configKeys: ["re", "im", "zoom"],
-        specialHandling: () => {
+        apply: () => {
           this.map.refresh(true);
           this.setCoordinateInputValues();
         },
@@ -316,7 +334,13 @@ class MandelbrotControls {
       }
 
       this.updateResetButtonsVisibility();
-      this.map.refresh(resetView);
+      if (id === "paletteMinIter" || id === "paletteMaxIter") {
+        // The palette range only affects coloring, not escape values:
+        // repaint the tiles in place instead of re-rendering.
+        this.map.applyColorSettings();
+      } else {
+        this.map.refresh(resetView);
+      }
     }, 1000);
   }
 
@@ -412,7 +436,9 @@ class MandelbrotControls {
         this.map.config[id] = Number(value);
       }
       this.updateResetButtonsVisibility();
-      this.map.refresh();
+      // Color scheme and color space only affect coloring, not escape
+      // values: repaint the tiles in place instead of re-rendering.
+      this.map.applyColorSettings();
     };
   }
 
@@ -440,6 +466,10 @@ class MandelbrotControls {
         if (this.map.config.paletteAutoAdjust) {
           this.map.refitPaletteAndRecolor();
         }
+      } else if (id === "reverseColors") {
+        // Reversal only affects coloring, not escape values: repaint the
+        // tiles in place instead of re-rendering.
+        this.map.applyColorSettings();
       } else {
         this.map.refresh();
       }
@@ -454,7 +484,9 @@ class MandelbrotControls {
 
       this.map.config[id] = newValue;
       this.updateResetButtonsVisibility();
-      this.map.refresh();
+      // The hue/saturate/lighten sliders only affect coloring, not escape
+      // values: repaint the tiles in place instead of re-rendering.
+      this.map.applyColorSettings();
     }, 300);
   }
 
@@ -778,6 +810,10 @@ class MandelbrotControls {
       const button = document.getElementById(config.buttonId);
       if (button) {
         button.onclick = () => {
+          const changedKeys = config.configKeys.filter(
+            (key) => this.map.config[key] !== this.map.initialConfig[key],
+          );
+
           this.resetConfigValues(config.configKeys);
 
           if (config.specialHandling) {
@@ -786,7 +822,9 @@ class MandelbrotControls {
 
           this.updateResetButtonsVisibility();
 
-          if (config.buttonId !== "resetCoordinates") {
+          if (config.apply) {
+            config.apply(changedKeys);
+          } else {
             this.map.refresh();
           }
         };
