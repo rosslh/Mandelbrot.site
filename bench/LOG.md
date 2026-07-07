@@ -480,3 +480,67 @@ loads ever matter; (b) exponent ≠ 2 could reuse the stream kernel with a
 general-exponent step; (c) the perturbation-f64 delta loop could get the
 same refill treatment (its batches also pay max-of-pair) — measure first;
 (d) orbit cache sharing remains the top deep-zoom item.
+[2026-07-07, later: (d) was a misattribution — see the hybrid float-exp
+entry below.]
+
+## 2026-07-07 — SHIPPED: hybrid f64/ComplexExp float-exp loop (z259 e2e −84.7%)
+
+Machine: mac arm64 (M1 Pro, 8 logical cores), Chrome for Testing 136,
+macOS 14. Code change only, production flags throughout. Session directive:
+weight experiments by absolute wall-time saved (30→20 s outweighs 3→2 s
+tenfold) and re-audit verdicts reached under naive criteria.
+
+**Corrected verdict (audit finding):** the 2026-07-04 claim "deep-zoom page
+loads are dominated by per-worker reference-orbit recomputation" — which
+promoted orbit cache sharing to top backlog item — was wrong. A cold/warm
+probe (run.mjs, user-z259-3898a95f) showed cold 1325 ms vs warm 1307 ms:
+the arbitrary-precision orbit costs ~18 ms; the per-pixel ComplexExp delta
+loops are the other ~1300 ms. ComplexExp optimization had been deprioritized
+*because of* that misattribution. Orbit sharing demoted (would save
+~18 ms/worker once per view). No other logged verdict flips under
+time-weighted criteria: the z0 whole-set +18–24% (≈+0.6 ms/tile) and
+syn-fexp-z500-cusp-hi +2.5% below are correctly accepted costs, and the
+opt3+simd128 "e2e neutral" call still nets positive absolute time (z259
+−3.5% ≈ −540 ms vs z46/z48 +5.7% ≈ +290 ms).
+
+**Change (perturbation.rs):** per-pixel hybrid delta loop for the float-exp
+pathway (exponent 2, `dc.exp >= -800`). While `|dz|²` stays above 2^-800,
+the step runs in plain f64 — bit-identical there because every ComplexExp
+op is the same mantissa arithmetic at a power-of-two scale, and the margins
+(promote at dz ≥ 2^-380, dc ≥ 2^-800, redo floor at |dz|² < 2^-800) keep all
+intermediates plus the 120-bit `+ dc` alignment window clear of subnormals.
+A step whose result dips below the floor is *redone* in ComplexExp from the
+exact pre-step state, so no f64 rounding of the dip is ever observed; the
+pixel demotes to the ComplexExp loop and re-promotes when the delta grows
+back. At z259 (dc ≈ 2^-259) pixels run essentially 100% in the f64 phase.
+
+Wasm-level (run.mjs, full 35-case corpus, 10 samples) vs clean-tree base:
+
+| case | delta |
+|---|---|
+| user-z259-3898a95f | **−85.0%** (1305 → 196 ms; cold −84.8%) |
+| syn-fexp-z300-dendrite / -cusp | −83.8% / −83.8% |
+| syn-fexp-z500-needle | −58.0% (small-mode phase longer at 2^-500 deltas) |
+| syn-fexp-z500-cusp-hi | +2.9% (near-parabolic pixels never promote; below sig floor) |
+| direct / perturbation-f64 geomean | −0.2% / +0.0% (untouched) |
+| float-exp geomean | **−72.7%** |
+
+Correctness: cargo test 59/59; pixel-check all 35 cases byte-identical
+(the bit-exactness argument held empirically, including deep user cases).
+
+E2E (run-e2e.mjs, complete builds pre=HEAD@aff677c / post=this change,
+5 rounds): **grid-z259-i1600 15586 → 2382 ms (−84.7%, cold −84.9%)**; z36
++0.6%, z46 −0.8%, z20 +0.6%, z48 +0.2% (all within noise); overall geomean
+−31.2%. Cold tracks warm (scalar loop, no new hand-SIMD, warmup rule n/a).
+Slowest standard case is now grid-z48-i20000 (pf64) at ~3.4 s.
+
+Size: bench artifact 290.5 → 293.1 KiB (+0.9%); dist module wasm
+291.6 → 294.2 KiB.
+
+Reproduce: `node src/run.mjs --variants base259,hybrid-fe --filter float-exp`;
+e2e as usual with the standard grid corpus.
+
+Verdict: shipped — the largest absolute win so far (~13.2 s off the slowest
+e2e case). Follow-ups moved to the skill backlog: pf64 delta-loop refill
+(now the slowest case), SIMD for the hybrid's f64 phase (z259's remaining
+2.4 s), rescaled-epoch loop if z400+ traffic materializes.

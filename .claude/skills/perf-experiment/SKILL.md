@@ -107,11 +107,36 @@ wasm-opt. **Gotcha:** a `--rustflags` value replaces the `.cargo/config.toml`
 rustflags entirely, so it must re-include `-C target-feature=+simd128` (and
 keep `--enable-simd` in the wasm-opt flags) to stay comparable to production.
 
+## Prioritizing experiments and judging trade-offs
+
+**Weight by absolute wall-time saved, not percentages.** Cutting a render
+from 30 s to 20 s is worth 10x more than cutting one from 3 s to 2 s. Before
+picking an experiment, rank the e2e corpus cases by absolute time and target
+the slowest; rank them *within each pathway tier* (conventional `direct` vs
+arbitrary-precision `perturbation-f64`/`float-exp`) so a slow deep-zoom tier
+is not masked by fast direct cases, and each tier's worst case gets attention.
+A small regression on a millisecond-scale case is an acceptable price for
+seconds off a heavyweight case — say so explicitly in the log rather than
+letting a geomean average it away.
+
+**Decompose before you optimize.** Attribute the slow case's time with a
+direct measurement (e.g. run.mjs's cold-vs-warm split separates
+reference-orbit computation from per-pixel loops) before choosing a fix.
+Lesson learned: deep-zoom loads were assumed "orbit-dominated" from indirect
+e2e reasoning and orbit sharing was promoted to top priority; a 2-minute
+cold/warm probe showed the orbit was ~18 ms and the ComplexExp pixel loops
+were ~1300 ms — the fix that followed cut the case by 85%.
+
+**Re-audit old verdicts when criteria change.** A "failed" or "deprioritized"
+verdict is only as good as the metric it was judged on; when the weighting or
+the corpus changes, re-check whether any settled question flips.
+
 ## Interpreting results
 
 - A per-case difference is significant (`*`) when it clears
-  `max(3%, 2*(MAD_a + MAD_b)/median_a)`. Judge experiments primarily on the
-  **overall geomean** and per-pathway geomeans, not single cases.
+  `max(3%, 2*(MAD_a + MAD_b)/median_a)`. Judge experiments primarily on
+  **absolute time deltas on the slowest cases per pathway tier** (see above),
+  with the overall and per-pathway geomeans as secondary regression guards.
 - Variants are interleaved within one Chrome session, so thermal drift hits
   both sides. Still: run on AC power, close heavy apps, and re-run close calls
   (within ~2x the threshold) with `--samples 15` before believing them.
@@ -185,6 +210,14 @@ tileSize and smoothColoring pairs. User cases (`user-*`) come from a Supabase
 dedupes, buckets by pathway x iteration tercile, samples a few per bucket).
 Keep the corpus small enough that a two-variant run finishes in minutes.
 
+When adding or choosing cases, **favor views with many border pixels** —
+pixels close to but outside the set, escaping at high-but-not-max counts.
+That is where users park and where the real work is (interior-heavy tiles
+short-circuit via rect_in_set/periodicity; low-iteration exteriors are
+cheap). Verify a candidate's composition with a small offline probe (interior
+fraction, escaper mean/p90) before trusting it, and keep each pathway tier
+represented by its realistic worst case.
+
 ## Experiment log — read it first, then append to it
 
 **`bench/LOG.md` is the durable record of every experiment.** Check it before
@@ -195,28 +228,39 @@ win, loss, or inconclusive — append an entry: date, machine, exact flags or
 code change, per-pathway geomean deltas, size delta, verdict. Raw results
 JSONs are gitignored and machine-local; the log is what survives.
 
-## Experiment backlog (roughly prioritized)
+## Experiment backlog (ranked by absolute time on the slowest e2e cases per tier)
 
-1. ~~Manual SIMD batching (2 pixels per lane) in the escape loops~~ SHIPPED
-   2026-07-04 together with a worker tier-up warmup (worker.js renders two
-   tiny boundary tiles at spawn) after a revert/re-land cycle: without the
-   warmup, the paired loop runs under Liftoff on every page load and e2e
-   regressed +18% at high iteration counts; with it, −16.8% e2e overall
-   (z36/i51200: −38%). See LOG.md 2026-07-04. **Standing rule: hand-written
-   SIMD hot loops ship only with a tier-up warmup and an e2e cold-pass
-   check.** Remaining half: ComplexExp (float-exp) lane pairing — likely
-   small upside, and deep-zoom loads are orbit-dominated anyway (see #2).
-2. Orbit cache sharing across worker threads — **promoted**: e2e shows
-   deep-zoom page loads are dominated by per-worker reference-orbit
-   recomputation (z259 grid load ≈ 15.5 s in every variant). Sharing one
-   orbit across the pool (or precomputing it before workers spawn) is the
-   highest-leverage deep-zoom item.
-3. Smooth-coloring cost: already measurable via the
+1. Perturbation-f64 delta-loop batching/refill (perturbation.rs): z48/i20000
+   is now the slowest standard e2e case (~3.4 s). The pf64 pathway still uses
+   the 2-wide paired loop, which pays max-of-pair; the direct pathway's
+   lane-refill stream kernel (−44% there) is the template. Measure first —
+   scalar-index orbit lookups (no wasm gather) are the complication.
+2. Float-exp big-phase SIMD (perturbation.rs): after the 2026-07-07 hybrid
+   ship, float-exp pixels spend most iterations in a *scalar* plain-f64 loop
+   (z259 grid ≈ 2.4 s e2e). Routing the f64 phase through the pair/refill
+   machinery could roughly halve it again. Mode switches are per-pixel
+   mid-flight, so lanes need per-lane demote handling.
+3. Ultra-deep small-mode cost: at effective zoom ≳ 400 the hybrid's
+   ComplexExp phase dominates again (syn-fexp-z500-needle −58% not −85%;
+   syn-fexp-z500-cusp-hi +2.5% — near-parabolic pixels never promote).
+   Options: cheaper ComplexExp step, or a rescaled-f64 epoch loop
+   (Fraktaler-style). Only worth it if user data shows z400+ traffic.
+4. ~~Orbit cache sharing across worker threads~~ **DEMOTED 2026-07-07**: the
+   "orbit-dominated deep-zoom loads" claim (LOG 2026-07-04) was a
+   misattribution — a cold/warm probe showed the z259 orbit costs ~18 ms per
+   worker vs ~1300 ms of per-pixel ComplexExp work (fixed by the hybrid
+   loop). Sharing would save ~18 ms × workers on first view; revisit only if
+   very high iteration counts (long orbits) at depth show up in user data.
+5. Smooth-coloring cost: already measurable via the
    `syn-pf64-z100-dendrite[-nosmooth]` pair; optimize only if it exceeds
    5–10% of tile time.
-4. dashu precision headroom (perturbation.rs: `(zoom + 64) -> 32-bit`
+6. dashu precision headroom (perturbation.rs: `(zoom + 64) -> 32-bit`
    granularity): affects cold times only; correctness-sensitive.
-5. `panic = "abort"` in release profile: trivial; verify wasm-bindgen still
+7. `panic = "abort"` in release profile: trivial; verify wasm-bindgen still
    works.
-5. ComplexExp micro-optimizations (float_exp.rs): only if float-exp dominates
-   the user corpus, and orbit sharing (#2) comes first.
+
+Shipped milestones: manual f64x2 pixel pairing + tier-up warmup (2026-07-04,
+−16.8% e2e; **standing rule: hand-written SIMD hot loops ship only with a
+tier-up warmup and an e2e cold-pass check**); quad batching + interior checks
+(2026-07-06); lane-refill stream kernel + Mariani–Silver (2026-07-07); hybrid
+f64/ComplexExp float-exp loop (2026-07-07, z259 e2e −84.7%).

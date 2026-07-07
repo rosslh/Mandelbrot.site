@@ -440,6 +440,134 @@ fn perturbed_escape_iterations_f64_pair(
     ]
 }
 
+/// Thresholds for the hybrid float-exp fast path. While every quantity stays
+/// in f64's *normal* range, each ComplexExp operation rounds exactly like the
+/// corresponding plain-f64 operation (it is the same mantissa arithmetic at a
+/// power-of-two scale), so the delta step can run on plain f64 with
+/// bit-identical results. The margins below keep all intermediates (mantissa
+/// products, squared norms, the `+ dc` alignment window of 120 exponent bits)
+/// clear of the subnormal zone where the two roundings diverge.
+const HYBRID_PROMOTE_EXP: i64 = -380;
+const HYBRID_DC_MIN_EXP: i64 = -800;
+/// `2^-800`; a step whose `|dz|^2` lands below this is redone in ComplexExp.
+const HYBRID_FLOOR_NORM_SQR: f64 = f64::from_bits((1023 - 800) << 52);
+
+/// In-flight state of one pixel in the hybrid float-exp loop. The delta lives
+/// in exactly one representation at a time: plain f64 (`big`) while it is
+/// safely normal, ComplexExp otherwise.
+struct HybridState<'a> {
+    orbit: &'a [(f64, f64)],
+    last_index: usize,
+    dc: ComplexExp,
+    dc_f64: Complex64,
+    reference_index: usize,
+    dz_small: ComplexExp,
+    dz_big: Complex64,
+    big: bool,
+    z: Complex64,
+}
+
+impl HybridState<'_> {
+    /// One ComplexExp perturbation step, identical to the pure float-exp
+    /// loop's `advance` (quadratic case).
+    fn small_step(&mut self) {
+        let z_ref = self.orbit[self.reference_index];
+        self.dz_small = delta_step_float_exp(Complex64::new(z_ref.0, z_ref.1), self.dz_small, 2)
+            .add(&self.dc);
+        self.reference_index += 1;
+
+        let z_ref_next = self.orbit[self.reference_index];
+        let (dz_re, dz_im) = self.dz_small.to_f64s();
+        self.z = Complex64::new(z_ref_next.0 + dz_re, z_ref_next.1 + dz_im);
+
+        if self.reference_index == self.last_index
+            || exp_value_less_than((self.z.norm_sqr(), 0), self.dz_small.norm_sqr_exp())
+        {
+            self.dz_small = ComplexExp::from_f64s(self.z.re, self.z.im);
+            self.reference_index = 0;
+        }
+    }
+
+    fn advance(&mut self) {
+        if !self.big {
+            self.small_step();
+            // Promote once the delta is comfortably normal; the conversion is
+            // exact (normalized mantissa times an in-range power of two).
+            if !self.dz_small.is_zero() && self.dz_small.exp >= HYBRID_PROMOTE_EXP {
+                let (re, im) = self.dz_small.to_f64s();
+                self.dz_big = Complex64::new(re, im);
+                self.big = true;
+            }
+            return;
+        }
+
+        let saved_dz = self.dz_big;
+        let saved_index = self.reference_index;
+        let z_ref = self.orbit[self.reference_index];
+        let new_dz = delta_step_f64(Complex64::new(z_ref.0, z_ref.1), saved_dz, 2) + self.dc_f64;
+
+        if new_dz.norm_sqr() < HYBRID_FLOOR_NORM_SQR {
+            // The delta dipped toward the subnormal zone; redo this step in
+            // ComplexExp from the exact pre-step state so no f64 rounding of
+            // the dip is ever observed.
+            self.dz_small = ComplexExp::from_f64s(saved_dz.re, saved_dz.im);
+            self.big = false;
+            self.reference_index = saved_index;
+            self.small_step();
+            return;
+        }
+
+        self.reference_index += 1;
+        let z_ref_next = self.orbit[self.reference_index];
+        self.z = Complex64::new(z_ref_next.0 + new_dz.re, z_ref_next.1 + new_dz.im);
+        self.dz_big = new_dz;
+
+        if self.reference_index == self.last_index || self.z.norm_sqr() < self.dz_big.norm_sqr() {
+            self.dz_big = self.z;
+            self.reference_index = 0;
+            if self.dz_big.norm_sqr() < HYBRID_FLOOR_NORM_SQR {
+                self.dz_small = ComplexExp::from_f64s(self.dz_big.re, self.dz_big.im);
+                self.big = false;
+            }
+        }
+    }
+}
+
+/// Escape iterations for one pixel switching adaptively between plain-f64 and
+/// extended-exponent deltas (quadratic case). Bit-identical to
+/// `perturbed_escape_iterations_float_exp`: the f64 phase only runs where the
+/// two arithmetics round identically.
+fn perturbed_escape_iterations_hybrid(
+    orbit: &[(f64, f64)],
+    dc: ComplexExp,
+    max_iterations: u32,
+    escape_radius_squared: f64,
+) -> (u32, Complex64) {
+    let (dc_re, dc_im) = dc.to_f64s();
+    let mut state = HybridState {
+        orbit,
+        last_index: orbit.len() - 1,
+        dc,
+        dc_f64: Complex64::new(dc_re, dc_im),
+        reference_index: 0,
+        dz_small: ComplexExp::ZERO,
+        dz_big: Complex64::new(0.0, 0.0),
+        big: false,
+        z: Complex64::new(0.0, 0.0),
+    };
+
+    // Pre-step, mirroring the pure loops: afterwards z equals the pixel's c.
+    state.advance();
+
+    let mut iterations = 0;
+    while state.z.norm_sqr() < escape_radius_squared && iterations < max_iterations {
+        state.advance();
+        iterations += 1;
+    }
+
+    (iterations, state.z)
+}
+
 /// Escape iterations for one pixel using extended-exponent deltas.
 fn perturbed_escape_iterations_float_exp(
     orbit: &[(f64, f64)],
@@ -448,6 +576,14 @@ fn perturbed_escape_iterations_float_exp(
     exponent: u32,
     escape_radius_squared: f64,
 ) -> (u32, Complex64) {
+    // Most float-exp work happens at depths where the delta is representable
+    // as a normal f64 nearly all the time; the hybrid loop runs those spans
+    // at plain-f64 speed. `dc` must itself be a safely normal f64 so its
+    // conversion and every `+ dc` round identically in both representations.
+    if exponent == 2 && !dc.is_zero() && dc.exp >= HYBRID_DC_MIN_EXP {
+        return perturbed_escape_iterations_hybrid(orbit, dc, max_iterations, escape_radius_squared);
+    }
+
     let last_index = orbit.len() - 1;
     let mut reference_index: usize = 0;
     let mut dz = ComplexExp::ZERO;
