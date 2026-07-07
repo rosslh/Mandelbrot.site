@@ -69,6 +69,42 @@ html.fractal-root {
   margin-left: calc(env(safe-area-inset-left) + var(--space-12)) !important;
 }
 
+// Sits in the corner container directly beneath the zoom control; shown
+// while tiles are rendering or being repainted. Its width matches the zoom
+// control (26px, or 34px with leaflet-touch borders) so the circle centers
+// exactly beneath the buttons.
+.tile-loading-spinner {
+  display: none;
+  width: 26px;
+  margin-left: calc(env(safe-area-inset-left) + var(--space-12)) !important;
+  justify-content: center;
+  pointer-events: none;
+
+  .leaflet-touch & {
+    width: 34px;
+  }
+
+  &.visible {
+    display: flex;
+  }
+
+  &::after {
+    content: "";
+    width: 18px;
+    height: 18px;
+    border: 3px solid rgb(255 255 255 / 30%);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: tile-spinner-rotate 0.8s linear infinite;
+  }
+}
+
+@keyframes tile-spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .overlay {
   padding: var(--space-8);
   background: color-mix(in sRGB, var(--gray-950) 80%, transparent);
@@ -503,6 +539,10 @@ input {
 
     .leaflet-control-zoom {
       display: none;
+    }
+
+    .tile-loading-spinner {
+      display: none !important;
     }
   }
 }

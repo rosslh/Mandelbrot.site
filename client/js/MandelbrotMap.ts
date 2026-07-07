@@ -4,7 +4,7 @@ import MandelbrotLayer from "./MandelbrotLayer";
 import { QueuedTask } from "threads/dist/master/pool-types";
 import MandelbrotControls from "./MandelbrotControls";
 import ImageSaver from "./ImageSaver";
-import TileCache from "./TileCache";
+import TileCache, { CachedTile } from "./TileCache";
 import {
   decimalDigitsForZoom,
   isValidDecimalCoordinate,
@@ -142,6 +142,11 @@ class MandelbrotMap extends L.Map {
   // Set when a color setting changes while tiles are still rendering: those
   // tiles were requested with the old colors, so repaint once they all land.
   private recolorPendingOnLoad = false;
+  // Drives the loading spinner beneath the zoom control: visible while the
+  // layer is rendering tiles or any recolor pass is repainting them.
+  private loadingSpinner: HTMLElement | null = null;
+  private layerLoading = false;
+  private activeRecolorPasses = 0;
 
   constructor({
     htmlId,
@@ -166,6 +171,7 @@ class MandelbrotMap extends L.Map {
     this.origin = { re: initialConfig.re, im: initialConfig.im };
     this.zoomOffset = 0;
     this.mandelbrotLayer = new MandelbrotLayer().addTo(this);
+    this.addLoadingSpinnerControl();
     this.initialConfig = { ...initialConfig };
     this.config = { ...initialConfig };
     this.controls = new MandelbrotControls(this);
@@ -176,6 +182,23 @@ class MandelbrotMap extends L.Map {
     this.setView([0, 0], this.initialConfig.zoom);
     this.setConfigFromUrl();
     this.setupEventListeners();
+  }
+
+  /** Adds the spinner to the same corner as the zoom control (after it, so
+   * it stacks beneath) and hides/shows it with the loading state. */
+  private addLoadingSpinnerControl() {
+    const SpinnerControl = L.Control.extend({
+      onAdd: () => L.DomUtil.create("div", "tile-loading-spinner"),
+    });
+    const control = new SpinnerControl({ position: "topleft" }).addTo(this);
+    this.loadingSpinner = control.getContainer() ?? null;
+  }
+
+  private updateLoadingSpinner() {
+    this.loadingSpinner?.classList.toggle(
+      "visible",
+      this.layerLoading || this.activeRecolorPasses > 0,
+    );
   }
 
   private setupEventListeners() {
@@ -200,11 +223,23 @@ class MandelbrotMap extends L.Map {
     this.mandelbrotLayer.on("tileunload", (event: L.TileEvent) => {
       this.tileCache.remove(event.coords);
     });
+    this.mandelbrotLayer.on("loading", () => {
+      this.layerLoading = true;
+      this.updateLoadingSpinner();
+    });
     // Fires once every visible tile has finished rendering: fit the palette
     // to the complete view in one step.
     this.mandelbrotLayer.on("load", () => {
+      this.layerLoading = false;
+      // May start a recolor pass, which keeps the spinner up until the
+      // repaint lands.
       this.handleTilesLoaded();
+      this.updateLoadingSpinner();
     });
+    // The initial render kicks off before these listeners attach, so its
+    // "loading" event has already fired; seed the state instead.
+    this.layerLoading = this.mandelbrotLayer.isLoading();
+    this.updateLoadingSpinner();
   }
 
   get effectiveZoom(): number {
@@ -297,6 +332,20 @@ class MandelbrotMap extends L.Map {
     const generation = ++this.recolorGeneration;
     const tiles = this.tileCache.tilesAtZoom(this.getZoom());
 
+    this.activeRecolorPasses += 1;
+    this.updateLoadingSpinner();
+    try {
+      await this.recolorTiles(tiles, generation);
+    } finally {
+      this.activeRecolorPasses -= 1;
+      this.updateLoadingSpinner();
+    }
+  }
+
+  private async recolorTiles(
+    tiles: CachedTile[],
+    generation: number,
+  ): Promise<void> {
     await Promise.all(
       tiles.map(async (tile) => {
         const request: WorkerRequest = {
