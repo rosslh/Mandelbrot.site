@@ -27,36 +27,39 @@ import("../../mandelbrot/pkg")
     // short-circuit would skip the escape loop).
     try {
       for (let i = 0; i < 2; i++) {
-        wasm.get_mandelbrot_image_precise(
-          "-0.7436438870371587",
-          "0.1318259042053119",
-          655,
-          656,
-          655,
-          656,
-          10,
-          0,
-          1000,
-          2,
-          64,
-          64,
-          "turbo",
-          false,
-          0,
-          0,
-          0,
-          2,
-          true,
-          0,
-          1000,
-        );
+        wasm
+          .get_mandelbrot_tile_precise(
+            "-0.7436438870371587",
+            "0.1318259042053119",
+            655,
+            656,
+            655,
+            656,
+            10,
+            0,
+            1000,
+            2,
+            64,
+            64,
+            "turbo",
+            false,
+            0,
+            0,
+            0,
+            2,
+            true,
+            0,
+            1000,
+            false,
+          )
+          .free();
       }
     } catch (warmupError) {
       console.warn("wasm warmup failed:", warmupError);
     }
 
-    const getTile = (params) =>
-      wasm.get_mandelbrot_image_precise(
+    const getTile = (params) => {
+      const tile = wasm.get_mandelbrot_tile_precise(
         params.originRe,
         params.originIm,
         params.bounds.xMin,
@@ -78,6 +81,32 @@ import("../../mandelbrot/pkg")
         params.smoothColoring,
         params.paletteMinIter,
         params.paletteMaxIter,
+        params.includeValues,
+      );
+
+      // Copy the fields out and free the wasm-bindgen struct; it is not
+      // garbage collected.
+      const result = {
+        image: tile.image,
+        values: params.includeValues ? tile.values : null,
+        minIter: tile.min_iter >= 0 ? tile.min_iter : null,
+        maxIter: tile.max_iter >= 0 ? tile.max_iter : null,
+      };
+      tile.free();
+      return result;
+    };
+
+    const recolorTile = (params) =>
+      wasm.recolor_tile(
+        params.values,
+        params.colorScheme,
+        params.reverseColors,
+        params.shiftHueAmount,
+        params.saturateAmount,
+        params.lightenAmount,
+        params.colorSpace,
+        params.paletteMinIter,
+        params.paletteMaxIter,
       );
 
     const optimiseImage = async (payload) => {
@@ -95,6 +124,8 @@ import("../../mandelbrot/pkg")
       switch (request.type) {
         case "calculate":
           return getTile(request.payload);
+        case "recolor":
+          return recolorTile(request.payload);
         case "optimise":
           return await optimiseImage(request.payload);
         default:

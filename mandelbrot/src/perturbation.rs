@@ -409,10 +409,7 @@ fn perturbed_escape_iterations_f64_pair(
     let mut remaining = max_iterations;
 
     while remaining > 0 {
-        let norm_sqr = f64x2_add(
-            f64x2_mul(z_out_re, z_out_re),
-            f64x2_mul(z_out_im, z_out_im),
-        );
+        let norm_sqr = f64x2_add(f64x2_mul(z_out_re, z_out_re), f64x2_mul(z_out_im, z_out_im));
         alive = v128_and(alive, f64x2_lt(norm_sqr, radius_squared));
         if !v128_any_true(alive) {
             break;

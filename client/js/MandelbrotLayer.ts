@@ -1,7 +1,7 @@
 import debounce from "lodash/debounce";
 import * as L from "leaflet";
 import type MandelbrotMap from "./MandelbrotMap";
-import { TileRect, WorkerRequest } from "./MandelbrotMap";
+import { MandelbrotResponse, TileRect, WorkerRequest } from "./MandelbrotMap";
 
 type Done = (error: null, tile: HTMLCanvasElement) => void;
 
@@ -36,6 +36,9 @@ export type WasmRequestPayload = {
   smoothColoring: boolean;
   paletteMinIter: number;
   paletteMaxIter: number;
+  // Whether to return the per-pixel escape values used for recoloring; the
+  // offscreen image-export path skips them to avoid the extra transfer.
+  includeValues: boolean;
 };
 
 type TileGenerationTask = {
@@ -60,8 +63,10 @@ class MandelbrotLayer extends L.GridLayer {
     bounds: TileRect,
     imageWidth: number,
     imageHeight: number,
+    includeValues: boolean,
   ): WasmRequestPayload {
     return {
+      includeValues,
       originRe: this._map.origin.re,
       originIm: this._map.origin.im,
       bounds,
@@ -103,12 +108,17 @@ class MandelbrotLayer extends L.GridLayer {
         try {
           const request: WorkerRequest = {
             type: "calculate" as const,
-            payload: this.buildRequestPayload(bounds, imageWidth, imageHeight),
+            payload: this.buildRequestPayload(
+              bounds,
+              imageWidth,
+              imageHeight,
+              false,
+            ),
           };
-          const data = (await workerTask(request)) as Uint8Array;
+          const response = (await workerTask(request)) as MandelbrotResponse;
 
           const imageData = new ImageData(
-            Uint8ClampedArray.from(data),
+            Uint8ClampedArray.from(response.image),
             imageWidth,
             imageHeight,
           );
@@ -198,16 +208,26 @@ class MandelbrotLayer extends L.GridLayer {
           bounds,
           scaledTileSize,
           scaledTileSize,
+          true,
         ),
       };
-      const data = (await workerTask(request)) as Uint8Array;
+      const response = (await workerTask(request)) as MandelbrotResponse;
 
       const imageData = new ImageData(
-        Uint8ClampedArray.from(data),
+        Uint8ClampedArray.from(response.image),
         scaledTileSize,
         scaledTileSize,
       );
       context.putImageData(imageData, 0, 0);
+      if (response.values) {
+        this._map.tileCache.record(
+          tilePosition,
+          response.minIter,
+          response.maxIter,
+          canvas,
+          response.values,
+        );
+      }
       announceFirstTileRendered();
       this._map.queuedTileTasks = this._map.queuedTileTasks.filter(
         (task) => task.id !== id,

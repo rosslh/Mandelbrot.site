@@ -246,6 +246,15 @@
           </button>
         </summary>
         <div class="details-content">
+          <div class="checkbox-wrapper">
+            <input
+              type="checkbox"
+              id="paletteAutoAdjust"
+              name="paletteAutoAdjust"
+              checked
+            />
+            <label for="paletteAutoAdjust">Auto-adjust</label>
+          </div>
           <div class="input-wrapper">
             <label for="paletteMinIter">Min iterations</label>
             <input
@@ -263,15 +272,6 @@
               name="paletteMaxIter"
               required
             />
-          </div>
-          <div class="checkbox-wrapper">
-            <input
-              type="checkbox"
-              id="scaleWithIterations"
-              name="scaleWithIterations"
-              checked
-            />
-            <label for="scaleWithIterations">Scale with iterations</label>
           </div>
         </div>
       </details>

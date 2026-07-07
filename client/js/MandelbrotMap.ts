@@ -4,6 +4,7 @@ import MandelbrotLayer from "./MandelbrotLayer";
 import { QueuedTask } from "threads/dist/master/pool-types";
 import MandelbrotControls from "./MandelbrotControls";
 import ImageSaver from "./ImageSaver";
+import TileCache from "./TileCache";
 import {
   decimalDigitsForZoom,
   isValidDecimalCoordinate,
@@ -23,7 +24,10 @@ export type MandelbrotConfig = {
   smoothColoring: boolean;
   paletteMinIter: number;
   paletteMaxIter: number;
-  scaleWithIterations: boolean;
+  // When enabled the palette range fits itself to the on-screen tiles and
+  // the min/max inputs become read-only displays; when disabled they are
+  // the user's to edit.
+  paletteAutoAdjust: boolean;
 
   // Coordinates are decimal strings because deep zooms exceed f64 precision.
   re: string;
@@ -38,11 +42,40 @@ export type MandelbrotRequest = {
 };
 export type OptimisePayload = { buffer: ArrayBuffer };
 export type OptimiseRequest = { type: "optimise"; payload: OptimisePayload };
-export type WorkerRequest = MandelbrotRequest | OptimiseRequest;
+export type RecolorPayload = {
+  // Per-pixel smoothed escape values captured when the tile was rendered.
+  values: Float32Array;
+  colorScheme: string;
+  reverseColors: boolean;
+  shiftHueAmount: number;
+  saturateAmount: number;
+  lightenAmount: number;
+  colorSpace: number;
+  paletteMinIter: number;
+  paletteMaxIter: number;
+};
+export type RecolorRequest = { type: "recolor"; payload: RecolorPayload };
+export type WorkerRequest =
+  | MandelbrotRequest
+  | OptimiseRequest
+  | RecolorRequest;
 
-export type MandelbrotResponse = Uint8Array;
+export type MandelbrotResponse = {
+  image: Uint8Array;
+  // Per-pixel smoothed escape values for recoloring; null when the request
+  // did not ask for them (offscreen image export).
+  values: Float32Array | null;
+  // Escaped-pixel iteration range of the tile; null when the tile is
+  // entirely inside the set.
+  minIter: number | null;
+  maxIter: number | null;
+};
 export type OptimiseResponse = ArrayBuffer;
-export type WorkerResponse = MandelbrotResponse | OptimiseResponse;
+export type RecolorResponse = Uint8Array;
+export type WorkerResponse =
+  | MandelbrotResponse
+  | OptimiseResponse
+  | RecolorResponse;
 
 type TaskThread = FunctionThread<[WorkerRequest], WorkerResponse>;
 
@@ -102,6 +135,13 @@ class MandelbrotMap extends L.Map {
   queuedTileTasks: QueuedTileTask[] = [];
   origin: { re: string; im: string };
   zoomOffset: number;
+  tileCache = new TileCache();
+  // Increments whenever a recolor pass or full re-render starts, so stale
+  // in-flight recolor results are dropped instead of painting mixed palettes.
+  private recolorGeneration = 0;
+  // Set when a color setting changes while tiles are still rendering: those
+  // tiles were requested with the old colors, so repaint once they all land.
+  private recolorPendingOnLoad = false;
 
   constructor({
     htmlId,
@@ -146,10 +186,24 @@ class MandelbrotMap extends L.Map {
       this.controls.throttleSetCoordinateInputValues,
     );
     this.on("move", this.controls.throttleSetCoordinateInputValues);
+    // Apply the auto-fitted palette range at zoom boundaries: the new zoom's
+    // tiles all render from scratch anyway, so the update costs nothing.
+    this.on("zoomstart", () => {
+      this.applyDetectedPaletteRange();
+    });
     this.on("zoomend", () => {
       this.cancelTileTasksOnWrongZoom();
       this.rebaseOriginIfNeeded();
       this.controls.throttleSetCoordinateInputValues();
+    });
+    // Only on-screen tiles should feed the palette range detection.
+    this.mandelbrotLayer.on("tileunload", (event: L.TileEvent) => {
+      this.tileCache.remove(event.coords);
+    });
+    // Fires once every visible tile has finished rendering: fit the palette
+    // to the complete view in one step.
+    this.mandelbrotLayer.on("load", () => {
+      this.handleTilesLoaded();
     });
   }
 
@@ -207,6 +261,108 @@ class MandelbrotMap extends L.Map {
       yMax: southWest.y,
       zoom,
     };
+  }
+
+  /** In auto palette mode, applies the iteration range detected from the
+   * on-screen tiles to the config and inputs, so the next render or recolor
+   * uses it. Returns whether the applied values changed. */
+  applyDetectedPaletteRange(): boolean {
+    if (!this.config.paletteAutoAdjust) {
+      return false;
+    }
+
+    const range = this.tileCache.detectedRange(this.getZoom());
+    if (!range) {
+      return false;
+    }
+
+    const changed =
+      this.config.paletteMinIter !== range.min ||
+      this.config.paletteMaxIter !== range.max;
+
+    this.config.paletteMinIter = range.min;
+    this.config.paletteMaxIter = range.max;
+    (document.getElementById("paletteMinIter") as HTMLInputElement).value =
+      String(range.min);
+    (document.getElementById("paletteMaxIter") as HTMLInputElement).value =
+      String(range.max);
+
+    return changed;
+  }
+
+  /** Recolors every cached on-screen tile in place with the current color
+   * and palette settings — an O(pixels) pass over the cached escape values,
+   * with no escape-time recomputation. */
+  private async recolorVisibleTiles(): Promise<void> {
+    const generation = ++this.recolorGeneration;
+    const tiles = this.tileCache.tilesAtZoom(this.getZoom());
+
+    await Promise.all(
+      tiles.map(async (tile) => {
+        const request: WorkerRequest = {
+          type: "recolor",
+          payload: {
+            values: tile.values,
+            colorScheme: this.config.colorScheme,
+            reverseColors: this.config.reverseColors,
+            shiftHueAmount: this.config.shiftHueAmount,
+            saturateAmount: this.config.saturateAmount,
+            lightenAmount: this.config.lightenAmount,
+            colorSpace: this.config.colorSpace,
+            paletteMinIter: this.config.paletteMinIter,
+            paletteMaxIter: this.config.paletteMaxIter,
+          },
+        };
+
+        try {
+          const image = (await this.pool.queue((worker) =>
+            worker(request),
+          )) as RecolorResponse;
+
+          // A newer recolor pass or a full re-render supersedes this result.
+          if (generation !== this.recolorGeneration) {
+            return;
+          }
+
+          tile.canvas
+            .getContext("2d")
+            ?.putImageData(
+              new ImageData(
+                Uint8ClampedArray.from(image),
+                tile.width,
+                tile.height,
+              ),
+              0,
+              0,
+            );
+        } catch {
+          // The pool was terminated by a full re-render, which repaints
+          // every tile anyway.
+        }
+      }),
+    );
+  }
+
+  /** Applies an explicit palette-range action (a reset, or enabling
+   * auto-adjust) without re-rendering: in auto mode fit to the on-screen
+   * tiles, then repaint in place. */
+  refitPaletteAndRecolor() {
+    if (this.mandelbrotLayer.isLoading()) {
+      this.recolorPendingOnLoad = true;
+    }
+    this.applyDetectedPaletteRange();
+    this.recolorVisibleTiles();
+  }
+
+  /** Runs when every visible tile has finished rendering: fit the palette to
+   * the complete view (auto mode), and repaint tiles that landed with
+   * out-of-date colors after a mid-load color change. */
+  private handleTilesLoaded() {
+    const rangeChanged = this.applyDetectedPaletteRange();
+    if (rangeChanged || this.recolorPendingOnLoad) {
+      this.recolorVisibleTiles();
+    }
+    this.recolorPendingOnLoad = false;
   }
 
   private handleMapClick = (e: L.LeafletMouseEvent) => {
@@ -267,6 +423,13 @@ class MandelbrotMap extends L.Map {
   }
 
   async refresh(resetView = false) {
+    this.applyDetectedPaletteRange();
+    // Every tile re-renders below: cached escape data is stale (it may
+    // describe a different iteration cap), and in-flight recolor results
+    // must not paint over the fresh tiles.
+    this.tileCache.clear();
+    this.recolorGeneration += 1;
+    this.recolorPendingOnLoad = false;
     await this.createPool();
     this.imageSaver = new ImageSaver(this, this.pool, this.mandelbrotLayer);
     if (resetView) {
@@ -295,15 +458,29 @@ class MandelbrotMap extends L.Map {
       colorSpace: cs,
       paletteMinIter: pmin,
       paletteMaxIter: pmax,
+      paletteAutoAdjust,
     } = this.config;
 
     const url = new URL(window.location.origin);
 
-    Object.entries({ re, im, z, i, e, c, r, h, s, l, cs, pmin, pmax }).forEach(
-      ([key, value]) => {
-        url.searchParams.set(key, String(value));
-      },
-    );
+    Object.entries({
+      re,
+      im,
+      z,
+      i,
+      e,
+      c,
+      r,
+      h,
+      s,
+      l,
+      cs,
+      pmin,
+      pmax,
+      pm: paletteAutoAdjust ? "auto" : "manual",
+    }).forEach(([key, value]) => {
+      url.searchParams.set(key, String(value));
+    });
 
     return url.toString();
   }
@@ -324,6 +501,7 @@ class MandelbrotMap extends L.Map {
     const smoothColoring = queryParams.get("sc");
     const paletteMinIter = queryParams.get("pmin");
     const paletteMaxIter = queryParams.get("pmax");
+    const paletteMode = queryParams.get("pm");
 
     if (
       re &&
@@ -392,6 +570,17 @@ class MandelbrotMap extends L.Map {
         (document.getElementById("paletteMaxIter") as HTMLInputElement).value =
           paletteMaxIter;
       }
+      if (paletteMode === "auto" || paletteMode === "manual") {
+        this.config.paletteAutoAdjust = paletteMode === "auto";
+      } else if (paletteMinIter || paletteMaxIter) {
+        // Legacy share URLs predate auto-adjust; explicit palette values
+        // imply the sender tuned them by hand, so preserve that appearance.
+        this.config.paletteAutoAdjust = false;
+      }
+      (
+        document.getElementById("paletteAutoAdjust") as HTMLInputElement
+      ).checked = this.config.paletteAutoAdjust;
+      this.controls.syncAutoAdjustUi();
 
       window.history.replaceState({}, document.title, window.location.pathname);
       this.refresh();

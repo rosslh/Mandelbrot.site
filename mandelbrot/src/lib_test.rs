@@ -628,7 +628,7 @@ mod lib_test {
         let palette_start = 0;
         let palette_end = 100;
 
-        let image = super::render_mandelbrot_set(
+        let rendered = super::render_mandelbrot_set(
             re_range,
             im_range,
             max_iterations,
@@ -647,12 +647,23 @@ mod lib_test {
         );
 
         assert_eq!(
-            image.len(),
+            rendered.image.len(),
             image_width * image_height * super::NUM_COLOR_CHANNELS
         );
 
-        assert_eq!(image[0..4], [44, 28, 55, 255]); // Top-left pixel
-        assert_eq!(image[396..400], [44, 28, 55, 255]); // Bottom-right pixel
+        assert_eq!(rendered.image[0..4], [44, 28, 55, 255]); // Top-left pixel
+        assert_eq!(rendered.image[396..400], [44, 28, 55, 255]); // Bottom-right pixel
+
+        // The view mixes interior and escaping points, so a range is observed
+        let (min, max) = rendered.stats.range.expect("mixed view should have stats");
+        assert!(min <= max);
+        assert!(max < max_iterations);
+
+        // One escape value per pixel; escaped pixels are finite, interior
+        // pixels are the Infinity sentinel, and both kinds are present here
+        assert_eq!(rendered.values.len(), image_width * image_height);
+        assert!(rendered.values.iter().any(|v| v.is_finite()));
+        assert!(rendered.values.iter().any(|v| v.is_infinite()));
     }
 
     #[test]
@@ -1789,5 +1800,272 @@ mod lib_test {
             color_zero_min, color_zero_both,
             "Zero min, positive max should differ from zero min, zero max"
         );
+    }
+
+    // Shared arguments for the tile functions: (color and palette settings
+    // that both get_mandelbrot_image_precise and get_mandelbrot_tile_precise
+    // accept after the geometry/iteration parameters).
+    fn tile_precise_image(
+        origin_re: &str,
+        origin_im: &str,
+        tile: (f64, f64, f64, f64),
+        tile_zoom: i32,
+        zoom_offset: u32,
+        max_iterations: u32,
+    ) -> Vec<u8> {
+        super::get_mandelbrot_image_precise(
+            origin_re.to_string(),
+            origin_im.to_string(),
+            tile.0,
+            tile.1,
+            tile.2,
+            tile.3,
+            tile_zoom,
+            zoom_offset,
+            max_iterations,
+            2,
+            32,
+            32,
+            "turbo".to_string(),
+            false,
+            0.0,
+            0.0,
+            0.0,
+            crate::ValidColorSpace::Hsl,
+            true,
+            0,
+            as_i32(max_iterations),
+        )
+    }
+
+    fn tile_precise_with_stats(
+        origin_re: &str,
+        origin_im: &str,
+        tile: (f64, f64, f64, f64),
+        tile_zoom: i32,
+        zoom_offset: u32,
+        max_iterations: u32,
+    ) -> super::MandelbrotTile {
+        super::get_mandelbrot_tile_precise(
+            origin_re.to_string(),
+            origin_im.to_string(),
+            tile.0,
+            tile.1,
+            tile.2,
+            tile.3,
+            tile_zoom,
+            zoom_offset,
+            max_iterations,
+            2,
+            32,
+            32,
+            "turbo".to_string(),
+            false,
+            0.0,
+            0.0,
+            0.0,
+            crate::ValidColorSpace::Hsl,
+            true,
+            0,
+            as_i32(max_iterations),
+            true,
+        )
+    }
+
+    #[test]
+    fn test_get_mandelbrot_tile_precise_mixed_view() {
+        let max_iterations = 200;
+
+        // At zoom 2 with origin 0, tile coordinates [1.3, 3.2] x [1.8, 3.3]
+        // cover roughly re in [-1.97, 1.0] and im in [-1.16, 1.19]: the
+        // classic full-set view, which contains both interior and escaping
+        // points
+        let view = (1.3, 3.2, 1.8, 3.3);
+        let tile = tile_precise_with_stats("0", "0", view, 2, 0, max_iterations);
+
+        assert!(tile.min_iter >= 0, "Mixed view should observe a range");
+        assert!(tile.min_iter <= tile.max_iter);
+        assert!(
+            tile.max_iter < as_i32(max_iterations),
+            "Interior points must be excluded from the range"
+        );
+
+        // The image must match the stats-free legacy export bit-for-bit
+        let legacy = tile_precise_image("0", "0", view, 2, 0, max_iterations);
+        assert_eq!(tile.image, legacy);
+    }
+
+    #[test]
+    fn test_get_mandelbrot_tile_precise_inside_set() {
+        // A small rectangle around the origin lies entirely inside the set;
+        // the rect_in_set shortcut yields a solid black tile with no stats
+        let tile = tile_precise_with_stats("0", "0", (655.0, 656.0, 655.0, 656.0), 10, 0, 200);
+
+        assert_eq!(tile.min_iter, -1, "Fully-interior tile has no range");
+        assert_eq!(tile.max_iter, -1);
+        assert_eq!(tile.image, super::create_solid_black_image(32, 32));
+        assert_eq!(tile.values.len(), 32 * 32);
+        assert!(
+            tile.values.iter().all(|v| v.is_infinite()),
+            "Interior pixels carry the Infinity sentinel"
+        );
+    }
+
+    #[test]
+    fn test_get_mandelbrot_tile_precise_deep_zoom() {
+        let max_iterations = 100_000;
+
+        // Effective zoom 12 + 40 = 52 is past DEEP_ZOOM_THRESHOLD, so this
+        // exercises the perturbation path. The origin sits on the set
+        // boundary, so the view contains escaping points
+        let view = (2621.0, 2622.0, 2621.0, 2622.0);
+        let origin = ("-0.7436438870371587", "0.1318259042053119");
+        let tile = tile_precise_with_stats(origin.0, origin.1, view, 12, 40, max_iterations);
+
+        assert!(tile.min_iter >= 1, "Boundary view should observe a range");
+        assert!(tile.min_iter <= tile.max_iter);
+        assert!(tile.max_iter < as_i32(max_iterations));
+
+        let legacy = tile_precise_image(origin.0, origin.1, view, 12, 40, max_iterations);
+        assert_eq!(tile.image, legacy);
+
+        // Recoloring the deep-zoom tile's cached values with its own params
+        // must reproduce a valid image of the same size
+        let recolored = super::recolor_tile(
+            &tile.values,
+            "turbo".to_string(),
+            false,
+            0.0,
+            0.0,
+            0.0,
+            crate::ValidColorSpace::Hsl,
+            0,
+            as_i32(max_iterations),
+        );
+        assert_eq!(recolored.len(), tile.image.len());
+    }
+
+    #[test]
+    fn test_get_mandelbrot_tile_precise_values_flag() {
+        // include_values=false returns an empty buffer, saving the transfer
+        // for large offscreen renders (image export)
+        let tile = super::get_mandelbrot_tile_precise(
+            "0".to_string(),
+            "0".to_string(),
+            1.3,
+            3.2,
+            1.8,
+            3.3,
+            2,
+            0,
+            200,
+            2,
+            32,
+            32,
+            "turbo".to_string(),
+            false,
+            0.0,
+            0.0,
+            0.0,
+            crate::ValidColorSpace::Hsl,
+            true,
+            0,
+            200,
+            false,
+        );
+
+        assert!(tile.values.is_empty());
+        assert_eq!(tile.image.len(), 32 * 32 * super::NUM_COLOR_CHANNELS);
+        assert!(tile.min_iter >= 0, "Stats are still reported");
+    }
+
+    #[test]
+    fn test_recolor_tile_matches_render() {
+        // Without smooth coloring the cached values are whole iteration
+        // counts, exactly representable in f32, so recoloring with the same
+        // parameters must reproduce the rendered image byte-for-byte
+        let max_iterations = 200;
+        let render = |palette_min: i32, palette_max: i32| {
+            super::get_mandelbrot_tile_precise(
+                "0".to_string(),
+                "0".to_string(),
+                1.3,
+                3.2,
+                1.8,
+                3.3,
+                2,
+                0,
+                max_iterations,
+                2,
+                32,
+                32,
+                "inferno".to_string(),
+                false,
+                0.0,
+                0.0,
+                0.0,
+                crate::ValidColorSpace::Hsl,
+                false,
+                palette_min,
+                palette_max,
+                true,
+            )
+        };
+
+        let tile = render(0, as_i32(max_iterations));
+
+        let recolored = super::recolor_tile(
+            &tile.values,
+            "inferno".to_string(),
+            false,
+            0.0,
+            0.0,
+            0.0,
+            crate::ValidColorSpace::Hsl,
+            0,
+            as_i32(max_iterations),
+        );
+        assert_eq!(
+            recolored, tile.image,
+            "Recolor with identical params must match the render"
+        );
+
+        // Recoloring with the tile's own detected range must equal a fresh
+        // render that used that range from the start
+        let refit = super::recolor_tile(
+            &tile.values,
+            "inferno".to_string(),
+            false,
+            0.0,
+            0.0,
+            0.0,
+            crate::ValidColorSpace::Hsl,
+            tile.min_iter,
+            tile.max_iter,
+        );
+        let rerendered = render(tile.min_iter, tile.max_iter);
+        assert_eq!(
+            refit, rerendered.image,
+            "Recolor with a new range must match a full re-render"
+        );
+        assert_ne!(refit, tile.image, "The narrowed range changes the output");
+    }
+
+    #[test]
+    fn test_recolor_tile_interior_is_black() {
+        let values = vec![f32::INFINITY; 16];
+        let img = super::recolor_tile(
+            &values,
+            "turbo".to_string(),
+            false,
+            0.0,
+            0.0,
+            0.0,
+            crate::ValidColorSpace::Hsl,
+            0,
+            200,
+        );
+
+        assert_eq!(img, super::create_solid_black_image(4, 4));
     }
 }

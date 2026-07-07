@@ -145,7 +145,7 @@ window.addEventListener("load", () => {
         smoothColoring: true,
         paletteMinIter: 0,
         paletteMaxIter: 200,
-        scaleWithIterations: true,
+        paletteAutoAdjust: true,
 
         re: "-0.5",
         im: "0",

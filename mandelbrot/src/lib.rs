@@ -24,6 +24,47 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 const ESCAPE_RADIUS: f64 = 3.0;
 type RgbColor = [u8; 3];
 
+/// Running min/max of the escaped-pixel iteration counts observed while
+/// rendering a tile. Interior pixels are rendered black regardless of the
+/// palette, so they are not tracked; `range` stays `None` for tiles entirely
+/// inside the set.
+#[derive(Clone, Copy, Default)]
+struct TileIterationStats {
+    range: Option<(u32, u32)>,
+}
+
+impl TileIterationStats {
+    fn record(&mut self, escape_iterations: u32, max_iterations: u32) {
+        if escape_iterations < max_iterations {
+            self.range = Some(match self.range {
+                Some((min, max)) => (min.min(escape_iterations), max.max(escape_iterations)),
+                None => (escape_iterations, escape_iterations),
+            });
+        }
+    }
+}
+
+/// A rendered tile: RGBA bytes, the per-pixel smoothed escape values that
+/// produced them (f32, `INFINITY` for interior pixels), and the iteration
+/// stats observed while rendering. The values buffer is what the client
+/// caches to recolor the tile later without recomputing escape times.
+struct RenderedTile {
+    image: Vec<u8>,
+    values: Vec<f32>,
+    stats: TileIterationStats,
+}
+
+impl RenderedTile {
+    /// A solid black tile, as produced for views entirely inside the set.
+    fn solid_black(image_width: usize, image_height: usize) -> RenderedTile {
+        RenderedTile {
+            image: create_solid_black_image(image_width, image_height),
+            values: vec![f32::INFINITY; image_width * image_height],
+            stats: TileIterationStats::default(),
+        }
+    }
+}
+
 const NUM_COLOR_CHANNELS: usize = 4;
 
 static COLOR_PALETTES: Lazy<HashMap<String, colorous::Gradient>> = Lazy::new(|| {
@@ -159,7 +200,10 @@ fn calculate_escape_iterations_quadratic_pair(
             break;
         }
 
-        let next_re = f64x2_add(f64x2_sub(f64x2_mul(z_re, z_re), f64x2_mul(z_im, z_im)), c_re);
+        let next_re = f64x2_add(
+            f64x2_sub(f64x2_mul(z_re, z_re), f64x2_mul(z_im, z_im)),
+            c_re,
+        );
         let next_im = f64x2_add(f64x2_mul(f64x2_splat(2.0), f64x2_mul(z_re, z_im)), c_im);
         z_re = v128_bitselect(next_re, z_re, alive);
         z_im = v128_bitselect(next_im, z_im, alive);
@@ -442,6 +486,9 @@ fn get_color_palette(
 ///
 /// # Returns
 /// An array of 3 u8 values representing the RGB color.
+/// Production code goes through `calculate_escape_iterations_pair` plus
+/// `color_from_escape_result` instead so it can also track iteration stats.
+#[cfg(test)]
 fn compute_pixel_color(
     re: f64,
     im: f64,
@@ -476,8 +523,81 @@ fn compute_pixel_color(
     )
 }
 
-/// Maps an escape-time result to a color. Shared by the direct and the
-/// perturbation-based renderers.
+/// The (optionally smoothed) escape value for a pixel, or `f64::INFINITY`
+/// when the pixel never escaped. This is the palette-independent quantity
+/// the color mapping consumes, and — narrowed to f32 — what tiles cache
+/// client-side so they can be recolored without recomputing escape times.
+fn smoothed_escape_value(
+    escape_iterations: u32,
+    z: Complex64,
+    max_iterations: u32,
+    exponent: u32,
+    smooth_coloring: bool,
+) -> f64 {
+    if escape_iterations == max_iterations {
+        return f64::INFINITY;
+    }
+
+    if smooth_coloring {
+        static ESCAPE_RADIUS_LN: once_cell::sync::Lazy<f64> =
+            once_cell::sync::Lazy::new(|| ESCAPE_RADIUS.ln());
+
+        let exponent_ln = f64::from(exponent).ln();
+
+        // See: https://iquilezles.org/articles/msetsmooth/
+        f64::from(escape_iterations) - ((z.norm().ln() / *ESCAPE_RADIUS_LN).ln() / exponent_ln)
+    } else {
+        f64::from(escape_iterations)
+    }
+}
+
+/// Maps a smoothed escape value (see `smoothed_escape_value`) to a color.
+/// Non-finite values mark interior pixels and map to black.
+fn color_from_smoothed_value(
+    smoothed_value: f64,
+    palette: &colorous::Gradient,
+    should_reverse_colors: bool,
+    color_space: &ValidColorSpace,
+    shift_hue_amount: f32,
+    saturate_amount: f32,
+    lighten_amount: f32,
+    min_iterations_threshold: f64,
+    max_iterations_threshold: f64,
+) -> RgbColor {
+    if !smoothed_value.is_finite() {
+        return [0, 0, 0];
+    }
+
+    // Normalize the value between min and max thresholds to get 0.0 to 1.0
+    let mut norm = if smoothed_value <= min_iterations_threshold {
+        0.0
+    } else if smoothed_value >= max_iterations_threshold {
+        1.0
+    } else {
+        (smoothed_value - min_iterations_threshold)
+            / (max_iterations_threshold - min_iterations_threshold)
+    };
+
+    if should_reverse_colors {
+        norm = 1.0 - norm;
+    }
+
+    let color = palette.eval_continuous(norm);
+
+    transform_color(
+        color,
+        color_space,
+        shift_hue_amount,
+        saturate_amount,
+        lighten_amount,
+    )
+    .as_array()
+}
+
+/// Maps an escape-time result to a color. Production code composes
+/// `smoothed_escape_value` + `color_from_smoothed_value` directly so it can
+/// also cache the value; this convenience wrapper remains for tests.
+#[cfg(test)]
 fn color_from_escape_result(
     escape_iterations: u32,
     z: Complex64,
@@ -493,46 +613,23 @@ fn color_from_escape_result(
     min_iterations_threshold: f64,
     max_iterations_threshold: f64,
 ) -> RgbColor {
-    if escape_iterations == max_iterations {
-        [0, 0, 0]
-    } else {
-        let smoothed_value = if smooth_coloring {
-            static ESCAPE_RADIUS_LN: once_cell::sync::Lazy<f64> =
-                once_cell::sync::Lazy::new(|| ESCAPE_RADIUS.ln());
-
-            let exponent_ln = f64::from(exponent).ln();
-
-            // See: https://iquilezles.org/articles/msetsmooth/
-            f64::from(escape_iterations) - ((z.norm().ln() / *ESCAPE_RADIUS_LN).ln() / exponent_ln)
-        } else {
-            f64::from(escape_iterations)
-        };
-
-        // Normalize the value between min and max thresholds to get 0.0 to 1.0
-        let mut norm = if smoothed_value <= min_iterations_threshold {
-            0.0
-        } else if smoothed_value >= max_iterations_threshold {
-            1.0
-        } else {
-            (smoothed_value - min_iterations_threshold)
-                / (max_iterations_threshold - min_iterations_threshold)
-        };
-
-        if should_reverse_colors {
-            norm = 1.0 - norm;
-        }
-
-        let color = palette.eval_continuous(norm);
-
-        transform_color(
-            color,
-            color_space,
-            shift_hue_amount,
-            saturate_amount,
-            lighten_amount,
-        )
-        .as_array()
-    }
+    color_from_smoothed_value(
+        smoothed_escape_value(
+            escape_iterations,
+            z,
+            max_iterations,
+            exponent,
+            smooth_coloring,
+        ),
+        palette,
+        should_reverse_colors,
+        color_space,
+        shift_hue_amount,
+        saturate_amount,
+        lighten_amount,
+        min_iterations_threshold,
+        max_iterations_threshold,
+    )
 }
 
 /// Generates the Mandelbrot set image data.
@@ -555,7 +652,8 @@ fn color_from_escape_result(
 /// - `palette_max_iter`: The maximum iteration count for the color palette range.
 ///
 /// # Returns
-/// A vector of bytes representing the RGBA color values of the image.
+/// The rendered tile: RGBA bytes, per-pixel smoothed escape values, and the
+/// iteration stats observed while rendering.
 fn render_mandelbrot_set(
     re_range: itertools_num::Linspace<f64>,
     im_range: itertools_num::Linspace<f64>,
@@ -572,9 +670,11 @@ fn render_mandelbrot_set(
     smooth_coloring: bool,
     palette_min_iter: i32,
     palette_max_iter: i32,
-) -> Vec<u8> {
+) -> RenderedTile {
     let output_size: usize = image_width * image_height * NUM_COLOR_CHANNELS;
     let mut img: Vec<u8> = vec![0; output_size];
+    let mut values: Vec<f32> = vec![f32::INFINITY; image_width * image_height];
+    let mut stats = TileIterationStats::default();
 
     // Pre-fill the alpha channel with 255 for the entire image
     for alpha_idx in (3..output_size).step_by(NUM_COLOR_CHANNELS) {
@@ -587,6 +687,36 @@ fn render_mandelbrot_set(
 
     let re_values: Vec<f64> = re_range.collect();
 
+    let mut write_pixel = |pixel_index: usize, escape_iterations: u32, z: Complex64| {
+        stats.record(escape_iterations, max_iterations);
+
+        let smoothed_value = smoothed_escape_value(
+            escape_iterations,
+            z,
+            max_iterations,
+            exponent,
+            smooth_coloring,
+        );
+        values[pixel_index] = smoothed_value as f32;
+
+        let pixel = color_from_smoothed_value(
+            smoothed_value,
+            palette,
+            should_reverse_colors,
+            color_space,
+            shift_hue_amount,
+            saturate_amount,
+            lighten_amount,
+            min_iterations_threshold,
+            max_iterations_threshold,
+        );
+
+        let index = pixel_index * NUM_COLOR_CHANNELS;
+        img[index] = pixel[0];
+        img[index + 1] = pixel[1];
+        img[index + 2] = pixel[2];
+    };
+
     for (x, im) in im_range.enumerate() {
         let mut y = 0;
         while y + 1 < re_values.len() {
@@ -598,56 +728,24 @@ fn render_mandelbrot_set(
             );
 
             for (lane, &(escape_iterations, z)) in results.iter().enumerate() {
-                let pixel = color_from_escape_result(
-                    escape_iterations,
-                    z,
-                    max_iterations,
-                    exponent,
-                    palette,
-                    should_reverse_colors,
-                    color_space,
-                    shift_hue_amount,
-                    saturate_amount,
-                    lighten_amount,
-                    smooth_coloring,
-                    min_iterations_threshold,
-                    max_iterations_threshold,
-                );
-
-                let index = (x * image_width + y + lane) * NUM_COLOR_CHANNELS;
-                img[index] = pixel[0];
-                img[index + 1] = pixel[1];
-                img[index + 2] = pixel[2];
+                write_pixel(x * image_width + y + lane, escape_iterations, z);
             }
 
             y += 2;
         }
 
         if y < re_values.len() {
-            let pixel = compute_pixel_color(
-                re_values[y],
-                im,
-                max_iterations,
-                exponent,
-                palette,
-                should_reverse_colors,
-                color_space,
-                shift_hue_amount,
-                saturate_amount,
-                lighten_amount,
-                smooth_coloring,
-                min_iterations_threshold,
-                max_iterations_threshold,
-            );
-
-            let index = (x * image_width + y) * NUM_COLOR_CHANNELS;
-            img[index] = pixel[0];
-            img[index + 1] = pixel[1];
-            img[index + 2] = pixel[2];
+            let (escape_iterations, z) =
+                calculate_escape_iterations(re_values[y], im, max_iterations, exponent);
+            write_pixel(x * image_width + y, escape_iterations, z);
         }
     }
 
-    img
+    RenderedTile {
+        image: img,
+        values,
+        stats,
+    }
 }
 
 /// Creates a solid black image
@@ -657,6 +755,55 @@ fn create_solid_black_image(image_width: usize, image_height: usize) -> Vec<u8> 
         .cycle()
         .take(image_width * image_height * NUM_COLOR_CHANNELS)
         .collect()
+}
+
+/// Renders a Mandelbrot set image over an f64 view rectangle, returning the
+/// RGBA bytes, per-pixel smoothed escape values, and iteration stats.
+fn generate_mandelbrot_set_image(
+    re_min: f64,
+    re_max: f64,
+    im_min: f64,
+    im_max: f64,
+    max_iterations: u32,
+    exponent: u32,
+    image_width: usize,
+    image_height: usize,
+    color_scheme: &str,
+    reverse_colors: bool,
+    shift_hue_amount: f32,
+    saturate_amount: f32,
+    lighten_amount: f32,
+    color_space: ValidColorSpace,
+    smooth_coloring: bool,
+    palette_min_iter: i32,
+    palette_max_iter: i32,
+) -> RenderedTile {
+    let (palette, should_reverse_colors) = get_color_palette(color_scheme, reverse_colors);
+
+    let re_range = linspace(re_min, re_max, image_width);
+    let im_range = linspace(im_max, im_min, image_height);
+
+    if rect_in_set(re_range.clone(), im_range.clone(), max_iterations, exponent) {
+        return RenderedTile::solid_black(image_width, image_height);
+    }
+
+    render_mandelbrot_set(
+        re_range,
+        im_range,
+        max_iterations,
+        exponent,
+        image_width,
+        image_height,
+        palette,
+        should_reverse_colors,
+        &color_space,
+        shift_hue_amount,
+        saturate_amount,
+        lighten_amount,
+        smooth_coloring,
+        palette_min_iter,
+        palette_max_iter,
+    )
 }
 
 #[wasm_bindgen]
@@ -679,35 +826,30 @@ pub fn get_mandelbrot_set_image(
     palette_min_iter: i32,
     palette_max_iter: i32,
 ) -> Vec<u8> {
-    let (palette, should_reverse_colors) = get_color_palette(&color_scheme, reverse_colors);
-
-    let re_range = linspace(re_min, re_max, image_width);
-    let im_range = linspace(im_max, im_min, image_height);
-
-    if rect_in_set(re_range.clone(), im_range.clone(), max_iterations, exponent) {
-        return create_solid_black_image(image_width, image_height);
-    }
-
-    render_mandelbrot_set(
-        re_range,
-        im_range,
+    generate_mandelbrot_set_image(
+        re_min,
+        re_max,
+        im_min,
+        im_max,
         max_iterations,
         exponent,
         image_width,
         image_height,
-        palette,
-        should_reverse_colors,
-        &color_space,
+        &color_scheme,
+        reverse_colors,
         shift_hue_amount,
         saturate_amount,
         lighten_amount,
+        color_space,
         smooth_coloring,
         palette_min_iter,
         palette_max_iter,
     )
+    .image
 }
 
-/// Renders a Mandelbrot set image at any zoom depth.
+/// Renders a Mandelbrot set image at any zoom depth, returning the RGBA
+/// bytes plus the iteration stats observed while rendering.
 ///
 /// The view is described by an arbitrary-precision world origin (decimal
 /// strings) plus a rectangle in Leaflet tile coordinates. A tile coordinate
@@ -716,6 +858,166 @@ pub fn get_mandelbrot_set_image(
 /// origin. Shallow views use the direct f64 renderer; deep views use
 /// perturbation theory with an arbitrary-precision reference orbit, so zoom
 /// depth is not limited by f64 precision.
+fn render_tile_precise(
+    origin_re: &str,
+    origin_im: &str,
+    tile_x_min: f64,
+    tile_x_max: f64,
+    tile_y_min: f64,
+    tile_y_max: f64,
+    tile_zoom: i32,
+    zoom_offset: u32,
+    max_iterations: u32,
+    exponent: u32,
+    image_width: usize,
+    image_height: usize,
+    color_scheme: &str,
+    reverse_colors: bool,
+    shift_hue_amount: f32,
+    saturate_amount: f32,
+    lighten_amount: f32,
+    color_space: ValidColorSpace,
+    smooth_coloring: bool,
+    palette_min_iter: i32,
+    palette_max_iter: i32,
+) -> RenderedTile {
+    let effective_zoom = tile_zoom as i64 + zoom_offset as i64;
+
+    let use_perturbation = effective_zoom >= perturbation::DEEP_ZOOM_THRESHOLD
+        && (2..=perturbation::MAX_PERTURBED_EXPONENT).contains(&exponent);
+
+    if !use_perturbation {
+        // Shallow view (or unsupported exponent): f64 has enough precision to
+        // compute the bounds directly.
+        let origin_re_f64: f64 = origin_re.parse().unwrap_or(0.0);
+        let origin_im_f64: f64 = origin_im.parse().unwrap_or(0.0);
+
+        let scaled_offset = |tile_coordinate: f64| {
+            float_exp::ldexp(
+                perturbation::tile_coordinate_offset(tile_coordinate, tile_zoom),
+                -(zoom_offset as i64),
+            )
+        };
+
+        let re_min = origin_re_f64 + scaled_offset(tile_x_min);
+        let re_max = origin_re_f64 + scaled_offset(tile_x_max);
+        let im_max = origin_im_f64 - scaled_offset(tile_y_min);
+        let im_min = origin_im_f64 - scaled_offset(tile_y_max);
+
+        return generate_mandelbrot_set_image(
+            re_min,
+            re_max,
+            im_min,
+            im_max,
+            max_iterations,
+            exponent,
+            image_width,
+            image_height,
+            color_scheme,
+            reverse_colors,
+            shift_hue_amount,
+            saturate_amount,
+            lighten_amount,
+            color_space,
+            smooth_coloring,
+            palette_min_iter,
+            palette_max_iter,
+        );
+    }
+
+    let frame = match perturbation::PerturbedFrame::new(
+        origin_re,
+        origin_im,
+        tile_x_min,
+        tile_x_max,
+        tile_y_min,
+        tile_y_max,
+        tile_zoom,
+        zoom_offset,
+        image_width,
+        image_height,
+        max_iterations,
+        exponent,
+        ESCAPE_RADIUS,
+    ) {
+        Ok(frame) => frame,
+        Err(_) => return RenderedTile::solid_black(image_width, image_height),
+    };
+
+    if frame.border_in_set(image_width, image_height) {
+        return RenderedTile::solid_black(image_width, image_height);
+    }
+
+    let (palette, should_reverse_colors) = get_color_palette(color_scheme, reverse_colors);
+
+    let min_iterations_threshold = f64::from(palette_min_iter);
+    let max_iterations_threshold =
+        f64::from(palette_max_iter).max(min_iterations_threshold + f64::EPSILON);
+
+    let output_size: usize = image_width * image_height * NUM_COLOR_CHANNELS;
+    let mut img: Vec<u8> = vec![0; output_size];
+    let mut values: Vec<f32> = vec![f32::INFINITY; image_width * image_height];
+    let mut stats = TileIterationStats::default();
+
+    for row in 0..image_height {
+        let mut column = 0;
+        while column < image_width {
+            // Batch pairs of pixels into SIMD lanes; a trailing odd pixel is
+            // paired with itself.
+            let second_column = (column + 1).min(image_width - 1);
+            let results = frame.escape_iterations_pair((column, row), (second_column, row));
+
+            for (lane, &(escape_iterations, z)) in
+                results.iter().take(second_column - column + 1).enumerate()
+            {
+                stats.record(escape_iterations, max_iterations);
+
+                let smoothed_value = smoothed_escape_value(
+                    escape_iterations,
+                    z,
+                    max_iterations,
+                    exponent,
+                    smooth_coloring,
+                );
+                let pixel_index = row * image_width + column + lane;
+                values[pixel_index] = smoothed_value as f32;
+
+                let pixel = color_from_smoothed_value(
+                    smoothed_value,
+                    palette,
+                    should_reverse_colors,
+                    &color_space,
+                    shift_hue_amount,
+                    saturate_amount,
+                    lighten_amount,
+                    min_iterations_threshold,
+                    max_iterations_threshold,
+                );
+
+                let index = pixel_index * NUM_COLOR_CHANNELS;
+                img[index] = pixel[0];
+                img[index + 1] = pixel[1];
+                img[index + 2] = pixel[2];
+                img[index + 3] = 255;
+            }
+
+            column += 2;
+        }
+    }
+
+    RenderedTile {
+        image: img,
+        values,
+        stats,
+    }
+}
+
+/// Renders a Mandelbrot set image at any zoom depth. See
+/// `render_tile_precise` for the view geometry.
+///
+/// Kept with this exact signature and return type for the bench harness,
+/// which compares the current build against archived wasm builds; the app
+/// worker uses `get_mandelbrot_tile_precise` instead.
 #[wasm_bindgen]
 pub fn get_mandelbrot_image_precise(
     origin_re: String,
@@ -740,51 +1042,7 @@ pub fn get_mandelbrot_image_precise(
     palette_min_iter: i32,
     palette_max_iter: i32,
 ) -> Vec<u8> {
-    let effective_zoom = tile_zoom as i64 + zoom_offset as i64;
-
-    let use_perturbation = effective_zoom >= perturbation::DEEP_ZOOM_THRESHOLD
-        && (2..=perturbation::MAX_PERTURBED_EXPONENT).contains(&exponent);
-
-    if !use_perturbation {
-        // Shallow view (or unsupported exponent): f64 has enough precision to
-        // compute the bounds directly.
-        let origin_re_f64: f64 = origin_re.parse().unwrap_or(0.0);
-        let origin_im_f64: f64 = origin_im.parse().unwrap_or(0.0);
-
-        let scaled_offset = |tile_coordinate: f64| {
-            float_exp::ldexp(
-                perturbation::tile_coordinate_offset(tile_coordinate, tile_zoom),
-                -(zoom_offset as i64),
-            )
-        };
-
-        let re_min = origin_re_f64 + scaled_offset(tile_x_min);
-        let re_max = origin_re_f64 + scaled_offset(tile_x_max);
-        let im_max = origin_im_f64 - scaled_offset(tile_y_min);
-        let im_min = origin_im_f64 - scaled_offset(tile_y_max);
-
-        return get_mandelbrot_set_image(
-            re_min,
-            re_max,
-            im_min,
-            im_max,
-            max_iterations,
-            exponent,
-            image_width,
-            image_height,
-            color_scheme,
-            reverse_colors,
-            shift_hue_amount,
-            saturate_amount,
-            lighten_amount,
-            color_space,
-            smooth_coloring,
-            palette_min_iter,
-            palette_max_iter,
-        );
-    }
-
-    let frame = match perturbation::PerturbedFrame::new(
+    render_tile_precise(
         &origin_re,
         &origin_im,
         tile_x_min,
@@ -793,65 +1051,158 @@ pub fn get_mandelbrot_image_precise(
         tile_y_max,
         tile_zoom,
         zoom_offset,
-        image_width,
-        image_height,
         max_iterations,
         exponent,
-        ESCAPE_RADIUS,
-    ) {
-        Ok(frame) => frame,
-        Err(_) => return create_solid_black_image(image_width, image_height),
+        image_width,
+        image_height,
+        &color_scheme,
+        reverse_colors,
+        shift_hue_amount,
+        saturate_amount,
+        lighten_amount,
+        color_space,
+        smooth_coloring,
+        palette_min_iter,
+        palette_max_iter,
+    )
+    .image
+}
+
+/// A rendered tile plus the data the client needs to auto-fit and reapply
+/// the palette range without re-rendering: the escaped-pixel iteration
+/// range, and (optionally) the per-pixel smoothed escape values that
+/// `recolor_tile` consumes.
+#[wasm_bindgen]
+pub struct MandelbrotTile {
+    /// RGBA bytes of the rendered tile.
+    #[wasm_bindgen(getter_with_clone)]
+    pub image: Vec<u8>,
+    /// Per-pixel smoothed escape values (`Infinity` for interior pixels),
+    /// or empty when not requested.
+    #[wasm_bindgen(getter_with_clone)]
+    pub values: Vec<f32>,
+    /// Lowest escaped-pixel iteration count, or -1 if no pixel escaped.
+    pub min_iter: i32,
+    /// Highest escaped-pixel iteration count, or -1 if no pixel escaped.
+    pub max_iter: i32,
+}
+
+/// Renders a Mandelbrot tile at any zoom depth (see `render_tile_precise`
+/// for the view geometry) and reports the tile's escaped-pixel iteration
+/// range alongside the image. When `include_values` is set, the per-pixel
+/// smoothed escape values are returned too so the tile can later be
+/// recolored via `recolor_tile`; large offscreen renders (image export)
+/// skip them to avoid the extra transfer.
+#[wasm_bindgen]
+pub fn get_mandelbrot_tile_precise(
+    origin_re: String,
+    origin_im: String,
+    tile_x_min: f64,
+    tile_x_max: f64,
+    tile_y_min: f64,
+    tile_y_max: f64,
+    tile_zoom: i32,
+    zoom_offset: u32,
+    max_iterations: u32,
+    exponent: u32,
+    image_width: usize,
+    image_height: usize,
+    color_scheme: String,
+    reverse_colors: bool,
+    shift_hue_amount: f32,
+    saturate_amount: f32,
+    lighten_amount: f32,
+    color_space: ValidColorSpace,
+    smooth_coloring: bool,
+    palette_min_iter: i32,
+    palette_max_iter: i32,
+    include_values: bool,
+) -> MandelbrotTile {
+    let rendered = render_tile_precise(
+        &origin_re,
+        &origin_im,
+        tile_x_min,
+        tile_x_max,
+        tile_y_min,
+        tile_y_max,
+        tile_zoom,
+        zoom_offset,
+        max_iterations,
+        exponent,
+        image_width,
+        image_height,
+        &color_scheme,
+        reverse_colors,
+        shift_hue_amount,
+        saturate_amount,
+        lighten_amount,
+        color_space,
+        smooth_coloring,
+        palette_min_iter,
+        palette_max_iter,
+    );
+
+    let (min_iter, max_iter) = match rendered.stats.range {
+        Some((min, max)) => (min as i32, max as i32),
+        None => (-1, -1),
     };
 
-    if frame.border_in_set(image_width, image_height) {
-        return create_solid_black_image(image_width, image_height);
+    MandelbrotTile {
+        image: rendered.image,
+        values: if include_values {
+            rendered.values
+        } else {
+            Vec::new()
+        },
+        min_iter,
+        max_iter,
     }
+}
 
+/// Recolors a tile from its cached per-pixel smoothed escape values (as
+/// returned by `get_mandelbrot_tile_precise`), producing the RGBA bytes the
+/// full renderer would produce for the same color settings — without
+/// recomputing escape times. Anything that changes the escape values
+/// themselves (iterations, exponent, smooth coloring) still requires a
+/// re-render.
+#[wasm_bindgen]
+pub fn recolor_tile(
+    values: &[f32],
+    color_scheme: String,
+    reverse_colors: bool,
+    shift_hue_amount: f32,
+    saturate_amount: f32,
+    lighten_amount: f32,
+    color_space: ValidColorSpace,
+    palette_min_iter: i32,
+    palette_max_iter: i32,
+) -> Vec<u8> {
     let (palette, should_reverse_colors) = get_color_palette(&color_scheme, reverse_colors);
 
     let min_iterations_threshold = f64::from(palette_min_iter);
     let max_iterations_threshold =
         f64::from(palette_max_iter).max(min_iterations_threshold + f64::EPSILON);
 
-    let output_size: usize = image_width * image_height * NUM_COLOR_CHANNELS;
-    let mut img: Vec<u8> = vec![0; output_size];
+    let mut img: Vec<u8> = vec![0; values.len() * NUM_COLOR_CHANNELS];
 
-    for row in 0..image_height {
-        let mut column = 0;
-        while column < image_width {
-            // Batch pairs of pixels into SIMD lanes; a trailing odd pixel is
-            // paired with itself.
-            let second_column = (column + 1).min(image_width - 1);
-            let results = frame.escape_iterations_pair((column, row), (second_column, row));
+    for (pixel_index, &value) in values.iter().enumerate() {
+        let pixel = color_from_smoothed_value(
+            f64::from(value),
+            palette,
+            should_reverse_colors,
+            &color_space,
+            shift_hue_amount,
+            saturate_amount,
+            lighten_amount,
+            min_iterations_threshold,
+            max_iterations_threshold,
+        );
 
-            for (lane, &(escape_iterations, z)) in
-                results.iter().take(second_column - column + 1).enumerate()
-            {
-                let pixel = color_from_escape_result(
-                    escape_iterations,
-                    z,
-                    max_iterations,
-                    exponent,
-                    palette,
-                    should_reverse_colors,
-                    &color_space,
-                    shift_hue_amount,
-                    saturate_amount,
-                    lighten_amount,
-                    smooth_coloring,
-                    min_iterations_threshold,
-                    max_iterations_threshold,
-                );
-
-                let index = (row * image_width + column + lane) * NUM_COLOR_CHANNELS;
-                img[index] = pixel[0];
-                img[index + 1] = pixel[1];
-                img[index + 2] = pixel[2];
-                img[index + 3] = 255;
-            }
-
-            column += 2;
-        }
+        let index = pixel_index * NUM_COLOR_CHANNELS;
+        img[index] = pixel[0];
+        img[index + 1] = pixel[1];
+        img[index + 2] = pixel[2];
+        img[index + 3] = 255;
     }
 
     img

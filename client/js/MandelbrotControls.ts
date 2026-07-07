@@ -25,11 +25,7 @@ type SelectInput = {
 };
 
 type CheckboxInput = {
-  id:
-    | "reverseColors"
-    | "highDpiTiles"
-    | "smoothColoring"
-    | "scaleWithIterations";
+  id: "reverseColors" | "highDpiTiles" | "smoothColoring" | "paletteAutoAdjust";
 };
 
 type SliderInput = {
@@ -39,7 +35,7 @@ type SliderInput = {
 type ResetButtonConfig = {
   buttonId: string;
   configKeys: Array<keyof MandelbrotConfig>;
-  specialHandling?: (oldIterations?: number) => void;
+  specialHandling?: () => void;
   checkDiff?: () => boolean;
 };
 
@@ -58,30 +54,8 @@ class MandelbrotControls {
       {
         buttonId: "resetRender",
         configKeys: ["iterations", "exponent", "highDpiTiles"],
-        specialHandling: (oldIterations) => {
-          if (this.map.config.scaleWithIterations && oldIterations) {
-            const newIterations = this.map.config.iterations;
-            const ratio = newIterations / oldIterations;
-
-            const newMinIter = Math.floor(
-              this.map.config.paletteMinIter * ratio,
-            );
-            const newMaxIter = Math.floor(
-              this.map.config.paletteMaxIter * ratio,
-            );
-
-            this.map.config.paletteMinIter = newMinIter;
-            this.map.config.paletteMaxIter = newMaxIter;
-
-            const minIterInput = document.getElementById(
-              "paletteMinIter",
-            ) as HTMLInputElement;
-            const maxIterInput = document.getElementById(
-              "paletteMaxIter",
-            ) as HTMLInputElement;
-            minIterInput.value = String(newMinIter);
-            maxIterInput.value = String(newMaxIter);
-          }
+        specialHandling: () => {
+          this.resetPaletteCeilingToIterations(this.map.config.iterations);
         },
       },
       {
@@ -90,21 +64,30 @@ class MandelbrotControls {
       },
       {
         buttonId: "resetPaletteRange",
-        configKeys: ["paletteMinIter", "scaleWithIterations"],
+        configKeys: ["paletteMinIter", "paletteAutoAdjust"],
         specialHandling: () => {
           // Reset paletteMaxIter based on current iterations
           this.map.config.paletteMaxIter = this.map.config.iterations;
           (
             document.getElementById("paletteMaxIter") as HTMLInputElement
           ).value = String(this.map.config.iterations);
+          this.syncAutoAdjustUi();
         },
         checkDiff: () => {
+          if (
+            this.map.config.paletteAutoAdjust !==
+            this.map.initialConfig.paletteAutoAdjust
+          ) {
+            return true;
+          }
+          if (this.map.config.paletteAutoAdjust) {
+            // Auto-applied values are machine-set, not user divergence.
+            return false;
+          }
           return (
             this.map.config.paletteMinIter !==
               this.map.initialConfig.paletteMinIter ||
-            this.map.config.paletteMaxIter !== this.map.config.iterations ||
-            this.map.config.scaleWithIterations !==
-              this.map.initialConfig.scaleWithIterations
+            this.map.config.paletteMaxIter !== this.map.config.iterations
           );
         },
       },
@@ -135,6 +118,7 @@ class MandelbrotControls {
     ];
 
     this.handleInputs();
+    this.syncAutoAdjustUi();
     this.updateResetButtonsVisibility();
     this.loadDetailsState();
 
@@ -261,7 +245,7 @@ class MandelbrotControls {
       { id: "reverseColors" },
       { id: "highDpiTiles" },
       { id: "smoothColoring" },
-      { id: "scaleWithIterations" },
+      { id: "paletteAutoAdjust" },
     ];
 
     checkboxInputs.forEach((input) => this.handleCheckboxInput(input));
@@ -319,8 +303,8 @@ class MandelbrotControls {
         parsedValue = this.map.config[id]; // Reset to previous value
       }
 
-      if (id === "iterations" && this.map.config.scaleWithIterations) {
-        this.updatePaletteMinMaxWithIterations(parsedValue);
+      if (id === "iterations") {
+        this.resetPaletteCeilingToIterations(parsedValue);
       }
 
       input.value = String(parsedValue);
@@ -359,27 +343,29 @@ class MandelbrotControls {
     }, 1000);
   }
 
-  private updatePaletteMinMaxWithIterations(newIterations: number) {
-    const oldIterations = this.map.config.iterations;
+  /** In auto mode, changing the iteration cap resets the palette upper bound
+   * to the new cap as a provisional range (the lower bound is kept, clamped
+   * under the new ceiling): re-rendering with the old fit would clamp
+   * everything above it into a maxed-out band around the set until the
+   * re-fit, so the stale detection is dropped and the proper range is fitted
+   * once all tiles finish rendering. A user-set range is untouched. */
+  private resetPaletteCeilingToIterations(newIterations: number) {
+    if (!this.map.config.paletteAutoAdjust) {
+      return;
+    }
 
-    if (oldIterations === 0) return;
+    this.map.tileCache.clear();
 
-    const ratio = newIterations / oldIterations;
+    this.map.config.paletteMaxIter = newIterations;
+    this.map.config.paletteMinIter = Math.min(
+      this.map.config.paletteMinIter,
+      newIterations,
+    );
 
-    const newMinIter = Math.floor(this.map.config.paletteMinIter * ratio);
-    const newMaxIter = Math.floor(this.map.config.paletteMaxIter * ratio);
-
-    this.map.config.paletteMinIter = newMinIter;
-    this.map.config.paletteMaxIter = newMaxIter;
-
-    const minIterInput = document.getElementById(
-      "paletteMinIter",
-    ) as HTMLInputElement;
-    const maxIterInput = document.getElementById(
-      "paletteMaxIter",
-    ) as HTMLInputElement;
-    minIterInput.value = String(newMinIter);
-    maxIterInput.value = String(newMaxIter);
+    (document.getElementById("paletteMaxIter") as HTMLInputElement).value =
+      String(this.map.config.paletteMaxIter);
+    (document.getElementById("paletteMinIter") as HTMLInputElement).value =
+      String(this.map.config.paletteMinIter);
   }
 
   private handleIterationButtons() {
@@ -399,24 +385,16 @@ class MandelbrotControls {
     }, 500);
 
     multiplyButton.onclick = () => {
-      if (this.map.config.scaleWithIterations) {
-        this.updatePaletteMinMaxWithIterations(this.map.config.iterations * 2);
-      }
-
       this.map.config.iterations *= 2;
+      this.resetPaletteCeilingToIterations(this.map.config.iterations);
       iterationsInput.value = String(this.map.config.iterations);
 
       debouncedRefresh();
     };
 
     divideButton.onclick = () => {
-      const newIterations = Math.ceil(this.map.config.iterations / 2);
-
-      if (this.map.config.scaleWithIterations) {
-        this.updatePaletteMinMaxWithIterations(newIterations);
-      }
-
-      this.map.config.iterations = newIterations;
+      this.map.config.iterations = Math.ceil(this.map.config.iterations / 2);
+      this.resetPaletteCeilingToIterations(this.map.config.iterations);
       iterationsInput.value = String(this.map.config.iterations);
 
       debouncedRefresh();
@@ -427,14 +405,26 @@ class MandelbrotControls {
     const select = document.getElementById(id) as HTMLSelectElement;
     select.value = String(this.map.config[id]);
     select.onchange = ({ target }) => {
+      const value = (target as HTMLSelectElement).value;
       if (id === "colorScheme") {
-        this.map.config[id] = (target as HTMLSelectElement).value;
-      } else if (id === "colorSpace") {
-        this.map.config[id] = Number((target as HTMLSelectElement).value);
+        this.map.config[id] = value;
+      } else {
+        this.map.config[id] = Number(value);
       }
       this.updateResetButtonsVisibility();
       this.map.refresh();
     };
+  }
+
+  /** Reflects the auto-adjust state in the panel: while enabled the min/max
+   * inputs become read-only displays of the applied values. */
+  syncAutoAdjustUi() {
+    const isAuto = this.map.config.paletteAutoAdjust;
+
+    (document.getElementById("paletteMinIter") as HTMLInputElement).disabled =
+      isAuto;
+    (document.getElementById("paletteMaxIter") as HTMLInputElement).disabled =
+      isAuto;
   }
 
   private handleCheckboxInput({ id }: CheckboxInput) {
@@ -443,7 +433,16 @@ class MandelbrotControls {
     checkbox.onchange = ({ target }) => {
       this.map.config[id] = (target as HTMLInputElement).checked;
       this.updateResetButtonsVisibility();
-      this.map.refresh();
+      if (id === "paletteAutoAdjust") {
+        this.syncAutoAdjustUi();
+        // Disabling keeps the current values for the user to edit; enabling
+        // fits to the visible tiles via an in-place recolor, no re-render.
+        if (this.map.config.paletteAutoAdjust) {
+          this.map.refitPaletteAndRecolor();
+        }
+      } else {
+        this.map.refresh();
+      }
     };
   }
 
@@ -629,15 +628,29 @@ class MandelbrotControls {
       colorSpace: cs,
       paletteMinIter: pmin,
       paletteMaxIter: pmax,
+      paletteAutoAdjust,
     } = this.map.config;
 
     const url = new URL(window.location.origin);
 
-    Object.entries({ re, im, z, i, e, c, r, h, s, l, cs, pmin, pmax }).forEach(
-      ([key, value]) => {
-        url.searchParams.set(key, String(value));
-      },
-    );
+    Object.entries({
+      re,
+      im,
+      z,
+      i,
+      e,
+      c,
+      r,
+      h,
+      s,
+      l,
+      cs,
+      pmin,
+      pmax,
+      pm: paletteAutoAdjust ? "auto" : "manual",
+    }).forEach(([key, value]) => {
+      url.searchParams.set(key, String(value));
+    });
 
     return url.toString();
   }
@@ -765,15 +778,10 @@ class MandelbrotControls {
       const button = document.getElementById(config.buttonId);
       if (button) {
         button.onclick = () => {
-          const oldIterations =
-            config.buttonId === "resetRender"
-              ? this.map.config.iterations
-              : undefined;
-
           this.resetConfigValues(config.configKeys);
 
           if (config.specialHandling) {
-            config.specialHandling(oldIterations);
+            config.specialHandling();
           }
 
           this.updateResetButtonsVisibility();
