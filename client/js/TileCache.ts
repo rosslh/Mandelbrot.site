@@ -27,8 +27,8 @@ export type CachedTile = {
 // iterations, crushing the boundary glow. Thin filament views cut the other
 // way: their high-iteration pixels hug a nearly one-dimensional curve, so
 // even a 0.01% tail (99.99%) clips real structure and flattens the filament
-// glow. 99.999% (~14 px on a full screen) only removes isolated specks.
-const CEILING_PERCENTILE = 0.99999;
+// glow. 99.9945% (~77 px on a full screen) only removes isolated specks.
+const CEILING_PERCENTILE = 0.999945;
 // Symmetric guard for the floor: a few stray fast-escaping pixels would
 // otherwise pin the range bottom and waste the low end of the gradient. The
 // low side is far less skewed than the high side (the exterior mass sits
