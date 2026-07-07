@@ -124,6 +124,13 @@ function renderPoolSize(): number {
   return Math.max(1, cores - 1);
 }
 
+// Duration of the opacity crossfade that eases freshly recolored tiles in
+// over the old palette instead of swapping them abruptly.
+const RECOLOR_FADE_MS = 220;
+
+// A tile's freshly computed pixels, ready to be faded in over its canvas.
+type TileRepaint = { tile: CachedTile; imageData: ImageData };
+
 class MandelbrotMap extends L.Map {
   mandelbrotLayer: MandelbrotLayer;
   mapId: string;
@@ -346,8 +353,11 @@ class MandelbrotMap extends L.Map {
     tiles: CachedTile[],
     generation: number,
   ): Promise<void> {
-    await Promise.all(
-      tiles.map(async (tile) => {
+    // Compute every tile's new pixels before painting anything, so all tiles
+    // fade to the new palette in one synchronized pass instead of popping
+    // one by one as their worker results land.
+    const repaints = await Promise.all(
+      tiles.map(async (tile): Promise<TileRepaint | null> => {
         const request: WorkerRequest = {
           type: "recolor",
           payload: {
@@ -368,28 +378,100 @@ class MandelbrotMap extends L.Map {
             worker(request),
           )) as RecolorResponse;
 
-          // A newer recolor pass or a full re-render supersedes this result.
-          if (generation !== this.recolorGeneration) {
-            return;
-          }
-
-          tile.canvas
-            .getContext("2d")
-            ?.putImageData(
-              new ImageData(
-                Uint8ClampedArray.from(image),
-                tile.width,
-                tile.height,
-              ),
-              0,
-              0,
-            );
+          return {
+            tile,
+            imageData: new ImageData(
+              Uint8ClampedArray.from(image),
+              tile.width,
+              tile.height,
+            ),
+          };
         } catch {
           // The pool was terminated by a full re-render, which repaints
           // every tile anyway.
+          return null;
         }
       }),
     );
+
+    // A newer recolor pass or a full re-render supersedes this result.
+    if (generation !== this.recolorGeneration) {
+      return;
+    }
+
+    await this.crossfadeTiles(
+      repaints.filter((repaint): repaint is TileRepaint => repaint !== null),
+      generation,
+    );
+  }
+
+  /** Paints the new tile images with a short opacity crossfade, all tiles in
+   * lockstep: each frame redraws the snapshotted old pixels and blends the
+   * new image on top at rising alpha, then lands on an exact putImageData.
+   * Bails out mid-fade when a newer recolor pass or a full re-render bumps
+   * the generation, since that pass repaints every tile itself. */
+  private crossfadeTiles(
+    repaints: TileRepaint[],
+    generation: number,
+  ): Promise<void> {
+    if (
+      repaints.length === 0 ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      for (const { tile, imageData } of repaints) {
+        tile.canvas.getContext("2d")?.putImageData(imageData, 0, 0);
+      }
+      return Promise.resolve();
+    }
+
+    const fades = repaints.flatMap(({ tile, imageData }) => {
+      const context = tile.canvas.getContext("2d");
+      if (!context) {
+        return [];
+      }
+      // Snapshot the currently displayed pixels (possibly themselves
+      // mid-fade toward a superseded palette) and stage the new image on a
+      // canvas of its own: putImageData ignores alpha compositing, so the
+      // blend has to go through drawImage.
+      const oldPixels = document.createElement("canvas");
+      oldPixels.width = tile.width;
+      oldPixels.height = tile.height;
+      oldPixels.getContext("2d")?.drawImage(tile.canvas, 0, 0);
+      const newPixels = document.createElement("canvas");
+      newPixels.width = tile.width;
+      newPixels.height = tile.height;
+      newPixels.getContext("2d")?.putImageData(imageData, 0, 0);
+      return [{ context, imageData, oldPixels, newPixels }];
+    });
+
+    return new Promise((resolve) => {
+      const start = performance.now();
+      const frame = (now: number) => {
+        if (generation !== this.recolorGeneration) {
+          resolve();
+          return;
+        }
+        const progress = Math.min(1, (now - start) / RECOLOR_FADE_MS);
+        if (progress === 1) {
+          // The blended frames are compositing approximations; finish with
+          // the worker's exact pixels.
+          for (const fade of fades) {
+            fade.context.putImageData(fade.imageData, 0, 0);
+          }
+          resolve();
+          return;
+        }
+        for (const fade of fades) {
+          fade.context.globalAlpha = 1;
+          fade.context.drawImage(fade.oldPixels, 0, 0);
+          fade.context.globalAlpha = progress;
+          fade.context.drawImage(fade.newPixels, 0, 0);
+          fade.context.globalAlpha = 1;
+        }
+        requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    });
   }
 
   /** Applies a color-only settings change (scheme, reversal, hue/saturation/
