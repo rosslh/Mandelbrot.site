@@ -457,12 +457,18 @@ class MandelbrotMap extends L.Map {
     });
 
     return new Promise((resolve) => {
-      const start = performance.now();
+      // Anchored to the first frame's own timestamp: rAF timestamps are
+      // vsync-aligned and can precede a performance.now() taken when the
+      // fade is scheduled, and a negative progress would be silently
+      // ignored by the globalAlpha setter, painting the new image at full
+      // opacity for one frame.
+      let start: number | null = null;
       const frame = (now: number) => {
         if (generation !== this.recolorGeneration) {
           resolve();
           return;
         }
+        start ??= now;
         const progress = Math.min(1, (now - start) / RECOLOR_FADE_MS);
         if (progress === 1) {
           // The blended frames are compositing approximations; finish with
