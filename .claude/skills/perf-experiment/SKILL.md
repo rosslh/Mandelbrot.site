@@ -208,6 +208,10 @@ dendrite `i`, needle `-2`) that stay meaningful at any zoom depth, plus
 tileSize and smoothColoring pairs. User cases (`user-*`) come from a Supabase
 `events` export via `node src/ingest.mjs <export.csv> --write` (validates,
 dedupes, buckets by pathway x iteration tercile, samples a few per bucket).
+An export is checked out at the repo root as `events_rows.csv` (~24k rows:
+id, created_at, share_url, re, im, zoom, iterations, event_name,
+session_id) — use it for ingest, frequency weighting, or finding real slow
+views; never copy session_ids or share URLs into committed corpus rows.
 Keep the corpus small enough that a two-variant run finishes in minutes.
 
 When adding or choosing cases, **favor views with many border pixels** —
