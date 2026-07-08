@@ -544,3 +544,40 @@ Verdict: shipped — the largest absolute win so far (~13.2 s off the slowest
 e2e case). Follow-ups moved to the skill backlog: pf64 delta-loop refill
 (now the slowest case), SIMD for the hybrid's f64 phase (z259's remaining
 2.4 s), rescaled-epoch loop if z400+ traffic materializes.
+
+## 2026-07-08 — Corpus expansion: 7 probed pf64 user cases + holdout ship gate
+
+Machine: mac arm64 (M1 Pro), Chrome for Testing 136. No production code
+change — corpus + skill guidance only.
+
+Probed 54 deduped pf64 candidates from events_rows.csv at 64x64 (interior
+fraction, escaper mean/p50/p90/p99, iteration sum). Export findings: the
+pf64 tier in real usage is essentially all z47–59 (exactly one view past
+z60); exactly one float-exp view exists (the z259 already in the corpus);
+the slowest real views are 25–50k-iteration pf64 tiles the old corpus
+(capped at i20000) never covered.
+
+Added (all perturbation-f64; heavy cases carry tileSize overrides so
+samples fit the budget — per-pixel cost is size-invariant):
+- user-z47-fb5f0315 i50000 @100px — heaviest real e2 view: 62% interior,
+  escaper mean 49.7k/50k (trapped needle channel), ~3.1 s/sample
+- user-z48-0a309fb2 i48000 @100px — cusp channel, 68% interior + trapped
+- user-z48-f36112fd i50000 @100px — border band, 19% interior, mean 40k
+- user-z47-da3d5543 i25600 — fully in-set (border_in_set shortcut path)
+- user-z48-58cd3904 i25600 e4 — fully in-set multibrot (general-exponent
+  border pixels)
+- user-z48-6481040a i999 — low-iter, 60% interior + near-max escapers
+- user-z48-0611aae8 i45999 e52 @64px — slowest real view in the export
+  (~60 s/tile at 200px): the O(exponent) Horner delta step dominates
+  (escaper mean only 100). Candidate target for a future experiment.
+
+Corpus 35 → 42 cases; pixel-check base259 vs hybrid-fe: all 42
+byte-identical (hybrid bit-exactness holds on the new views too).
+
+Also added to the skill: holdout validation as an anti-overfitting ship
+gate (fresh seeded sample from events_rows.csv, excluding corpus views,
+per-tier, pre/post at low sample count) — the fixed corpus stays the
+iteration target, the holdout guards tuned constants and accepted diffs.
+Possible follow-up flagged: the e2e grid corpus has no heavyweight pf64
+case; the z47 i50000 view would represent real ~90 s page loads but would
+roughly double e2e runtime — decide deliberately.

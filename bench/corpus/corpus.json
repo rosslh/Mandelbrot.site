@@ -279,6 +279,15 @@
       "note": "perturbation-f64/low-iter"
     },
     {
+      "id": "user-z47-da3d5543",
+      "source": "user",
+      "re": "0.2504672000328716",
+      "im": "-0.000016024103453915473",
+      "zoom": 47,
+      "iterations": 25600,
+      "note": "perturbation-f64/high-iter; fully in-set view: exercises border_in_set shortcut with 25.6k-iteration border pixels"
+    },
+    {
       "id": "user-z47-f37e5416",
       "source": "user",
       "re": "-0.5496041100592572",
@@ -286,6 +295,43 @@
       "zoom": 47,
       "iterations": 2001,
       "note": "perturbation-f64/high-iter"
+    },
+    {
+      "id": "user-z47-fb5f0315",
+      "source": "user",
+      "re": "-1.7723767931915395",
+      "im": "0.00439357468238466",
+      "zoom": 47,
+      "iterations": 50000,
+      "overrides": {
+        "tileSize": 100
+      },
+      "note": "perturbation-f64/high-iter; heaviest real e2 view: 62% interior, escaper mean 49.7k/50k (trapped needle channel); tileSize 100 keeps samples in budget"
+    },
+    {
+      "id": "user-z48-0611aae8",
+      "source": "user",
+      "re": "-0.561760682385648",
+      "im": "-0.7341970302369814",
+      "zoom": 48,
+      "iterations": 45999,
+      "overrides": {
+        "exponent": 52,
+        "tileSize": 64
+      },
+      "note": "perturbation-f64/high-iter; slowest real view in export (~60 s/tile at 200px): exponent-52 Horner delta step dominates, escaper mean only 100; tileSize 64 keeps samples in budget"
+    },
+    {
+      "id": "user-z48-0a309fb2",
+      "source": "user",
+      "re": "0.2500612710671293",
+      "im": "-7.752127428872768e-7",
+      "zoom": 48,
+      "iterations": 48000,
+      "overrides": {
+        "tileSize": 100
+      },
+      "note": "perturbation-f64/high-iter; cusp channel: 68% interior + trapped escapers (mean 32k/48k); tileSize 100 keeps samples in budget"
     },
     {
       "id": "user-z48-15d70019",
@@ -304,6 +350,27 @@
       "zoom": 48,
       "iterations": 500,
       "note": "perturbation-f64/mid-iter"
+    },
+    {
+      "id": "user-z48-58cd3904",
+      "source": "user",
+      "re": "-1.2234533843006323",
+      "im": "-1.2398273963043493e-8",
+      "zoom": 48,
+      "iterations": 25600,
+      "overrides": {
+        "exponent": 4
+      },
+      "note": "perturbation-f64/high-iter; fully in-set multibrot: general-exponent Horner loop on border pixels only"
+    },
+    {
+      "id": "user-z48-6481040a",
+      "source": "user",
+      "re": "-0.45068966497470875",
+      "im": "-0.5605623670010154",
+      "zoom": 48,
+      "iterations": 999,
+      "note": "perturbation-f64/low-iter; 60% interior + near-max escapers (mean 962/999) at low absolute budget"
     },
     {
       "id": "user-z48-ccbd4f51",
@@ -331,6 +398,18 @@
       "zoom": 48,
       "iterations": 9000,
       "note": "perturbation-f64/high-iter"
+    },
+    {
+      "id": "user-z48-f36112fd",
+      "source": "user",
+      "re": "-1.1883354848761543",
+      "im": "0.30460678136290387",
+      "zoom": 48,
+      "iterations": 50000,
+      "overrides": {
+        "tileSize": 100
+      },
+      "note": "perturbation-f64/high-iter; border band: 19% interior, escaper mean 40k/50k near-max; tileSize 100 keeps samples in budget"
     },
     {
       "id": "user-z85-c163744e",

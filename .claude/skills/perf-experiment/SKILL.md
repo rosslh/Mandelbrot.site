@@ -220,7 +220,30 @@ That is where users park and where the real work is (interior-heavy tiles
 short-circuit via rect_in_set/periodicity; low-iteration exteriors are
 cheap). Verify a candidate's composition with a small offline probe (interior
 fraction, escaper mean/p90) before trusting it, and keep each pathway tier
-represented by its realistic worst case.
+represented by its realistic worst case. Heavy cases may carry a `tileSize`
+override (100 or 64) so a sample fits the per-case budget: per-pixel cost is
+size-invariant, so relative deltas are preserved.
+What the export says about real usage (probed 2026-07-07): the pf64 tier is
+effectively all z47–59 (one lone view past z60), there is exactly one
+float-exp view (z259), and the slowest real views are 25k–50k-iteration
+pf64 tiles — including an exponent-52 view (~60 s/tile at 200px) where the
+O(exponent) Horner delta step, not the iteration count, is the cost.
+
+### Holdout validation (anti-overfitting ship gate)
+
+The fixed corpus is what you iterate against, and that also makes it easy to
+overfit: tuned constants and accepted trade-offs are only ever validated on
+its ~40 views. Before shipping an algorithmic winner — especially one with
+tuned thresholds (e.g. the hybrid promote/floor exponents) or deliberately
+accepted pixel diffs — validate against a *fresh* sample: dedupe
+events_rows.csv, exclude views already in the corpus, stratified-sample
+~40–60 per pathway tier (seeded for reproducibility; use a fresh seed per
+experiment so the holdout does not become a second training set), and run
+pre/post at low sample count with budget caps. Check per-tier geomeans, the
+worst movers, and the time-weighted delta; run pixel-check on the holdout
+too when the change has any accepted output diff — artifact classes can hide
+on view shapes the fixed corpus lacks. The fixed corpus stays the fast
+iteration target; the holdout is a ship gate, paid once per experiment.
 
 ## Experiment log — read it first, then append to it
 
