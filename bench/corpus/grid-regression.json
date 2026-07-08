@@ -67,6 +67,24 @@
       "zoom": 259,
       "iterations": 1600,
       "note": "Corpus float-exp/high-iter: covers the pathway the opt3+simd128 flag change targets"
+    },
+    {
+      "id": "grid-z48-i800-85c3859b",
+      "source": "corpus:user-z48-85c3859b",
+      "re": "0.33260077192171966",
+      "im": "0.5745793274081237",
+      "zoom": 48,
+      "iterations": 800,
+      "note": "Lightest real pf64 view: guards the spawn-time cost of deep-zoom warmup work (added 2026-07-08, pf64 spawn-warmup entry)"
+    },
+    {
+      "id": "grid-z85-i200-c163744e",
+      "source": "corpus:user-z85-c163744e",
+      "re": "-0.758020648905594882055313761604286693",
+      "im": "-0.076342380269949609648412912019177464",
+      "zoom": 85,
+      "iterations": 200,
+      "note": "Ultra-light deep pf64 view (200 iterations, sub-500 ms load): the worst case for any spawn-time warmup tax; accepted +23 ms here for -8.9 s on grid-z47 (added 2026-07-08, pf64 spawn-warmup entry)"
     }
   ]
 }

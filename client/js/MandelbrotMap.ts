@@ -58,11 +58,16 @@ export type RecolorRequest = { type: "recolor"; payload: RecolorPayload };
 // Tier-up warmup for the general-exponent (multibrot) wasm kernel; returns
 // nothing. Sent once per worker at pool spawn when the view's exponent != 2.
 export type WarmupGeneralRequest = { type: "warmupGeneral" };
+// Tier-up warmup for the perturbation-f64 stream kernel; returns nothing.
+// Sent once per worker at pool spawn when the view is already at deep-zoom
+// depth (exponent 2, effective zoom >= DEEP_ZOOM_THRESHOLD).
+export type WarmupDeepRequest = { type: "warmupDeep" };
 export type WorkerRequest =
   | MandelbrotRequest
   | OptimiseRequest
   | RecolorRequest
-  | WarmupGeneralRequest;
+  | WarmupGeneralRequest
+  | WarmupDeepRequest;
 
 export type MandelbrotResponse = {
   image: Uint8Array;
@@ -115,6 +120,10 @@ type TilePosition = {
 // own zoom is reset to a small value; `zoomOffset` accumulates the difference.
 // The effective zoom is `leafletZoom + zoomOffset` and is unbounded.
 const MAX_LEAFLET_ZOOM = 26;
+// Effective zoom where the wasm switches from the direct f64 loop to
+// perturbation (DEEP_ZOOM_THRESHOLD in mandelbrot/src/perturbation.rs); used
+// only to decide whether pool spawn should warm the perturbation kernel.
+const DEEP_ZOOM_THRESHOLD = 47;
 const MIN_LEAFLET_ZOOM_WITH_OFFSET = 8;
 const REBASED_LEAFLET_ZOOM = 12;
 
@@ -597,11 +606,20 @@ class MandelbrotMap extends L.Map {
     // warmup does not tier up; warm it during spawn (before the pool hands
     // the worker any tile) so deep multibrot tiles never render under
     // Liftoff. Exponent-2 loads skip this entirely (see worker.js).
-    const warmGeneralKernel = this.config?.exponent && this.config.exponent !== 2;
+    const warmGeneralKernel =
+      this.config?.exponent && this.config.exponent !== 2;
+    // Likewise for the exponent-2 perturbation kernel: only views already at
+    // deep-zoom depth need it warm, and shallow views that later zoom past
+    // the threshold tier it up naturally over their first few tiles.
+    const warmDeepKernel =
+      !warmGeneralKernel && (this.config?.zoom ?? 0) >= DEEP_ZOOM_THRESHOLD;
     this.pool = Pool(async () => {
       const worker = await spawn(new Worker("./worker.js"));
       if (warmGeneralKernel) {
         await worker({ type: "warmupGeneral" });
+      }
+      if (warmDeepKernel) {
+        await worker({ type: "warmupDeep" });
       }
       return worker;
     }, renderPoolSize());

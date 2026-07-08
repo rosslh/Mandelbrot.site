@@ -939,3 +939,72 @@ user-z48 --budget-ms 30000`; `node src/validate.mjs --variants
 base-e52,e52-stream`; e2e standard corpus as usual plus `node
 src/run-e2e.mjs --variants pre-e52,post-e52 --corpus
 corpus/grid-multibrot.json --viewport 800x600 --rounds 2 --warmup 0`.
+
+## 2026-07-08 — SHIPPED: conditional deep-zoom (pf64) spawn warmup — backlog #1
+
+Machine: mac arm64 (M1 Pro, 8 logical cores), Chrome for Testing 136,
+macOS 14. Client JS change only (client/js/worker.js,
+client/js/MandelbrotMap.ts); no Rust, no flags, wasm byte-identical
+(307.1 KiB both sides). Pre-change ref: 3372666.
+
+Follow-up to yesterday's finding: the spawn warmup only exercised the
+*direct* kernel, so the exponent-2 pf64 stream kernel (a separate wasm
+function) ran heavy first tiles partly under Liftoff — the unconditional
+e52-warmup probe had shown z47-i50000 −15.9% from spawn execution volume
+alone.
+
+**Change:** worker exposes a `warmupDeep` request; `createPool` sends it
+per worker at spawn when the initial view is already at deep-zoom depth
+(`config.zoom >= 47`, mirroring DEEP_ZOOM_THRESHOLD in perturbation.rs)
+and the exponent is 2 (multibrot pools already get `warmupGeneral`).
+Shallow loads pay nothing; shallow views that later zoom past the
+threshold tier up naturally over their first tiles.
+
+**Warmup tile design (probed before implementing):** at pf64 depths a
+tile is either fast-escaping or fully capped, and capped tiles are a trap:
+the trapped-channel candidate (z47 needle coords) probed 100% interior
+with identical wall time at cap 1000 vs 2000 — border_in_set fills the
+tile and the kernel never runs. Shipped tile: dendrite tip (0, 1) at
+effective zoom 48 (0% interior, escapers mean ~40, so nothing
+short-circuits and lanes refill constantly), volume via pixel count
+instead of iteration depth: 256x256, ~2.6M iterations/render, 2 renders
+(~31 ms cold / ~16 ms tiered each), plus a 2000-step dashu reference
+orbit that warms the bignum code deep views run cold per worker.
+
+E2E (complete builds, pre=3372666 / post, standard grid corpus + 2 new
+light-pf64 tax cases, 3 rounds):
+
+| case | delta (warm) | cold |
+|---|---|---|
+| grid-z47-i50000 | **−16.2%** (54.6 → 45.8 s) | −16.0% |
+| grid-z48-i20000 | **−12.6%** (2154 → 1881 ms) | −12.0% |
+| grid-z48-i800 (light pf64) | **−7.1%** (891 → 828 ms) | −5.2% |
+| grid-z85-i200 (ultra-light pf64) | +5.7% (401 → 424 ms) | +5.2% |
+| grid-z20 / z36 / z46 / z259 | ±1.1% (gated off / untargeted) | — |
+
+Overall geomean −4.2%. **Accepted trade-off, stated explicitly:** the
++23 ms on the 0.4 s z85-i200 view (warmup cost exceeds tiering benefit at
+200 iterations) buys −8.9 s per load on the heaviest real pf64 view and
+−273 ms on z48-i20000 — absolute-time weighting says that is a bargain.
+Both light views are now committed grid-regression cases so future
+spawn-time work stays honest.
+
+**Volume matrix (2 vs 4 renders, focused e2e):** doubling spawn volume
+bought nothing on the heavies (z47 −0.1%, z48-i20k −0.3% — the kernel is
+fully tiered at 2 renders) and doubled the z85 tax to +10.8%. 2 renders
+is the knee. Deferred/idle warmup (the backlog's alternative) is moot for
+the conditional design: on deep loads the warmup must precede the first
+tile to help it, and shallow loads don't run it at all.
+
+Correctness: no wasm/output change possible (warmup renders are discarded;
+tile parameters untouched); tsc, eslint, prettier clean. Holdout gate
+n/a — the change is invisible at wasm level; e2e is the gate.
+
+Verdict: shipped. Heavy deep-zoom share-URL loads drop 12–16% end to end
+on top of yesterday's kernel wins (grid-z47 cumulative 2026-07-07→08:
+99 s → 45.8 s).
+
+Reproduce: `node src/build-dist.mjs pre-pf64warm --ref 3372666 && node
+src/build-dist.mjs post-pf64warm && node src/run-e2e.mjs --variants
+pre-pf64warm,post-pf64warm --rounds 3` (grid-regression.json now includes
+the two tax cases).

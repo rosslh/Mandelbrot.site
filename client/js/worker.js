@@ -104,6 +104,54 @@ import("../../mandelbrot/pkg")
       }
     };
 
+    // The perturbation-f64 stream kernel (exponent 2, effective zoom >= 47)
+    // is also a separate wasm function from the direct loop the init warmup
+    // exercises, so deep-zoom first tiles run it at Liftoff speed: an
+    // execution-volume probe measured heavy pf64 loads 10-16% slower end to
+    // end without extra spawn warmup (bench/LOG.md 2026-07-08). The pool
+    // requests this warmup at spawn only when the initial view is already at
+    // deep-zoom depth, so shallow loads pay nothing. Boundary-rich dendrite
+    // tile (0% interior, escapers mean ~40 iterations, so nothing
+    // short-circuits and lanes refill constantly); 256px at ~2.6M iterations
+    // per render gives the kernel enough execution volume to tier up, and
+    // the 2000-step arbitrary-precision reference orbit warms the dashu code
+    // that deep views run cold per worker. ~30/~16 ms per render
+    // (Liftoff/tiered), only on loads that take seconds anyway.
+    const warmupDeepKernel = () => {
+      try {
+        for (let i = 0; i < 2; i++) {
+          wasm
+            .get_mandelbrot_tile_precise(
+              "0",
+              "1",
+              2621,
+              2622,
+              2621,
+              2622,
+              12,
+              36,
+              2000,
+              2,
+              256,
+              256,
+              "turbo",
+              false,
+              0,
+              0,
+              0,
+              2,
+              true,
+              0,
+              2000,
+              false,
+            )
+            .free();
+        }
+      } catch (warmupError) {
+        console.warn("wasm deep-zoom kernel warmup failed:", warmupError);
+      }
+    };
+
     const getTile = (params) => {
       const tile = wasm.get_mandelbrot_tile_precise(
         params.originRe,
@@ -176,6 +224,8 @@ import("../../mandelbrot/pkg")
           return await optimiseImage(request.payload);
         case "warmupGeneral":
           return warmupGeneralKernel();
+        case "warmupDeep":
+          return warmupDeepKernel();
         default:
           throw new Error(`Unknown worker request type: ${request.type}`);
       }
