@@ -1181,3 +1181,103 @@ perturbation-f64`; `node src/validate.mjs --variants baseline,pf64-mariani
 src/build-dist.mjs post-mariani && node src/run-e2e.mjs --variants
 pre-mariani,post-mariani --rounds 3` (plus `--filter 0a309fb2` for the new
 case).
+
+## 2026-07-08 — NEGATIVE: iteration-skipping at real pf64 depths (BLA + multiplier interior detection); backlog #4 and #6 closed
+
+Machine: mac arm64 (M1 Pro, 8 logical cores), Chrome for Testing 136,
+macOS 14. **No production change.** Two native decomposition probes (kept as
+ignored tests in mandelbrot/src/perturbation_test.rs), one flag experiment,
+one readout from existing data. Baseline artifact rebuilt at HEAD (7ed51f6).
+
+Target selection: after the 2026-07-07/08 ships, the slowest standard e2e
+case by far is grid-z47-i50000 (~45 s; next-worst standard case ~2 s). Its
+tiles are trapped needle channel: 62% interior pixels that never rebase (so
+(dz, index) periodicity provably cannot fire) in a channel too thin for
+Mariani rings, plus escapers at mean 49.7k of 50k. Every pixel grinds
+~full budget at the e2 stream kernel's structural norm (~2.9 ms/Miter) —
+the remaining cost IS the iteration count, so only iteration-skipping could
+cut it. Both known skipping techniques were probed and both fail.
+
+**Probe 1 — BLA (Zhuoran-style bivariate linear approximation),
+`bla_probe`:** per-orbit-index affine steps dz -> A·dz + B·dc merged into
+power-of-two levels, validity radius r = eps·|A| (single step, quadratic;
+general-exponent analogue for e52), merge r = min(r1, (r2 − |B1|·dc_max)/
+|A1|), skips aligned at index mod 2^level, exact single steps otherwise.
+Native scalar exact loop vs BLA loop on the 6 heavy e2 corpus views + e52
+at 100px (bench-corpus coordinates, worker-identical frame math):
+
+| view | eps 2^-24: skipped / native speedup / diff px (max Δiter) | eps 2^-32: same |
+|---|---|---|
+| fb5f0315 trapped-needle i50k | 93% / 7.2x / 291 (334) | 62% / 1.18x / 27 (53) |
+| 0a309fb2 cusp-channel i48k | 88% / 5.5x / 951 (21987) | 30% / 1.34x / 212 (11676) |
+| f36112fd border-band i50k | 56% / 1.3x / 4305 (6448) | 27% / 1.05x / 1153 (3203) |
+| d0e211ec trapped i32k | 61% / 1.4x / 2408 (1252) | 27% / 1.01x / 494 (916) |
+| 953fa585 interior i25k | 18% / 1.2x / 126 (12469) | 6% / 1.04x / 12 (12469) |
+| dc40277a border i16k | 84% / 3.2x / 328 (434) | 55% / 1.29x / 75 (188) |
+
+Even at eps 2^-40 (skip rates 0.7–10%, speed ≤ 1.0x) diffs persist:
+f36112fd 312 px (max Δ2821), 0a309fb2 24 px (max Δ16363). e52 is a
+non-starter (reference orbit escapes at 85 iterations — nothing to compose;
+1.0x at eps 2^-40 with garbage z errors). Why it fails here: at z47–59 the
+deltas have only ~47 bits of smallness headroom; after the first ~40
+doublings — and permanently after any rebase — pixels iterate with O(1)
+deltas where the step is genuinely nonlinear, so tolerances tight enough to
+respect the output bar leave almost nothing skippable, and the production
+SIMD stream kernel is already ~1.7x scalar per step, which eats the entire
+1.0–1.35x native-scalar win. The diffs are not ulp-level: chaos amplifies
+any rounding-path change into escape-count shifts of hundreds to thousands
+of iterations on boundary pixels. BLA remains a z250+ technique; that tier
+(one real view) is already at 1.25 s e2e.
+
+**Probe 2 — attracting-cycle (multiplier) interior detection,
+`multiplier_interior_probe`:** on an approximate return |z − z_saved| < δ
+(Brent-scheduled saves), accumulate the candidate period's multiplier
+∏(2z); |m| < margin would retire the pixel as interior. Simulated on the
+exact loop without changing it, so retire decisions are compared against
+each pixel's true outcome. Result: unsound at useful δ and useless at safe
+δ. δ=1e-6: retires 100% of interior pixels (fb5f0315 saves 81% of interior
+work) but falsely retires *thousands of escapers* — including all 10000
+pixels of the 0%-interior dc40277a view (chaotic orbits pass near z≈0, so a
+spurious near-return plus one tiny |2z| factor mimics contraction; margin
+0.9 vs 0.99 changes nothing, i.e. the products are garbage, not
+near-threshold). δ=1e-9: retires ~nothing on the channel views (0/6184 on
+fb5f0315 — the trapped channels are near-parabolic, |m|≈1, so true
+convergence never reaches δ within budget) and *still* falsely retires 17
+escapers on 0a309fb2. A rigorous ball-arithmetic version would refuse
+near-parabolic cycles by construction — firing on exactly nothing here.
+
+**Structural conclusion (the durable one):** within the project's output
+bar (byte-identical, or isolated justified artifacts), the pf64 algorithmic
+space is now exhausted — refill/ILP, state periodicity, Mariani fill,
+general-exponent SIMD kernels, and spawn warmups have all shipped, and both
+iteration-skipping families fail. grid-z47's remaining ~45 s is irreducible
+exact per-pixel work. Do not re-probe BLA/multiplier variants at z47–59;
+any future attack on this case requires an explicit output-policy decision
+(perceptual-equivalence gate instead of byte-exactness) taken deliberately,
+not as a side effect of a perf experiment.
+
+**Backlog #4 (smooth-coloring cost) — closed, no action.** From the
+2026-07-08 A/A data: syn-pf64-z100-dendrite 25.43 ms vs -nosmooth 23.24 ms
+at 200px → ~2.2 ms/tile flat post-processing (~55 ns/px). That is ~9% of a
+light tile and ~0.05% of the heavy tiles that set page-load times —
+below the action threshold under absolute-time weighting.
+
+**Backlog #6 (panic = "abort") — closed, no benefit, not shipped.** Built
+via env passthrough (`CARGO_PROFILE_RELEASE_PANIC=abort node src/build.mjs
+panic-abort`; build.mjs spreads process.env). Builds are deterministic
+(no-flag rebuild is byte-identical to baseline), the flag did change the
+binary — and the size delta is exactly **0 bytes** (326491 both): on
+wasm32-unknown-unknown panics already lower to abort, so only the linked
+runtime shim changes. Speed: 16-case `--filter syn-` run, all pathways
++0.0–0.1% geomean, time-weighted +0.3% — noise. The real wasm size lever
+in this family (nightly -Zbuild-std + panic_immediate_abort) is out of
+scope on the stable-toolchain policy.
+
+Correctness: cargo test 59/59 (+2 new ignored probes); no wasm change
+anywhere, so no pixel-check/holdout/e2e applicable.
+
+Reproduce: `cargo test --release bla_probe -- --ignored --nocapture` and
+`cargo test --release multiplier_interior_probe -- --ignored --nocapture`
+(probes committed in mandelbrot/src/perturbation_test.rs);
+`CARGO_PROFILE_RELEASE_PANIC=abort node src/build.mjs panic-abort && node
+src/run.mjs --variants baseline,panic-abort --filter syn-`.

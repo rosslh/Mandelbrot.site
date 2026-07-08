@@ -356,33 +356,59 @@ wall time at cap 1000 vs 2000); 2 renders of a 256px dendrite tile
 (~5.2M iters) fully tier the e2 stream kernel — doubling to 4 renders
 bought nothing on the heavies and doubled the light-view tax.
 
-1. Float-exp big-phase SIMD (perturbation.rs): after the 2026-07-07 hybrid
-   ship, float-exp pixels spend most iterations in a *scalar* plain-f64 loop
-   (z259 grid ≈ 2.4 s e2e). Routing the f64 phase through the pair/refill
-   machinery could roughly halve it again. Mode switches are per-pixel
-   mid-flight, so lanes need per-lane demote handling.
-2. Ultra-deep small-mode cost: at effective zoom ≳ 400 the hybrid's
+Former item #1 (float-exp big-phase SIMD) **shipped 2026-07-08** as the
+hybrid float-exp stream kernel + conditional `warmupFloatExp` — see the LOG
+entry: z259 e2e 2375 → 1250 ms (−47.4%), float-exp geomean −27.7% wasm-level,
+all other traffic neutral. Mariani–Silver for pf64 also **shipped
+2026-07-08**: interior-heavy real views −57..−69% wasm-level,
+grid-z48-i48000 e2e −9.7% (new committed grid-regression case); multibrot
+pf64 deliberately stays ungated off the wave driver (scattered interior
+pays wave overhead for nothing).
+
+**SETTLED 2026-07-08 (negative — do not re-run): iteration-skipping at
+real pf64 depths (z47–59).** Both known families fail against the output
+bar; probes are committed as ignored tests in
+mandelbrot/src/perturbation_test.rs (`bla_probe`,
+`multiplier_interior_probe`), full numbers in the LOG entry. BLA: at
+tolerances loose enough to skip meaningful work it shifts boundary-pixel
+escape counts by hundreds–thousands of iterations (chaos amplifies any
+rounding-path change); at safe tolerances the native win is 1.0–1.35x,
+which the shipped SIMD stream kernel (~1.7x scalar) fully eats; the delta
+headroom that makes BLA work simply doesn't exist below ~z250, and the e52
+view's 85-iteration reference orbit leaves nothing to compose. Multiplier
+interior detection: false-retires thousands of escapers at δ=1e-6 (spurious
+near-returns + one tiny |2z| factor mimic contraction) and never fires on
+the near-parabolic trapped channels (|m|≈1) at δ=1e-9. Consequence:
+**grid-z47-i50000's ~45 s is irreducible exact work** — every remaining
+pf64 lever inside byte-exact semantics has shipped. Attacking it further
+requires an explicit output-policy decision (perceptual-equivalence gate
+instead of byte-exactness), taken deliberately by the user, not as a side
+effect of an experiment.
+
+1. Ultra-deep small-mode cost: at effective zoom ≳ 400 the hybrid's
    ComplexExp phase dominates again (syn-fexp-z500-needle −58% not −85%;
    syn-fexp-z500-cusp-hi +2.5% — near-parabolic pixels never promote).
    Options: cheaper ComplexExp step, or a rescaled-f64 epoch loop
    (Fraktaler-style). Only worth it if user data shows z400+ traffic.
-3. ~~Orbit cache sharing across worker threads~~ **DEMOTED 2026-07-07**: the
+   (BLA is also viable at these depths — the headroom argument above
+   inverts — but same traffic gate applies.)
+2. ~~Orbit cache sharing across worker threads~~ **DEMOTED 2026-07-07**: the
    "orbit-dominated deep-zoom loads" claim (LOG 2026-07-04) was a
    misattribution — a cold/warm probe showed the z259 orbit costs ~18 ms per
    worker vs ~1300 ms of per-pixel ComplexExp work (fixed by the hybrid
    loop). Sharing would save ~18 ms × workers on first view; revisit only if
    very high iteration counts (long orbits) at depth show up in user data.
-4. Smooth-coloring cost: already measurable via the
-   `syn-pf64-z100-dendrite[-nosmooth]` pair; optimize only if it exceeds
-   5–10% of tile time.
-5. dashu precision headroom (perturbation.rs: `(zoom + 64) -> 32-bit`
+3. ~~Smooth-coloring cost~~ **CLOSED 2026-07-08**: ~2.2 ms flat per 200px
+   tile (~55 ns/px post-processing; the smooth/nosmooth pair differs by 9%
+   only on light tiles). Negligible on the heavy tiles that set page-load
+   times — below the action threshold under absolute-time weighting.
+4. dashu precision headroom (perturbation.rs: `(zoom + 64) -> 32-bit`
    granularity): affects cold times only; correctness-sensitive.
-6. `panic = "abort"` in release profile: trivial; verify wasm-bindgen still
-   works.
-
-Hybrid float-exp does NOT need re-validation against the expanded corpus:
-the new cases are all pf64 (untouched by the hybrid) and pixel-check
-already passed on all 42 cases.
+5. ~~`panic = "abort"` in release profile~~ **CLOSED 2026-07-08**: exactly
+   0 bytes size delta and speed within noise — wasm32 panics already lower
+   to abort, only the runtime shim changes. The real lever
+   (nightly -Zbuild-std + panic_immediate_abort) is out of scope on the
+   stable-toolchain policy.
 
 Shipped milestones: manual f64x2 pixel pairing + tier-up warmup (2026-07-04,
 −16.8% e2e; **standing rule: hand-written SIMD hot loops ship only with a
@@ -390,4 +416,6 @@ tier-up warmup and an e2e cold-pass check**); quad batching + interior checks
 (2026-07-06); lane-refill stream kernel + Mariani–Silver (2026-07-07); hybrid
 f64/ComplexExp float-exp loop (2026-07-07, z259 e2e −84.7%); pf64 lane-refill
 stream kernel + (dz, index) Brent periodicity (2026-07-08, grid-z47 e2e
-−40%, e52 −31%).
+−40%, e52 −31%); general-exponent pf64 stream kernel + conditional warmups
+(2026-07-08, e52 e2e −44.6%); pf64 Mariani–Silver + hybrid float-exp stream
+kernel (2026-07-08).
