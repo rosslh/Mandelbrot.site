@@ -1008,3 +1008,98 @@ Reproduce: `node src/build-dist.mjs pre-pf64warm --ref 3372666 && node
 src/build-dist.mjs post-pf64warm && node src/run-e2e.mjs --variants
 pre-pf64warm,post-pf64warm --rounds 3` (grid-regression.json now includes
 the two tax cases).
+
+## 2026-07-08 — SHIPPED: hybrid float-exp stream kernel + conditional float-exp spawn warmup — backlog #1
+
+Machine: mac arm64 (M1 Pro, 8 logical cores), Chrome for Testing 136,
+macOS 14. Code change (mandelbrot/src/perturbation.rs) + client warmup
+(client/js/worker.js, client/js/MandelbrotMap.ts); no flag changes.
+Pre-change ref: cc36994.
+
+After the 2026-07-07 hybrid ship, float-exp pixels spent most iterations
+in a *scalar* plain-f64 loop — the only remaining scalar hot loop. This
+routes that big phase through the lane-refill stream machinery.
+
+**Change 1 (perturbation.rs):** `stream_hybrid_escape` — the stream kernel
+adapted to the hybrid loop (quadratic only, 4 chains x 2 lanes,
+bookkeeping every 16 steps, no periodicity — matching the scalar hybrid,
+which has none). Pixels start in the small (ComplexExp) phase, so each is
+scalar-stepped until its first promotion before being loaded onto a lane
+(`hybrid_warm_in`; at z259 that is one step — dc ≈ 2^-259 promotes
+immediately). The floor-dip check is vectorized per step (reusing the
+|dz|² the rebase test already needs): if any live lane's step lands below
+2^-800, the whole chain skips the commit, the dipped lanes are *evicted*
+with their exact pre-step state and finished on the scalar hybrid loop
+(whose first advance redoes the step in ComplexExp), and surviving lanes
+recompute the identical step next pass. A rebase landing below the floor
+evicts post-commit in small mode (the scalar demote path). Eviction means
+a pixel that leaves the f64 phase loses SIMD for its remainder — at real
+depths (z259–300) dips are ~nonexistent, and at z500 the small mode
+dominates anyway. Ineligible pixels (dc zero / exp < -800) run the pure
+float-exp loop during warm-in. Every scalar path is the existing code, so
+results are bit-identical.
+
+**Change 2 (worker.js + MandelbrotMap.ts):** `warmupFloatExp` at pool
+spawn when the initial view has `zoom >= 250` (FLOAT_EXP_THRESHOLD) and
+exponent 2 — the new kernel is a separate wasm function, so the standing
+per-instantiation warmup rule applies (a float-exp view's tiles never run
+the pf64 kernel, so this *replaces* `warmupDeep` at those depths rather
+than adding to it). Warmup tile probed before implementing: dendrite tip
+(0, 1) at effective zoom 260 (escaper-rich, mean ~240 iterations, 0%
+interior, nothing short-circuits; 40 ms warm / 68 ms cold at 200px),
+shipped at 128x128 / i=1500 / 2 renders ≈ 3.9M iterations per render,
+~16 ms tiered.
+
+Wasm-level (run.mjs, full 43-case corpus, 10 samples, baseline vs
+fexp-stream, both from clean tree @cc36994):
+
+| case | delta |
+|---|---|
+| user-z259-3898a95f | **−53.1%** (196 → 92 ms; cold −52.4%; 9.0 → 4.2 ms/Miter) |
+| syn-fexp-z300-dendrite | −49.6% (90 → 45 ms) |
+| syn-fexp-z500-needle | −16.9% (small-mode phase untouched) |
+| syn-fexp-z300-cusp / z500-cusp-hi | −0.1% / +0.0% (near-parabolic, never promote) |
+| float-exp geomean / direct / pf64 | **−27.7%** / +0.3% / −0.0% |
+
+Only the three targeted float-exp cases flagged significant, all wins.
+
+Correctness: cargo test 59/59; pixel-check byte-identical on all 43
+corpus cases; enrich --check matches all blessed hashes. Zero output
+change — no re-bless, no --allow-diff.
+
+Holdout ship gate (seed 2026-07-08, 40/tier; float-exp holdout pool is
+empty, so this guards direct/pf64 neutrality): direct +0.2%, pf64 +0.6%,
+time-weighted +0.4% — at the A/A floor. One flagged mover
+(hold-z48-da230d26, +29.4% at n=3 — the same ~16 ms view that
+false-flagged +65.7% last experiment) re-ran at **+0.2%** with
+--samples 15.
+
+E2E ship gate (complete builds pre=cc36994 / post, 3 rounds; first run
+died with a transient puppeteer detached-frame error after the heavy
+cases, light five re-run in a second session):
+
+| case | delta (warm) | cold |
+|---|---|---|
+| grid-z259-i1600 | **−47.4%** (2375 → 1250 ms) | **−46.7%** (2370 → 1264 ms) |
+| grid-z47-i50000 / z48-i20000 | −0.7% / −1.0% | +0.4% / +1.0% |
+| grid-z36 / z46 / z20 | −1.6% / +0.1% / −1.9% | ≤±2.9% |
+| grid-z48-i800 / z85-i200 (warmup tax guards) | −1.4% / −3.0% | −1.3% / −5.0% |
+
+Cold tracks warm on the target case — the conditional warmup does its
+job — and no light case pays a tax (the warmup fires only at zoom >= 250,
+where loads take seconds).
+
+Size: bench artifact 305.9 → 315.8 KiB (+3.2%); production module wasm
+307.1 → 317.0 KiB (+9.9 KiB) — the second stream-kernel-sized function.
+
+Verdict: shipped. The float-exp tier's page load halves again on top of
+the −84.7% hybrid ship (z259 cumulative 2026-07-06→08: 15.6 s → 1.25 s).
+Remaining float-exp headroom is the ultra-deep small mode (backlog: z500
+cusp-hi never promotes; z500 needle keeps a long ComplexExp phase) — only
+worth it if z400+ traffic materializes.
+
+Reproduce: `node src/run.mjs --variants baseline,fexp-stream --filter
+float-exp`; `node src/validate.mjs --variants baseline,fexp-stream`;
+`node src/build-dist.mjs pre-fexp --ref cc36994 && node
+src/build-dist.mjs post-fexp && node src/run-e2e.mjs --variants
+pre-fexp,post-fexp --rounds 3`.

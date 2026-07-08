@@ -152,6 +152,51 @@ import("../../mandelbrot/pkg")
       }
     };
 
+    // The hybrid float-exp stream kernel (exponent 2, effective zoom >= 250)
+    // is yet another separate wasm function, so float-exp first tiles would
+    // run it at Liftoff speed (the stream kernel is one call per tile, so
+    // tier-up never lands mid-tile; see bench/LOG.md 2026-07-08 on the
+    // general kernel). The pool requests this warmup at spawn only when the
+    // initial view is already at float-exp depth. Same boundary-rich
+    // dendrite tile as the deep-zoom warmup but at effective zoom 260, where
+    // pixel deltas promote to the kernel's f64 phase immediately; the
+    // reference orbit also warms the higher-precision dashu path float-exp
+    // views pay per worker.
+    const warmupFloatExpKernel = () => {
+      try {
+        for (let i = 0; i < 2; i++) {
+          wasm
+            .get_mandelbrot_tile_precise(
+              "0",
+              "1",
+              2621,
+              2622,
+              2621,
+              2622,
+              12,
+              248,
+              1500,
+              2,
+              128,
+              128,
+              "turbo",
+              false,
+              0,
+              0,
+              0,
+              2,
+              true,
+              0,
+              1500,
+              false,
+            )
+            .free();
+        }
+      } catch (warmupError) {
+        console.warn("wasm float-exp kernel warmup failed:", warmupError);
+      }
+    };
+
     const getTile = (params) => {
       const tile = wasm.get_mandelbrot_tile_precise(
         params.originRe,
@@ -226,6 +271,8 @@ import("../../mandelbrot/pkg")
           return warmupGeneralKernel();
         case "warmupDeep":
           return warmupDeepKernel();
+        case "warmupFloatExp":
+          return warmupFloatExpKernel();
         default:
           throw new Error(`Unknown worker request type: ${request.type}`);
       }

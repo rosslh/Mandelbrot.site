@@ -903,6 +903,38 @@ impl HybridState<'_> {
     }
 }
 
+fn hybrid_initial_state(orbit: &[(f64, f64)], dc: ComplexExp) -> HybridState<'_> {
+    let (dc_re, dc_im) = dc.to_f64s();
+    HybridState {
+        orbit,
+        last_index: orbit.len() - 1,
+        dc,
+        dc_f64: Complex64::new(dc_re, dc_im),
+        reference_index: 0,
+        dz_small: ComplexExp::ZERO,
+        dz_big: Complex64::new(0.0, 0.0),
+        big: false,
+        z: Complex64::new(0.0, 0.0),
+    }
+}
+
+/// Runs a hybrid pixel from its current state until escape or budget
+/// exhaustion. `iterations` counts the steps already taken (the un-counted
+/// pre-step excluded).
+fn run_hybrid_to_completion(
+    state: &mut HybridState,
+    start_iterations: u32,
+    max_iterations: u32,
+    escape_radius_squared: f64,
+) -> (u32, Complex64) {
+    let mut iterations = start_iterations;
+    while state.z.norm_sqr() < escape_radius_squared && iterations < max_iterations {
+        state.advance();
+        iterations += 1;
+    }
+    (iterations, state.z)
+}
+
 /// Escape iterations for one pixel switching adaptively between plain-f64 and
 /// extended-exponent deltas (quadratic case). Bit-identical to
 /// `perturbed_escape_iterations_float_exp`: the f64 phase only runs where the
@@ -913,29 +945,12 @@ fn perturbed_escape_iterations_hybrid(
     max_iterations: u32,
     escape_radius_squared: f64,
 ) -> (u32, Complex64) {
-    let (dc_re, dc_im) = dc.to_f64s();
-    let mut state = HybridState {
-        orbit,
-        last_index: orbit.len() - 1,
-        dc,
-        dc_f64: Complex64::new(dc_re, dc_im),
-        reference_index: 0,
-        dz_small: ComplexExp::ZERO,
-        dz_big: Complex64::new(0.0, 0.0),
-        big: false,
-        z: Complex64::new(0.0, 0.0),
-    };
+    let mut state = hybrid_initial_state(orbit, dc);
 
     // Pre-step, mirroring the pure loops: afterwards z equals the pixel's c.
     state.advance();
 
-    let mut iterations = 0;
-    while state.z.norm_sqr() < escape_radius_squared && iterations < max_iterations {
-        state.advance();
-        iterations += 1;
-    }
-
-    (iterations, state.z)
+    run_hybrid_to_completion(&mut state, 0, max_iterations, escape_radius_squared)
 }
 
 /// Escape iterations for one pixel using extended-exponent deltas.
@@ -990,6 +1005,339 @@ fn perturbed_escape_iterations_float_exp(
     }
 
     (iterations, z)
+}
+
+/// Outcome of scalar-stepping a float-exp pixel until it is ready for the
+/// SIMD stream kernel's f64 phase.
+#[cfg(target_arch = "wasm32")]
+enum HybridWarmIn<'a> {
+    /// The pixel reached the big (plain-f64) phase with `iterations` counted
+    /// steps taken; its state can be loaded onto a SIMD lane.
+    Big {
+        state: HybridState<'a>,
+        iterations: u32,
+    },
+    Finished(u32, Complex64),
+}
+
+/// Scalar-steps one float-exp pixel until it enters the big phase, escapes,
+/// or exhausts the budget. Pixels not eligible for the hybrid loop (dc zero
+/// or too small for exact f64 conversion) run the pure float-exp loop to
+/// completion. Arithmetic is exactly the scalar hybrid loop's, so a pixel
+/// that never reaches a lane still gets bit-identical results.
+#[cfg(target_arch = "wasm32")]
+fn hybrid_warm_in(
+    orbit: &[(f64, f64)],
+    dc: ComplexExp,
+    max_iterations: u32,
+    escape_radius_squared: f64,
+) -> HybridWarmIn<'_> {
+    if dc.is_zero() || dc.exp < HYBRID_DC_MIN_EXP {
+        let (iterations, z) =
+            perturbed_escape_iterations_float_exp(orbit, dc, max_iterations, 2, escape_radius_squared);
+        return HybridWarmIn::Finished(iterations, z);
+    }
+
+    let mut state = hybrid_initial_state(orbit, dc);
+    // Pre-step, mirroring the per-pixel loops: afterwards z equals the
+    // pixel's c.
+    state.advance();
+
+    let mut iterations = 0u32;
+    while state.z.norm_sqr() < escape_radius_squared && iterations < max_iterations {
+        if state.big {
+            return HybridWarmIn::Big { state, iterations };
+        }
+        state.advance();
+        iterations += 1;
+    }
+    HybridWarmIn::Finished(iterations, state.z)
+}
+
+/// Streaming lane-refill kernel for the hybrid float-exp path (quadratic
+/// only). Lanes hold pixels in the hybrid loop's big (plain-f64) phase and
+/// advance them exactly like `HybridState::advance`'s big branch, one pixel
+/// per f64x2 lane with `CHAINS` vectors in flight; per-lane arithmetic is
+/// IEEE-identical to the scalar loop, so results are bit-identical to
+/// `perturbed_escape_iterations_hybrid`. The rare per-pixel events that
+/// leave the f64 phase — a step dipping below `HYBRID_FLOOR_NORM_SQR`
+/// (which the scalar loop redoes in ComplexExp) or a rebase landing below
+/// the floor (demotion) — evict the pixel from its lane with its exact
+/// scalar state; the pixel then finishes on the scalar hybrid loop and the
+/// lane is refilled. Pixels start in the small phase, so each is
+/// scalar-stepped until its first promotion before being loaded
+/// (`hybrid_warm_in`). No periodicity checks, matching the scalar hybrid
+/// loop.
+#[cfg(target_arch = "wasm32")]
+fn stream_hybrid_escape<const CHAINS: usize>(
+    orbit: &[(f64, f64)],
+    dc_of: impl Fn(usize) -> ComplexExp,
+    pixel_count: usize,
+    max_iterations: u32,
+    escape_radius_squared: f64,
+    results: &mut [(u32, Complex64)],
+) {
+    use core::arch::wasm32::*;
+
+    let last_index = orbit.len() - 1;
+    let zero_f = f64x2_splat(0.0);
+    let zero_i = i64x2_splat(0);
+
+    let mut state: [PairState; CHAINS] = core::array::from_fn(|_| PairState {
+        index: [0; 2],
+        dz_re: zero_f,
+        dz_im: zero_f,
+        z_re: zero_f,
+        z_im: zero_f,
+    });
+    let mut dc_re = [zero_f; CHAINS];
+    let mut dc_im = [zero_f; CHAINS];
+    let mut z_out_re = [zero_f; CHAINS];
+    let mut z_out_im = [zero_f; CHAINS];
+    // Alive lanes are all-ones and a subset of occupied; occupied lanes hold
+    // a pixel that has not been retired yet.
+    let mut alive = [zero_i; CHAINS];
+    let mut occupied = [zero_i; CHAINS];
+    let mut iters = [zero_i; CHAINS];
+    let mut slots = [[IDLE_SLOT; 2]; CHAINS];
+
+    let mut next_pixel = 0usize;
+    let mut live_lanes = 0usize;
+
+    // Draws pixels from the queue until one reaches the big phase (loading
+    // it onto lane (chain, sub)) or the queue runs out (marking the lane
+    // idle); pixels that finish during warm-in get their results written
+    // directly.
+    macro_rules! refill_lane {
+        ($chain:expr, $sub:expr) => {{
+            let chain = $chain;
+            let sub = $sub;
+            let mut loaded = false;
+            while next_pixel < pixel_count {
+                let pixel = next_pixel;
+                next_pixel += 1;
+                match hybrid_warm_in(orbit, dc_of(pixel), max_iterations, escape_radius_squared) {
+                    HybridWarmIn::Finished(iterations, z) => {
+                        results[pixel] = (iterations, z);
+                    }
+                    HybridWarmIn::Big {
+                        state: warm,
+                        iterations,
+                    } => {
+                        dc_re[chain] = f64x2_with_lane(dc_re[chain], sub, warm.dc_f64.re);
+                        dc_im[chain] = f64x2_with_lane(dc_im[chain], sub, warm.dc_f64.im);
+                        state[chain].dz_re =
+                            f64x2_with_lane(state[chain].dz_re, sub, warm.dz_big.re);
+                        state[chain].dz_im =
+                            f64x2_with_lane(state[chain].dz_im, sub, warm.dz_big.im);
+                        state[chain].z_re = f64x2_with_lane(state[chain].z_re, sub, warm.z.re);
+                        state[chain].z_im = f64x2_with_lane(state[chain].z_im, sub, warm.z.im);
+                        state[chain].index[sub] = warm.reference_index;
+                        z_out_re[chain] = f64x2_with_lane(z_out_re[chain], sub, warm.z.re);
+                        z_out_im[chain] = f64x2_with_lane(z_out_im[chain], sub, warm.z.im);
+                        alive[chain] = i64x2_with_lane(alive[chain], sub, -1);
+                        occupied[chain] = i64x2_with_lane(occupied[chain], sub, -1);
+                        iters[chain] = i64x2_with_lane(iters[chain], sub, i64::from(iterations));
+                        slots[chain][sub] = pixel;
+                        loaded = true;
+                        break;
+                    }
+                }
+            }
+            if !loaded {
+                alive[chain] = i64x2_with_lane(alive[chain], sub, 0);
+                occupied[chain] = i64x2_with_lane(occupied[chain], sub, 0);
+                slots[chain][sub] = IDLE_SLOT;
+                live_lanes -= 1;
+            }
+        }};
+    }
+
+    // Evicts lane (chain, sub) into a scalar HybridState and finishes the
+    // pixel on the scalar loop. `big`/`dz`/`index`/`z` describe the exact
+    // scalar state at eviction; `start_iterations` is clamped so lanes that
+    // garbage-stepped past the budget report exactly max_iterations.
+    macro_rules! evict_lane {
+        ($chain:expr, $sub:expr, $big:expr, $dz:expr, $index:expr, $z:expr) => {{
+            let chain = $chain;
+            let sub = $sub;
+            let pixel = slots[chain][sub];
+            let dc = dc_of(pixel);
+            let mut scalar = hybrid_initial_state(orbit, dc);
+            scalar.reference_index = $index;
+            scalar.z = $z;
+            if $big {
+                scalar.dz_big = $dz;
+                scalar.big = true;
+            } else {
+                scalar.dz_small = ComplexExp::from_f64s($dz.re, $dz.im);
+                scalar.big = false;
+            }
+            let start = (i64x2_lane(iters[chain], sub) as u32).min(max_iterations);
+            results[pixel] = run_hybrid_to_completion(
+                &mut scalar,
+                start,
+                max_iterations,
+                escape_radius_squared,
+            );
+            refill_lane!(chain, sub);
+        }};
+    }
+
+    for chain in 0..CHAINS {
+        for sub in 0..2 {
+            live_lanes += 1;
+            refill_lane!(chain, sub);
+        }
+    }
+    if live_lanes == 0 {
+        return;
+    }
+
+    let radius_squared = f64x2_splat(escape_radius_squared);
+    let floor_norm_sqr = f64x2_splat(HYBRID_FLOOR_NORM_SQR);
+    let max_iterations_minus_one = i64x2_splat(i64::from(max_iterations) - 1);
+
+    loop {
+        for _ in 0..PERTURB_STREAM_STRIDE {
+            for chain in 0..CHAINS {
+                let norm_sqr = f64x2_add(
+                    f64x2_mul(z_out_re[chain], z_out_re[chain]),
+                    f64x2_mul(z_out_im[chain], z_out_im[chain]),
+                );
+                alive[chain] = v128_and(alive[chain], f64x2_lt(norm_sqr, radius_squared));
+
+                // The step is computed in temporaries and only committed when
+                // no live lane dipped below the hybrid floor, mirroring the
+                // scalar loop's redo-in-ComplexExp rule: a dipped lane's
+                // pre-step state must survive untouched for the eviction.
+                let z_ref_first = orbit[state[chain].index[0]];
+                let z_ref_second = orbit[state[chain].index[1]];
+                let (step_re, step_im) = pair_delta_step::<false>(
+                    f64x2(z_ref_first.0, z_ref_second.0),
+                    f64x2(z_ref_first.1, z_ref_second.1),
+                    state[chain].dz_re,
+                    state[chain].dz_im,
+                    2,
+                );
+                let new_dz_re = f64x2_add(step_re, dc_re[chain]);
+                let new_dz_im = f64x2_add(step_im, dc_im[chain]);
+                let dz_norm_sqr = f64x2_add(
+                    f64x2_mul(new_dz_re, new_dz_re),
+                    f64x2_mul(new_dz_im, new_dz_im),
+                );
+
+                let dipped = v128_and(f64x2_lt(dz_norm_sqr, floor_norm_sqr), alive[chain]);
+                if v128_any_true(dipped) {
+                    // Rare: evict dipped lanes with their pre-step state (the
+                    // scalar loop redoes the step in ComplexExp) and skip the
+                    // commit; surviving lanes recompute this step identically
+                    // on the next pass.
+                    for sub in 0..2 {
+                        if i64x2_lane(dipped, sub) != 0 {
+                            let dz = Complex64::new(
+                                f64x2_lane(state[chain].dz_re, sub),
+                                f64x2_lane(state[chain].dz_im, sub),
+                            );
+                            let z = Complex64::new(
+                                f64x2_lane(z_out_re[chain], sub),
+                                f64x2_lane(z_out_im[chain], sub),
+                            );
+                            let index = state[chain].index[sub];
+                            evict_lane!(chain, sub, true, dz, index, z);
+                        }
+                    }
+                    continue;
+                }
+
+                let index_first = state[chain].index[0] + 1;
+                let index_second = state[chain].index[1] + 1;
+                let z_next_first = orbit[index_first];
+                let z_next_second = orbit[index_second];
+                let new_z_re = f64x2_add(f64x2(z_next_first.0, z_next_second.0), new_dz_re);
+                let new_z_im = f64x2_add(f64x2(z_next_first.1, z_next_second.1), new_dz_im);
+                let z_norm_sqr = f64x2_add(
+                    f64x2_mul(new_z_re, new_z_re),
+                    f64x2_mul(new_z_im, new_z_im),
+                );
+
+                let at_orbit_end = i64x2(
+                    -((index_first == last_index) as i64),
+                    -((index_second == last_index) as i64),
+                );
+                let rebase = v128_or(at_orbit_end, f64x2_lt(z_norm_sqr, dz_norm_sqr));
+
+                state[chain].dz_re = v128_bitselect(new_z_re, new_dz_re, rebase);
+                state[chain].dz_im = v128_bitselect(new_z_im, new_dz_im, rebase);
+                state[chain].index[0] = if i64x2_extract_lane::<0>(rebase) != 0 {
+                    0
+                } else {
+                    index_first
+                };
+                state[chain].index[1] = if i64x2_extract_lane::<1>(rebase) != 0 {
+                    0
+                } else {
+                    index_second
+                };
+                state[chain].z_re = new_z_re;
+                state[chain].z_im = new_z_im;
+
+                z_out_re[chain] = v128_bitselect(new_z_re, z_out_re[chain], alive[chain]);
+                z_out_im[chain] = v128_bitselect(new_z_im, z_out_im[chain], alive[chain]);
+                iters[chain] = i64x2_sub(iters[chain], alive[chain]);
+
+                // A rebase landing below the floor demotes the pixel to the
+                // ComplexExp phase (state already committed, step counted).
+                let demoted = v128_and(
+                    v128_and(rebase, f64x2_lt(z_norm_sqr, floor_norm_sqr)),
+                    alive[chain],
+                );
+                if v128_any_true(demoted) {
+                    for sub in 0..2 {
+                        if i64x2_lane(demoted, sub) != 0 {
+                            let z = Complex64::new(
+                                f64x2_lane(new_z_re, sub),
+                                f64x2_lane(new_z_im, sub),
+                            );
+                            evict_lane!(chain, sub, false, z, 0, z);
+                        }
+                    }
+                }
+            }
+        }
+
+        for chain in 0..CHAINS {
+            // A lane is finished when it escaped (occupied but no longer
+            // alive) or ran out its budget.
+            let out_of_budget = i64x2_gt(iters[chain], max_iterations_minus_one);
+            let finished = v128_or(
+                v128_andnot(occupied[chain], alive[chain]),
+                v128_and(alive[chain], out_of_budget),
+            );
+
+            if v128_any_true(finished) {
+                for sub in 0..2 {
+                    if i64x2_lane(finished, sub) == 0 {
+                        continue;
+                    }
+                    // Out-of-budget lanes may have overshot by masked steps,
+                    // hence the min below.
+                    let escape_iterations =
+                        (i64x2_lane(iters[chain], sub) as u32).min(max_iterations);
+                    let z = Complex64::new(
+                        f64x2_lane(z_out_re[chain], sub),
+                        f64x2_lane(z_out_im[chain], sub),
+                    );
+                    results[slots[chain][sub]] = (escape_iterations, z);
+                    refill_lane!(chain, sub);
+                }
+            }
+        }
+
+        if live_lanes == 0 {
+            break;
+        }
+    }
 }
 
 /// The geometry of a render target in tile space, plus everything needed to
@@ -1098,6 +1446,26 @@ impl PerturbedFrame {
     pub fn compute_all(&self, image_width: usize, image_height: usize) -> Vec<(u32, Complex64)> {
         let pixel_count = image_width * image_height;
         let mut results = vec![(0u32, Complex64::new(0.0, 0.0)); pixel_count];
+
+        #[cfg(target_arch = "wasm32")]
+        if self.use_float_exp && self.exponent == 2 {
+            let dc_of = |pixel: usize| {
+                let column = pixel % image_width;
+                let row = pixel / image_width;
+                let re_offset = self.first_column_offset + self.column_step * column as f64;
+                let im_offset = self.first_row_offset + self.row_step * row as f64;
+                ComplexExp::new(re_offset, im_offset, -self.zoom_offset)
+            };
+            stream_hybrid_escape::<PERTURB_STREAM_CHAINS>(
+                &self.orbit.values,
+                dc_of,
+                pixel_count,
+                self.max_iterations,
+                self.escape_radius_squared,
+                &mut results,
+            );
+            return results;
+        }
 
         #[cfg(target_arch = "wasm32")]
         if !self.use_float_exp {

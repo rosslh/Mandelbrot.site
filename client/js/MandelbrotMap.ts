@@ -62,12 +62,17 @@ export type WarmupGeneralRequest = { type: "warmupGeneral" };
 // Sent once per worker at pool spawn when the view is already at deep-zoom
 // depth (exponent 2, effective zoom >= DEEP_ZOOM_THRESHOLD).
 export type WarmupDeepRequest = { type: "warmupDeep" };
+// Tier-up warmup for the hybrid float-exp stream kernel; returns nothing.
+// Sent once per worker at pool spawn when the view is already at float-exp
+// depth (exponent 2, effective zoom >= FLOAT_EXP_THRESHOLD).
+export type WarmupFloatExpRequest = { type: "warmupFloatExp" };
 export type WorkerRequest =
   | MandelbrotRequest
   | OptimiseRequest
   | RecolorRequest
   | WarmupGeneralRequest
-  | WarmupDeepRequest;
+  | WarmupDeepRequest
+  | WarmupFloatExpRequest;
 
 export type MandelbrotResponse = {
   image: Uint8Array;
@@ -124,6 +129,10 @@ const MAX_LEAFLET_ZOOM = 26;
 // perturbation (DEEP_ZOOM_THRESHOLD in mandelbrot/src/perturbation.rs); used
 // only to decide whether pool spawn should warm the perturbation kernel.
 const DEEP_ZOOM_THRESHOLD = 47;
+// Effective zoom where perturbation switches from f64 deltas to the hybrid
+// float-exp kernel (FLOAT_EXP_THRESHOLD in mandelbrot/src/perturbation.rs);
+// used only to pick the right spawn warmup.
+const FLOAT_EXP_THRESHOLD = 250;
 const MIN_LEAFLET_ZOOM_WITH_OFFSET = 8;
 const REBASED_LEAFLET_ZOOM = 12;
 
@@ -608,15 +617,25 @@ class MandelbrotMap extends L.Map {
     // Liftoff. Exponent-2 loads skip this entirely (see worker.js).
     const warmGeneralKernel =
       this.config?.exponent && this.config.exponent !== 2;
-    // Likewise for the exponent-2 perturbation kernel: only views already at
-    // deep-zoom depth need it warm, and shallow views that later zoom past
-    // the threshold tier it up naturally over their first few tiles.
+    // Likewise for the exponent-2 perturbation kernels: only views already
+    // at depth need one warm, and shallow views that later zoom past a
+    // threshold tier it up naturally over their first few tiles. Views at
+    // float-exp depth render every tile through the hybrid float-exp kernel,
+    // not the perturbation-f64 one, so the two warmups are exclusive.
+    const initialZoom = this.config?.zoom ?? 0;
+    const warmFloatExpKernel =
+      !warmGeneralKernel && initialZoom >= FLOAT_EXP_THRESHOLD;
     const warmDeepKernel =
-      !warmGeneralKernel && (this.config?.zoom ?? 0) >= DEEP_ZOOM_THRESHOLD;
+      !warmGeneralKernel &&
+      !warmFloatExpKernel &&
+      initialZoom >= DEEP_ZOOM_THRESHOLD;
     this.pool = Pool(async () => {
       const worker = await spawn(new Worker("./worker.js"));
       if (warmGeneralKernel) {
         await worker({ type: "warmupGeneral" });
+      }
+      if (warmFloatExpKernel) {
+        await worker({ type: "warmupFloatExp" });
       }
       if (warmDeepKernel) {
         await worker({ type: "warmupDeep" });
