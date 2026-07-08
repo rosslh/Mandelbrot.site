@@ -85,6 +85,9 @@ function caseUrl(port, benchCase) {
     z: String(benchCase.zoom),
     i: String(benchCase.iterations),
   });
+  if (benchCase.exponent && benchCase.exponent !== 2) {
+    params.set("e", String(benchCase.exponent));
+  }
   return `http://127.0.0.1:${port}/?${params}`;
 }
 

@@ -57,6 +57,10 @@ self.onmessage = async (event) => {
       } catch (warmupError) {
         console.warn("wasm warmup failed:", warmupError);
       }
+      // Production additionally warms the general-exponent (multibrot)
+      // kernel at pool spawn when the view's exponent != 2
+      // (client/js/worker.js warmupGeneral); no grid corpus case uses an
+      // exponent != 2, so this worker skips it to match the common path.
       wasmModule = module;
       self.postMessage({ type: "ready" });
     } else if (message.type === "run") {

@@ -55,10 +55,14 @@ export type RecolorPayload = {
   paletteMaxIter: number;
 };
 export type RecolorRequest = { type: "recolor"; payload: RecolorPayload };
+// Tier-up warmup for the general-exponent (multibrot) wasm kernel; returns
+// nothing. Sent once per worker at pool spawn when the view's exponent != 2.
+export type WarmupGeneralRequest = { type: "warmupGeneral" };
 export type WorkerRequest =
   | MandelbrotRequest
   | OptimiseRequest
-  | RecolorRequest;
+  | RecolorRequest
+  | WarmupGeneralRequest;
 
 export type MandelbrotResponse = {
   image: Uint8Array;
@@ -589,7 +593,18 @@ class MandelbrotMap extends L.Map {
       await this.pool.terminate(true);
     }
     const { Worker, spawn } = await import("threads");
-    this.pool = Pool(() => spawn(new Worker("./worker.js")), renderPoolSize());
+    // Multibrot views run a separate wasm kernel that the worker's init
+    // warmup does not tier up; warm it during spawn (before the pool hands
+    // the worker any tile) so deep multibrot tiles never render under
+    // Liftoff. Exponent-2 loads skip this entirely (see worker.js).
+    const warmGeneralKernel = this.config?.exponent && this.config.exponent !== 2;
+    this.pool = Pool(async () => {
+      const worker = await spawn(new Worker("./worker.js"));
+      if (warmGeneralKernel) {
+        await worker({ type: "warmupGeneral" });
+      }
+      return worker;
+    }, renderPoolSize());
   }
 
   async refresh(resetView = false) {

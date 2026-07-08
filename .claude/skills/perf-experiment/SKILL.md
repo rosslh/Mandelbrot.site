@@ -332,28 +332,47 @@ touch them (the e2 win is pure refill/ILP; the e52 win is periodicity via
 that view's frequent rebases). Fully-interior e2 tiles (border_in_set
 regime) remain untouched by everything shipped so far.
 
-1. Float-exp big-phase SIMD (perturbation.rs): after the 2026-07-07 hybrid
+The general-exponent pf64 stream kernel **shipped 2026-07-08 (later the
+same day)** — see the LOG entry: lane-parallel SIMD Horner delta step, e52
+view e2e 133 → 74 s (−44.6%), e4/multibrot3 −27..−31%, all other traffic
+neutral. Mechanism notes that survive: monomorphize per exponent-class
+(a runtime `exponent == 2` branch in the step cost e2 +3–6%); a new SIMD
+kernel *instantiation* is a separate wasm function needing its own tier-up
+warmup, and the stream kernel is one call per tile, so an untiered first
+tile runs Liftoff for its entire duration (−8% instead of −45% e2e);
+warmups that cost every load must be made conditional (the multibrot
+warmup rides `config.exponent != 2` at pool spawn).
+
+1. Spawn-volume tier-up for heavy pf64 loads: the unconditional-warmup
+   probe (LOG 2026-07-08, general-exponent entry) showed grid-z47-i50000
+   −15.9% (−8.7 s) and grid-z48-i20000 −10.6% purely from extra spawn-time
+   execution volume — the current two-render direct warmup does not
+   exhaust V8's per-instance dynamic-tiering budget, so heavy pf64 first
+   tiles still partly run under Liftoff. Costs tens of ms on light loads
+   for seconds on the slowest real e2 loads; needs a cost/benefit e2e
+   matrix (more spawn volume vs deferred/idle warmup).
+2. Float-exp big-phase SIMD (perturbation.rs): after the 2026-07-07 hybrid
    ship, float-exp pixels spend most iterations in a *scalar* plain-f64 loop
    (z259 grid ≈ 2.4 s e2e). Routing the f64 phase through the pair/refill
    machinery could roughly halve it again. Mode switches are per-pixel
    mid-flight, so lanes need per-lane demote handling.
-2. Ultra-deep small-mode cost: at effective zoom ≳ 400 the hybrid's
+3. Ultra-deep small-mode cost: at effective zoom ≳ 400 the hybrid's
    ComplexExp phase dominates again (syn-fexp-z500-needle −58% not −85%;
    syn-fexp-z500-cusp-hi +2.5% — near-parabolic pixels never promote).
    Options: cheaper ComplexExp step, or a rescaled-f64 epoch loop
    (Fraktaler-style). Only worth it if user data shows z400+ traffic.
-3. ~~Orbit cache sharing across worker threads~~ **DEMOTED 2026-07-07**: the
+4. ~~Orbit cache sharing across worker threads~~ **DEMOTED 2026-07-07**: the
    "orbit-dominated deep-zoom loads" claim (LOG 2026-07-04) was a
    misattribution — a cold/warm probe showed the z259 orbit costs ~18 ms per
    worker vs ~1300 ms of per-pixel ComplexExp work (fixed by the hybrid
    loop). Sharing would save ~18 ms × workers on first view; revisit only if
    very high iteration counts (long orbits) at depth show up in user data.
-4. Smooth-coloring cost: already measurable via the
+5. Smooth-coloring cost: already measurable via the
    `syn-pf64-z100-dendrite[-nosmooth]` pair; optimize only if it exceeds
    5–10% of tile time.
-5. dashu precision headroom (perturbation.rs: `(zoom + 64) -> 32-bit`
+6. dashu precision headroom (perturbation.rs: `(zoom + 64) -> 32-bit`
    granularity): affects cold times only; correctness-sensitive.
-6. `panic = "abort"` in release profile: trivial; verify wasm-bindgen still
+7. `panic = "abort"` in release profile: trivial; verify wasm-bindgen still
    works.
 
 Hybrid float-exp does NOT need re-validation against the expanded corpus:

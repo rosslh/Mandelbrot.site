@@ -58,6 +58,52 @@ import("../../mandelbrot/pkg")
       console.warn("wasm warmup failed:", warmupError);
     }
 
+    // The general-exponent perturbation kernel is a separate wasm function
+    // (one instantiation shared by all exponents != 2), so the init warmup
+    // above never tiers it up and deep multibrot tiles would run it at
+    // Liftoff speed (measured: only -8% instead of -45% end-to-end on the
+    // e52 view, bench/LOG.md 2026-07-08). The pool requests this extra
+    // warmup at spawn only when the current view uses exponent != 2, so
+    // ordinary loads pay nothing (the unconditional version cost every
+    // light page load ~70 ms). Two tiny low-budget renders of a deep
+    // exponent-52 boundary view (5% interior, escapers mean ~140
+    // iterations, so the border check fails fast and every pixel streams
+    // through the kernel) consume the tier-up budget.
+    const warmupGeneralKernel = () => {
+      try {
+        for (let i = 0; i < 2; i++) {
+          wasm
+            .get_mandelbrot_tile_precise(
+              "-0.561760682385648",
+              "-0.7341970302369814",
+              2621,
+              2622,
+              2621,
+              2622,
+              12,
+              38,
+              300,
+              52,
+              32,
+              32,
+              "turbo",
+              false,
+              0,
+              0,
+              0,
+              2,
+              true,
+              0,
+              300,
+              false,
+            )
+            .free();
+        }
+      } catch (warmupError) {
+        console.warn("wasm general-kernel warmup failed:", warmupError);
+      }
+    };
+
     const getTile = (params) => {
       const tile = wasm.get_mandelbrot_tile_precise(
         params.originRe,
@@ -128,6 +174,8 @@ import("../../mandelbrot/pkg")
           return recolorTile(request.payload);
         case "optimise":
           return await optimiseImage(request.payload);
+        case "warmupGeneral":
+          return warmupGeneralKernel();
         default:
           throw new Error(`Unknown worker request type: ${request.type}`);
       }

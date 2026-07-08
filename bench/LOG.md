@@ -846,3 +846,96 @@ Reproduce: `node src/run.mjs --variants baseline,pf64-stream`;
 `node src/build-dist.mjs pre-stream --ref 8dd0e98 && node
 src/build-dist.mjs post-stream && node src/run-e2e.mjs --variants
 pre-stream,post-stream`.
+
+## 2026-07-08 — SHIPPED: general-exponent pf64 stream kernel + conditional multibrot tier-up warmup
+
+Machine: mac arm64 (M1 Pro, 8 logical cores), Chrome for Testing 136,
+macOS 14. Code change only (mandelbrot/src/perturbation.rs,
+client/js/worker.js, client/js/MandelbrotMap.ts); no flag changes.
+Pre-change ref: 45b903d. Chosen over the static backlog #1 (float-exp
+big-phase SIMD, ~1.2 s upside on the one z259 view) by absolute-time
+weighting: the e52 view — the slowest real view in the export — was
+untouched by every SIMD kernel shipped so far (exponent != 2 fell back to
+the fully scalar loop; 196 ms/Miter vs ~2.9 for e2 pf64).
+
+**Change 1 (perturbation.rs):** `pair_delta_step<const GENERAL: bool>` —
+the O(exponent) Horner delta step evaluated for both f64x2 lanes at once
+(coefficients are lane-invariant scalars; per-lane ops are IEEE-identical
+to scalar `delta_step_f64`, so results are bit-identical). `pair_step`,
+the pair kernel, and the stream kernel take the exponent + a `GENERAL`
+const-generic; `compute_all` / `escape_iterations_pair` now route ALL
+f64-delta tiles (any exponent 2..=64) through the stream/pair kernels,
+dispatching on exponent==2 at the entry points. **Monomorphization is
+load-bearing:** a first version with a runtime `exponent == 2` branch
+inside `pair_step` cost every e2 pf64 case +3–6%; the const-generic split
+restored e2 to baseline exactly.
+
+**Change 2 (worker.js + MandelbrotMap.ts):** conditional tier-up warmup.
+The general kernel is a separate wasm function, so the existing spawn
+warmup never tiers it and the first e2e run showed the win capped at −8%
+(Liftoff): post cold ≈ warm ≈ 122 s vs ~74 s tiered. An unconditional
+extra warmup (2 tiny e52 renders) unlocked −44.6% but cost EVERY light
+page load +60–75 ms (z20 +10.7%, z46 +8.7%, z36 +6.9%, z259 +3.1%) — an
+unacceptable tax for a rare view type. Shipped design: worker exposes a
+`warmupGeneral` request (2 renders of the e52 view at 32x32 / i=300 —
+probed 5% interior, escaper mean ~139, so border_in_set fails fast and
+all pixels stream); `createPool` sends it per worker at spawn only when
+`config.exponent != 2`. Share-URL loads recreate the pool after URL
+parsing (`setConfigFromUrl` → `refresh`) and exponent changes go through
+`refresh`, so every multibrot pool is warmed and exponent-2 loads pay
+nothing.
+
+Wasm-level (run.mjs, full 43-case corpus, 10 samples, base-e52 vs
+e52-stream, both @45b903d):
+
+| case | delta |
+|---|---|
+| user-z48-0611aae8 (e52, i45999) | **−46.5%** (4425 → 2367 ms @64px; 138.6 → 72.7 ms/Miter) |
+| user-z48-58cd3904 (e4 in-set multibrot) | −31.5% |
+| syn-pf64-z100-multibrot3 (in-set) | −27.1% |
+| pf64 geomean / direct / float-exp | −7.6% / −0.2% / +0.1% |
+
+e2 pf64 cases all within noise (the focused 11-case run showed +0.1–0.6%).
+Correctness: cargo test 59/59; pixel-check byte-identical on all 43 cases;
+enrich --check matches all blessed hashes; no output diff anywhere.
+
+Holdout ship gate (seed 2026-07-08, 40/tier): pf64 −2.8%, direct −0.3%,
+multibrot holdout views −23% to −53%. One flagged mover
+(hold-z48-da230d26, e2, +65.7% at n=3) re-ran at **−0.4%** with
+--samples 15 — n=3 scheduler/GC fluke, as the validator's noise-floor
+note predicts for ~16 ms views.
+
+E2E (complete builds pre=45b903d / post=this change):
+- Standard grid corpus: all six cases ±1.7%, overall geomean +0.3% —
+  no regression, no warmup tax (their URLs carry no exponent).
+- grid-z48-e52-0611aae8 (new corpus/grid-multibrot.json, 800x600, the
+  e52 view at production tile size): **133.4 → 73.9 s (−44.6%, cold
+  −44.7%)**. Without the warmup the same wasm delivered only −8.0%
+  (whole-tile Liftoff execution: the stream kernel is one call per tile,
+  so tier-up never lands mid-tile) — the standing SIMD-warmup rule
+  strikes again, now per kernel *instantiation*.
+- run-e2e.mjs now passes `e=<exponent>` in case URLs;
+  grid-multibrot.json stays out of grid-regression.json deliberately
+  (~2–4 min/round/variant) — run it when touching the general kernels.
+
+Size: bench artifact 298.9 → 305.9 KiB (+2.3%); dist module wasm
+300.0 → 307.1 KiB (+2.4%) — the duplicated stream-kernel instantiation.
+
+**Finding for the backlog (not shipped):** the unconditional-warmup run
+showed heavy e2 pf64 loads improving from *extra spawn-time execution
+volume alone* — z47-i50000 −15.9% (−8.7 s!), z48-i20000 −10.6% — i.e.
+the current two-render direct warmup does not exhaust V8's per-instance
+dynamic-tiering budget, and heavy pf64 first-tiles still run partly under
+Liftoff. A follow-up could recover seconds on the slowest real e2 loads
+by adding cheap spawn volume (or deferring it off the critical path),
+paying tens of ms on light loads — needs its own cost/benefit e2e matrix.
+
+Verdict: shipped — the slowest real view in the export drops from
+~133 s to ~74 s per page load end-to-end (−44.6%), on top of the −31%
+it got from scalar periodicity yesterday; all other traffic unaffected.
+
+Reproduce: `node src/run.mjs --variants base-e52,e52-stream --filter
+user-z48 --budget-ms 30000`; `node src/validate.mjs --variants
+base-e52,e52-stream`; e2e standard corpus as usual plus `node
+src/run-e2e.mjs --variants pre-e52,post-e52 --corpus
+corpus/grid-multibrot.json --viewport 800x600 --rounds 2 --warmup 0`.

@@ -320,46 +320,106 @@ struct PairState {
     z_im: core::arch::wasm32::v128,
 }
 
-/// One perturbation step for both lanes (quadratic case): advances the deltas,
-/// recombines with the reference orbit, and rebases lanes whose delta stopped
-/// being small. Escaped lanes keep stepping on garbage values (their output is
-/// frozen by the caller); the rebase-at-orbit-end rule keeps their indices in
-/// bounds regardless.
+/// `delta_step_f64` for both SIMD lanes at once: given per-lane reference
+/// values and deltas, returns `(Z + dz)^e - Z^e` per lane. Lanes are
+/// independent and every lane operation is the same IEEE arithmetic as the
+/// scalar version (the Horner coefficients are lane-invariant scalars), so
+/// each lane's result is bit-identical to `delta_step_f64`. `GENERAL` is a
+/// compile-time switch so the quadratic instantiation keeps its branch-free
+/// hot loop (a runtime exponent test here measurably slowed the e2 kernels).
 #[cfg(target_arch = "wasm32")]
-fn pair_step(
+#[inline]
+fn pair_delta_step<const GENERAL: bool>(
+    z_ref_re: core::arch::wasm32::v128,
+    z_ref_im: core::arch::wasm32::v128,
+    dz_re: core::arch::wasm32::v128,
+    dz_im: core::arch::wasm32::v128,
+    exponent: u32,
+) -> (core::arch::wasm32::v128, core::arch::wasm32::v128) {
+    use core::arch::wasm32::*;
+
+    debug_assert!(GENERAL || exponent == 2);
+    if !GENERAL {
+        let doubled_re = f64x2_add(f64x2_mul(f64x2_splat(2.0), z_ref_re), dz_re);
+        let doubled_im = f64x2_add(f64x2_mul(f64x2_splat(2.0), z_ref_im), dz_im);
+        return (
+            f64x2_sub(
+                f64x2_mul(doubled_re, dz_re),
+                f64x2_mul(doubled_im, dz_im),
+            ),
+            f64x2_add(
+                f64x2_mul(doubled_re, dz_im),
+                f64x2_mul(doubled_im, dz_re),
+            ),
+        );
+    }
+
+    // Horner evaluation of sum_{k=1..e} C(e,k) Z^(e-k) dz^k, lanewise.
+    let mut sum_re = f64x2_splat(1.0);
+    let mut sum_im = f64x2_splat(0.0);
+    let mut z_power_re = f64x2_splat(1.0);
+    let mut z_power_im = f64x2_splat(0.0);
+    let mut coefficient = 1.0_f64;
+
+    for k in (1..exponent).rev() {
+        let next_power_re = f64x2_sub(
+            f64x2_mul(z_power_re, z_ref_re),
+            f64x2_mul(z_power_im, z_ref_im),
+        );
+        let next_power_im = f64x2_add(
+            f64x2_mul(z_power_re, z_ref_im),
+            f64x2_mul(z_power_im, z_ref_re),
+        );
+        z_power_re = next_power_re;
+        z_power_im = next_power_im;
+        coefficient = coefficient * (k + 1) as f64 / (exponent - k) as f64;
+        let coefficient_lanes = f64x2_splat(coefficient);
+
+        let next_sum_re = f64x2_add(
+            f64x2_sub(f64x2_mul(sum_re, dz_re), f64x2_mul(sum_im, dz_im)),
+            f64x2_mul(z_power_re, coefficient_lanes),
+        );
+        let next_sum_im = f64x2_add(
+            f64x2_add(f64x2_mul(sum_re, dz_im), f64x2_mul(sum_im, dz_re)),
+            f64x2_mul(z_power_im, coefficient_lanes),
+        );
+        sum_re = next_sum_re;
+        sum_im = next_sum_im;
+    }
+
+    (
+        f64x2_sub(f64x2_mul(sum_re, dz_re), f64x2_mul(sum_im, dz_im)),
+        f64x2_add(f64x2_mul(sum_re, dz_im), f64x2_mul(sum_im, dz_re)),
+    )
+}
+
+/// One perturbation step for both lanes: advances the deltas, recombines with
+/// the reference orbit, and rebases lanes whose delta stopped being small.
+/// Escaped lanes keep stepping on garbage values (their output is frozen by
+/// the caller); the rebase-at-orbit-end rule keeps their indices in bounds
+/// regardless.
+#[cfg(target_arch = "wasm32")]
+fn pair_step<const GENERAL: bool>(
     orbit: &[(f64, f64)],
     dc_re: core::arch::wasm32::v128,
     dc_im: core::arch::wasm32::v128,
     last_index: usize,
+    exponent: u32,
     state: &mut PairState,
 ) {
     use core::arch::wasm32::*;
 
     let z_ref_first = orbit[state.index[0]];
     let z_ref_second = orbit[state.index[1]];
-    let doubled_re = f64x2_add(
-        f64x2_mul(f64x2_splat(2.0), f64x2(z_ref_first.0, z_ref_second.0)),
+    let (step_re, step_im) = pair_delta_step::<GENERAL>(
+        f64x2(z_ref_first.0, z_ref_second.0),
+        f64x2(z_ref_first.1, z_ref_second.1),
         state.dz_re,
-    );
-    let doubled_im = f64x2_add(
-        f64x2_mul(f64x2_splat(2.0), f64x2(z_ref_first.1, z_ref_second.1)),
         state.dz_im,
+        exponent,
     );
-
-    let new_dz_re = f64x2_add(
-        f64x2_sub(
-            f64x2_mul(doubled_re, state.dz_re),
-            f64x2_mul(doubled_im, state.dz_im),
-        ),
-        dc_re,
-    );
-    let new_dz_im = f64x2_add(
-        f64x2_add(
-            f64x2_mul(doubled_re, state.dz_im),
-            f64x2_mul(doubled_im, state.dz_re),
-        ),
-        dc_im,
-    );
+    let new_dz_re = f64x2_add(step_re, dc_re);
+    let new_dz_im = f64x2_add(step_im, dc_im);
 
     state.index[0] += 1;
     state.index[1] += 1;
@@ -395,15 +455,16 @@ fn pair_step(
 }
 
 /// Escape iterations for two pixels at once using f64 deltas with rebasing,
-/// one pixel per 128-bit SIMD lane (quadratic case). Lane arithmetic is
-/// IEEE-identical to `perturbed_escape_iterations_f64`, so results match it
-/// bit-for-bit; lanes that escape are frozen while the other keeps iterating.
+/// one pixel per 128-bit SIMD lane. Lane arithmetic is IEEE-identical to
+/// `perturbed_escape_iterations_f64`, so results match it bit-for-bit; lanes
+/// that escape are frozen while the other keeps iterating.
 #[cfg(target_arch = "wasm32")]
-fn perturbed_escape_iterations_f64_pair(
+fn perturbed_escape_iterations_f64_pair<const GENERAL: bool>(
     orbit: &[(f64, f64)],
     dc_first: Complex64,
     dc_second: Complex64,
     max_iterations: u32,
+    exponent: u32,
     escape_radius_squared: f64,
 ) -> [(u32, Complex64); 2] {
     use core::arch::wasm32::*;
@@ -423,7 +484,7 @@ fn perturbed_escape_iterations_f64_pair(
 
     // Pre-step, mirroring the scalar version: afterwards z equals each
     // pixel's own c.
-    pair_step(orbit, dc_re, dc_im, last_index, &mut state);
+    pair_step::<GENERAL>(orbit, dc_re, dc_im, last_index, exponent, &mut state);
 
     let mut z_out_re = state.z_re;
     let mut z_out_im = state.z_im;
@@ -449,7 +510,7 @@ fn perturbed_escape_iterations_f64_pair(
             break;
         }
 
-        pair_step(orbit, dc_re, dc_im, last_index, &mut state);
+        pair_step::<GENERAL>(orbit, dc_re, dc_im, last_index, exponent, &mut state);
         z_out_re = v128_bitselect(state.z_re, z_out_re, alive);
         z_out_im = v128_bitselect(state.z_im, z_out_im, alive);
         lane_iterations = i64x2_sub(lane_iterations, alive);
@@ -533,8 +594,8 @@ const PERTURB_STREAM_CHAINS: usize = 4;
 #[cfg(target_arch = "wasm32")]
 const PERTURB_STREAM_STRIDE: u32 = 16;
 
-/// Streaming lane-refill kernel for the f64-delta perturbation path
-/// (quadratic case): keeps `CHAINS` f64x2 vectors of pixels in flight via
+/// Streaming lane-refill kernel for the f64-delta perturbation path (any
+/// supported exponent): keeps `CHAINS` f64x2 vectors of pixels in flight via
 /// `pair_step` and refills a lane as soon as its pixel escapes, is detected
 /// periodic, or exhausts the budget — so no lane idles waiting for a slow
 /// neighbor, unlike the fixed pair batching. Escaped lanes freeze their z and
@@ -542,11 +603,12 @@ const PERTURB_STREAM_STRIDE: u32 = 16;
 /// garbage-stepping until the next bookkeeping pass, as in the pair kernel),
 /// so results are bit-identical to `perturbed_escape_iterations_f64`.
 #[cfg(target_arch = "wasm32")]
-fn stream_perturbed_escape_f64<const CHAINS: usize>(
+fn stream_perturbed_escape_f64<const CHAINS: usize, const GENERAL: bool>(
     orbit: &[(f64, f64)],
     dc_of: impl Fn(usize) -> Complex64,
     pixel_count: usize,
     max_iterations: u32,
+    exponent: u32,
     escape_radius_squared: f64,
     results: &mut [(u32, Complex64)],
 ) {
@@ -594,7 +656,7 @@ fn stream_perturbed_escape_f64<const CHAINS: usize>(
             let mut dz = delta_step_f64(
                 Complex64::new(z_ref.0, z_ref.1),
                 Complex64::new(0.0, 0.0),
-                2,
+                exponent,
             ) + dc;
             let mut index = 1usize;
             let z = Complex64::new(orbit[index].0 + dz.re, orbit[index].1 + dz.im);
@@ -649,11 +711,12 @@ fn stream_perturbed_escape_f64<const CHAINS: usize>(
                     f64x2_mul(z_out_im[chain], z_out_im[chain]),
                 );
                 alive[chain] = v128_and(alive[chain], f64x2_lt(norm_sqr, radius_squared));
-                pair_step(
+                pair_step::<GENERAL>(
                     orbit,
                     dc_re[chain],
                     dc_im[chain],
                     last_index,
+                    exponent,
                     &mut state[chain],
                 );
                 z_out_re[chain] = v128_bitselect(state[chain].z_re, z_out_re[chain], alive[chain]);
@@ -1029,23 +1092,37 @@ impl PerturbedFrame {
         )
     }
 
-    /// Escape results for every pixel in row-major order. The f64/quadratic
-    /// path streams all pixels through the lane-refilling kernel on wasm32;
-    /// other paths fall back to the per-pixel loops in pairs.
+    /// Escape results for every pixel in row-major order. The f64-delta path
+    /// streams all pixels through the lane-refilling kernel on wasm32; the
+    /// float-exp path falls back to the per-pixel loops in pairs.
     pub fn compute_all(&self, image_width: usize, image_height: usize) -> Vec<(u32, Complex64)> {
         let pixel_count = image_width * image_height;
         let mut results = vec![(0u32, Complex64::new(0.0, 0.0)); pixel_count];
 
         #[cfg(target_arch = "wasm32")]
-        if !self.use_float_exp && self.exponent == 2 {
-            stream_perturbed_escape_f64::<PERTURB_STREAM_CHAINS>(
-                &self.orbit.values,
-                |pixel| self.pixel_dc_f64(pixel % image_width, pixel / image_width),
-                pixel_count,
-                self.max_iterations,
-                self.escape_radius_squared,
-                &mut results,
-            );
+        if !self.use_float_exp {
+            let dc_of = |pixel: usize| self.pixel_dc_f64(pixel % image_width, pixel / image_width);
+            if self.exponent == 2 {
+                stream_perturbed_escape_f64::<PERTURB_STREAM_CHAINS, false>(
+                    &self.orbit.values,
+                    dc_of,
+                    pixel_count,
+                    self.max_iterations,
+                    self.exponent,
+                    self.escape_radius_squared,
+                    &mut results,
+                );
+            } else {
+                stream_perturbed_escape_f64::<PERTURB_STREAM_CHAINS, true>(
+                    &self.orbit.values,
+                    dc_of,
+                    pixel_count,
+                    self.max_iterations,
+                    self.exponent,
+                    self.escape_radius_squared,
+                    &mut results,
+                );
+            }
             return results;
         }
 
@@ -1093,28 +1170,41 @@ impl PerturbedFrame {
     }
 
     /// Escape iterations for two pixels sharing one call, batched into SIMD
-    /// lanes where a batched implementation exists (wasm32, f64 deltas,
-    /// exponent 2).
+    /// lanes where a batched implementation exists (wasm32, f64 deltas).
     #[cfg(target_arch = "wasm32")]
     pub fn escape_iterations_pair(
         &self,
         first: (usize, usize),
         second: (usize, usize),
     ) -> [(u32, Complex64); 2] {
-        if self.use_float_exp || self.exponent != 2 {
+        if self.use_float_exp {
             return [
                 self.escape_iterations(first.0, first.1),
                 self.escape_iterations(second.0, second.1),
             ];
         }
 
-        perturbed_escape_iterations_f64_pair(
-            &self.orbit.values,
-            self.pixel_dc_f64(first.0, first.1),
-            self.pixel_dc_f64(second.0, second.1),
-            self.max_iterations,
-            self.escape_radius_squared,
-        )
+        let dc_first = self.pixel_dc_f64(first.0, first.1);
+        let dc_second = self.pixel_dc_f64(second.0, second.1);
+        if self.exponent == 2 {
+            perturbed_escape_iterations_f64_pair::<false>(
+                &self.orbit.values,
+                dc_first,
+                dc_second,
+                self.max_iterations,
+                self.exponent,
+                self.escape_radius_squared,
+            )
+        } else {
+            perturbed_escape_iterations_f64_pair::<true>(
+                &self.orbit.values,
+                dc_first,
+                dc_second,
+                self.max_iterations,
+                self.exponent,
+                self.escape_radius_squared,
+            )
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
