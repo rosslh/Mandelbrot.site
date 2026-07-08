@@ -51,6 +51,15 @@
       "note": "Corpus perturbation-f64/high-iter just past the threshold; exercises paired delta loop"
     },
     {
+      "id": "grid-z47-i50000-fb5f0315",
+      "source": "corpus:user-z47-fb5f0315",
+      "re": "-1.7723767931915395",
+      "im": "0.00439357468238466",
+      "zoom": 47,
+      "iterations": 50000,
+      "note": "Heaviest real pf64 view (62% interior, escaper mean 49.7k/50k trapped needle channel): ~100 s wall per grid pass on 7 workers, so it adds ~100 s per round per variant to an e2e run — use --filter to skip it during iteration; it is the ship-gate case for the heavyweight pf64 regime (added 2026-07-08, LOG items 1-4 entry)"
+    },
+    {
       "id": "grid-z259-i1600-3898a95f",
       "source": "corpus:user-z259-3898a95f",
       "re": "-1.7400623825793399052208441670658256382966417204361718668798613188202595326994356178513819",

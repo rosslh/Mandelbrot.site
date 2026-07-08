@@ -321,70 +321,64 @@ JSONs are gitignored and machine-local; the log is what survives.
 
 ## Experiment backlog (ranked by absolute time on the slowest e2e cases per tier)
 
-**Items 1–4 are the priority queue for upcoming experiments** (set
-2026-07-08): the corpus expansion added the first heavyweight pf64 cases
-(25k–50k iterations, trapped/border-band/in-set compositions), and several
-shipped verdicts were only ever measured without them. Re-validate before
-building anything new on those verdicts.
+The 2026-07-08 re-validation queue (old items 1–4) is **resolved** — see the
+LOG "Backlog items 1–4 resolved" entry: the A/A floor holds on the heavy
+cases; pairing re-validated at −9.9 to −11.0% uniformly across compositions
+(max-of-pair costs ≤ ~1 point even on wide-spread border bands); the
+"no pf64 interior treatment" premise is contradicted (~60% of heavy-pf64
+corpus time is interior pixels grinding the full budget); cold tracks warm
+at heavyweight pf64 scale (no pf64 warmup tile needed) and
+grid-regression.json gained the z47 i50000 e2e case (~100 s per round per
+variant — `--filter` past it while iterating).
 
-1. **A/A noise floor on the new heavy cases** (prerequisite, ~minutes):
-   `baseline` vs `baseline2` over the 2026-07-08 additions. Their budget
-   caps trim samples to ~4 instead of 10, so medians are noisier; confirm
-   the 3% significance floor still holds before trusting items 2–4.
-2. **Re-validate f64x2 pairing on heavyweight pf64 + decide the refill
-   port.** The shipped −9.5% pf64 verdict (LOG 2026-07-02) was measured on
-   light cases only. The paired loop pays max-of-pair — worst exactly on the
-   new border-band composition (z48 i50000: escaper mean 40k, wide spread),
-   best on the trapped channels (mean 49.7k/50k, uniform). Run pre-pairing
-   scalar (`node src/build.mjs scalar-pf64 --ref 2210aea`) vs HEAD with
-   `--filter user-z4 --budget-ms 30000`; the same run measures the e52
-   Horner case (a hot loop no flag/code experiment ever saw) and produces
-   the numbers that decide whether the direct pathway's lane-refill kernel
-   (−44% there) gets ported to pf64.
-3. **Re-validate the 2026-07-06 "no pf64 interior treatment" decision.**
-   Its premise — pf64 pixels rarely run full budget at z47+ — is
-   contradicted by the probe data: real heavyweight pf64 views are 62–68%
-   interior at i48000–50000, ground through the full delta loop with no
-   cardioid/periodicity check. The direct pathway gained −74 to −86% on this
-   composition class. Bound the upside honestly: trapped-channel *escapers*
-   finish at 49.7k/50k and periodicity cannot help them, so the win is
-   capped by the interior fraction — measure per-case.
-4. **Re-validate the tier-up warmup cold-pass guarantee at heavyweight pf64
-   scale.** The warmup renders direct-pathway tiles; the pf64 paired loop is
-   a different function that may still hit page loads under Liftoff. The
-   original cold check passed on z48 i20000 grids (~3.4 s); a z47 i50000
-   grid is ~6× heavier, in the compile-contention regime that caused the
-   original +18% regression. Check cold vs warm with run-grid on the z47
-   i50000 point; if a penalty appears, the standing SIMD-warmup rule needs a
-   pf64 warmup tile. Decide here too whether grid-regression.json gains one
-   heavyweight pf64 e2e case (real ~90 s page loads, but roughly doubles e2e
-   runtime).
+1. **Port the lane-refill stream kernel to the exponent-2 pf64 delta loop,
+   with vectorized Brent periodicity on reconstructed z.** The convergence
+   of the two re-validations: refill/ILP width (2 → 8 pixels) is expected
+   to give −20–40% on every heavy e2 pf64 case (pairing's uniform −10.5%
+   shows lanes pay; direct's refill gave −44%), and the kernel port brings
+   the periodicity machinery along nearly for free — upside capped by
+   per-case interior work share (LOG table: 62–94% on the interior-heavy
+   heavy cases). pair_step already reconstructs full z = ref + dz each
+   step, so the check bolts on like the direct path's save schedule.
+   Closed-form cardioid/bulb checks can NOT work at z47+ (c is not
+   resolvable in f64) — periodicity is the only mechanism. Empirical
+   question a prototype must answer first: does the computed sequence
+   become *exactly* periodic through delta+rebase arithmetic? (After a
+   rebase the state is self-consistent in (dz, index), so plausible.)
+   Ship gate: heavy-pf64 corpus cases + the new grid-z47 e2e case + holdout.
+2. **Scalar periodicity in the general-exponent pf64 delta loop (the e52
+   case).** user-z48-0611aae8 is the slowest real view in the export
+   (6.4 s median at 64px, ~60 s/tile at 200px), 98.9% interior work, and
+   is untouched by every SIMD experiment (exponent ≠ 2 → scalar fallback;
+   195.99 ms/Miter vs ~6.2 for e2). A cheap exact-cycle check in the
+   scalar loop is the only candidate that touches it; upside cap ~6.3 s
+   of 6.4 s.
 
 Then, ranked as before:
 
-5. Float-exp big-phase SIMD (perturbation.rs): after the 2026-07-07 hybrid
+3. Float-exp big-phase SIMD (perturbation.rs): after the 2026-07-07 hybrid
    ship, float-exp pixels spend most iterations in a *scalar* plain-f64 loop
    (z259 grid ≈ 2.4 s e2e). Routing the f64 phase through the pair/refill
    machinery could roughly halve it again. Mode switches are per-pixel
    mid-flight, so lanes need per-lane demote handling.
-6. Ultra-deep small-mode cost: at effective zoom ≳ 400 the hybrid's
+4. Ultra-deep small-mode cost: at effective zoom ≳ 400 the hybrid's
    ComplexExp phase dominates again (syn-fexp-z500-needle −58% not −85%;
    syn-fexp-z500-cusp-hi +2.5% — near-parabolic pixels never promote).
    Options: cheaper ComplexExp step, or a rescaled-f64 epoch loop
    (Fraktaler-style). Only worth it if user data shows z400+ traffic.
-7. ~~Orbit cache sharing across worker threads~~ **DEMOTED 2026-07-07**: the
+5. ~~Orbit cache sharing across worker threads~~ **DEMOTED 2026-07-07**: the
    "orbit-dominated deep-zoom loads" claim (LOG 2026-07-04) was a
    misattribution — a cold/warm probe showed the z259 orbit costs ~18 ms per
    worker vs ~1300 ms of per-pixel ComplexExp work (fixed by the hybrid
    loop). Sharing would save ~18 ms × workers on first view; revisit only if
    very high iteration counts (long orbits) at depth show up in user data.
-8. Smooth-coloring cost: already measurable via the
+6. Smooth-coloring cost: already measurable via the
    `syn-pf64-z100-dendrite[-nosmooth]` pair; optimize only if it exceeds
    5–10% of tile time.
-9. dashu precision headroom (perturbation.rs: `(zoom + 64) -> 32-bit`
+7. dashu precision headroom (perturbation.rs: `(zoom + 64) -> 32-bit`
    granularity): affects cold times only; correctness-sensitive.
-10. `panic = "abort"` in release profile: trivial; verify wasm-bindgen still
-    works.
+8. `panic = "abort"` in release profile: trivial; verify wasm-bindgen still
+   works.
 
 Hybrid float-exp does NOT need re-validation against the expanded corpus:
 the new cases are all pf64 (untouched by the hybrid) and pixel-check

@@ -22,6 +22,41 @@ self.onmessage = async (event) => {
       const module = await import(message.url);
       await module.default(); // wasm-bindgen init: fetch + instantiate
       module.init(); // crate init: panic hook
+      // Same tier-up warmup as production (client/js/worker.js): two small
+      // boundary-rich exponent-2 renders at spawn so cold-pass numbers model
+      // real page loads, where TurboFan replaces Liftoff during pool init.
+      try {
+        for (let i = 0; i < 2; i++) {
+          module
+            .get_mandelbrot_tile_precise(
+              "-0.7436438870371587",
+              "0.1318259042053119",
+              655,
+              656,
+              655,
+              656,
+              10,
+              0,
+              1000,
+              2,
+              64,
+              64,
+              "turbo",
+              false,
+              0,
+              0,
+              0,
+              2,
+              true,
+              0,
+              1000,
+              false,
+            )
+            .free();
+        }
+      } catch (warmupError) {
+        console.warn("wasm warmup failed:", warmupError);
+      }
       wasmModule = module;
       self.postMessage({ type: "ready" });
     } else if (message.type === "run") {

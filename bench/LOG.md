@@ -669,3 +669,100 @@ Reproduce: `node src/ingest.mjs ../events_rows.csv --artifact baseline`
 (report only; --write to apply), `node src/enrich.mjs --check baseline`,
 `node src/run.mjs --variants baseline,baseline2`,
 `node src/validate.mjs --variants baseline,baseline2 --seed aa-noise-floor`.
+
+## 2026-07-08 — Backlog items 1–4 resolved: pf64 verdicts re-validated on the heavyweight cases
+
+Machine: mac arm64 (M1 Pro, 8 logical cores), Chrome for Testing 136,
+macOS 14. No production code change — measurements, harness parity fix,
+corpus addition, and backlog re-ranking only. Baseline artifact = HEAD wasm
+(29e7970); scalar-pf64 artifact built from a git worktree at 2210aea
+(pre-pairing scalar code + shipped flags; build.mjs has no --ref, so the
+build steps were reproduced manually — 271.0 KiB output matches that ref's
+logged size exactly).
+
+**Item 1 — A/A noise floor on the heavy cases: settled, no new run.** The
+2026-07-08 A/A (results/aa-new-corpus.json, 10 samples, full 43-case corpus)
+already includes all seven heavy additions: every heavy case within ±0.4%,
+zero false significants corpus-wide, aggregates ≤ +0.4%. The 3% significance
+floor holds despite budget-trimmed samples (~4 on the heaviest cases).
+
+**Item 2 — f64x2 pairing re-validated on heavyweight pf64: verdict holds,
+stronger than originally claimed.** scalar-pf64 vs baseline,
+`--filter user-z4 --budget-ms 30000`, 10 samples
+(results/2026-07-08T01-29-57-137Z-scalar-pf64_baseline.json):
+
+| composition class | cases | delta |
+|---|---|---|
+| trapped channels (fb5f0315 i50000, 0a309fb2 i48000) | 2 | −11.0% / −10.2% |
+| border band, wide spread (f36112fd i50000, d0e211ec) | 2 | −9.9% / −10.7% |
+| interior-heavy (953fa585, 9d06c2d7) | 2 | −10.5% / −10.4% |
+| all other exponent-2 pf64 | 7 | −10.2% to −11.0% |
+| in-set multibrot e4 (58cd3904) | 1 | +0.0% (scalar fallback) |
+| e52 Horner (0611aae8 i45999) | 1 | **−0.2% (untouched)** |
+
+Every exponent-2 case −9.9% to −11.0%, all significant; the feared
+max-of-pair penalty on wide-spread border compositions is ≤ ~1 point. Cold
+tracks warm on all 14 cases (−0.0% to −10.9%). Size delta in the comparison
+(271.0 → 293.1 KiB, +8.1%) is cumulative over everything shipped since
+2210aea, not pairing alone (pairing itself was +1.6%, LOG 2026-07-02).
+First-ever measurement of the e52 case: **195.99 ms/Miter vs 6.1–6.7 for
+every exponent-2 pf64 case** — the O(exponent) Horner delta step is ~32x
+structurally slower, exactly what the ms/Miter column exists to expose.
+
+**Item 3 — the 2026-07-06 "no pf64 interior treatment" decision is
+contradicted and reopened.** Its premise (pf64 pixels rarely run full budget
+at z47+) fails against the probe data. Upside cap per case = interior share
+of iteration work (interior% x budget x pixels / iterSum) x baseline median:
+
+| case | interior work share | cap on baseline median |
+|---|---|---|
+| user-z48-0611aae8 (e52) | 98.9% | ~6.3 s of 6.4 s |
+| user-z48-9d06c2d7 | 94.3% | ~1.4 s of 1.5 s |
+| user-z47-953fa585 | 90.2% | ~1.4 s of 1.5 s |
+| user-z48-0a309fb2 | 75.8% | ~2.0 s of 2.6 s |
+| user-z47-fb5f0315 | 62.5% | ~1.9 s of 3.1 s |
+| user-z48-4ef9f039 | 49.8% | ~0.8 s of 1.5 s |
+| user-z48-f36112fd | 22.4% | ~0.6 s of 2.6 s |
+| user-z48-d0e211ec | 8.8% | ~0.2 s of 1.9 s |
+
+Roughly 60% of the heavy-pf64 corpus time is interior pixels grinding the
+full budget. Trapped-channel *escapers* (49.7k/50k) remain out of reach, as
+the backlog predicted — the caps above already exclude them. Mechanism note:
+closed-form cardioid/bulb checks cannot work at z47+ (the test needs c
+resolved beyond f64), but the paired loop already reconstructs full
+z = ref + dz every step (perturbation.rs pair_step), so exact-equality Brent
+periodicity on reconstructed z bolts on like the direct path's vectorized
+save schedule. Whether the computed sequence becomes exactly periodic
+through delta+rebase arithmetic is the prototype's empirical question
+(after a rebase the state is self-consistent in (dz, index), so exact cycles
+are plausible).
+
+**Item 4 — tier-up warmup holds at heavyweight pf64 scale; no pf64 warmup
+tile needed.** Harness parity fix first: bench/page/grid-worker.js now runs
+the identical two-tile warmup as production client/js/worker.js at init
+(it previously had none, so cold passes overstated what real page loads
+pay). run-grid, z47 i50000 grid (45 tiles, 7 workers), 1 cold + 1 warmup +
+3 rounds (results/grid-z47-heavy-coldwarm.json): **cold 99596 ms vs warm
+median 99189 ms (±974) — +0.4%, within noise.** The direct-tile warmup
+suffices even though the pf64 paired loop is a different function; the
+compile-contention regime that caused the original +18% regression does not
+reproduce here. Also confirms this view is a ~100 s real page load — the
+slowest real regime in the export. Decision per the backlog: grid-z47-i50000
+added to corpus/grid-regression.json so the e2e ship gate covers the
+heavyweight pf64 regime; it adds ~100 s per round per variant (a two-variant
+5-round e2e gains ~20 min) — use `--filter` to skip it during iteration.
+
+**Verdict / re-ranked priorities.** Items 2+3 converge on one experiment,
+now backlog #1: port the direct pathway's lane-refill stream kernel to the
+exponent-2 pf64 delta loop with vectorized Brent periodicity on
+reconstructed z (refill/ILP expected −20–40% on every heavy e2 pf64 case;
+periodicity upside additionally capped by the table above). New #2: scalar
+periodicity in the general-exponent delta loop — the e52 case (slowest real
+view, 6.4 s median tile at 64px, ~99% interior work) is untouched by all
+SIMD work and needs only the cheap scalar check. No shipped verdict flips:
+pairing stays shipped, warmup rule stays as-is.
+
+Reproduce: `node src/run.mjs --variants scalar-pf64,baseline --filter
+user-z4 --budget-ms 30000`; `node src/run-grid.mjs --variants baseline
+--corpus <z47-grid-case> --rounds 3` (case now in grid-regression.json,
+id grid-z47-i50000-fb5f0315).
