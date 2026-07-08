@@ -21,6 +21,9 @@ use dashu::float::{DBig, FBig};
 use num::complex::Complex64;
 
 use crate::float_exp::{exp_value_less_than, ldexp, ComplexExp};
+#[cfg(target_arch = "wasm32")]
+use crate::{f64x2_lane, f64x2_with_lane, i64x2_lane, i64x2_with_lane, IDLE_SLOT};
+use crate::{PERIODICITY_CHECK_STRIDE, PERIODICITY_FIRST_SAVE};
 
 #[cfg(test)]
 #[path = "perturbation_test.rs"]
@@ -275,10 +278,31 @@ fn perturbed_escape_iterations_f64(
     // algorithm which starts iterating from z = c.
     advance(&mut reference_index, &mut dz, &mut z);
 
+    // Brent-style periodicity on the perturbation state. The step map is
+    // deterministic in (dz, reference_index), so an exact recurrence of that
+    // full state means the computed sequence cycles forever and can never
+    // escape; reporting max_iterations then matches running out the budget
+    // exactly (z is unused for interior pixels). Comparing reconstructed z
+    // alone would not be sound: different states can reconstruct the same z.
+    let mut saved_dz = dz;
+    let mut saved_index = reference_index;
+    let mut next_save = PERIODICITY_FIRST_SAVE;
+
     let mut iterations = 0;
     while z.norm_sqr() < escape_radius_squared && iterations < max_iterations {
         advance(&mut reference_index, &mut dz, &mut z);
         iterations += 1;
+
+        if iterations % PERIODICITY_CHECK_STRIDE == 0 {
+            if dz == saved_dz && reference_index == saved_index {
+                return (max_iterations, z);
+            }
+            if iterations == next_save {
+                saved_dz = dz;
+                saved_index = reference_index;
+                next_save = next_save.saturating_mul(2);
+            }
+        }
     }
 
     (iterations, z)
@@ -408,6 +432,16 @@ fn perturbed_escape_iterations_f64_pair(
     let mut lane_iterations = i64x2_splat(0);
     let mut remaining = max_iterations;
 
+    // Brent-style periodicity on the perturbation state (dz, index), per
+    // lane; see perturbed_escape_iterations_f64. dz equality is checked in
+    // SIMD, the scalar index only on the rare dz match.
+    let mut saved_dz_re = state.dz_re;
+    let mut saved_dz_im = state.dz_im;
+    let mut saved_index = state.index;
+    let mut steps_done = 0u32;
+    let mut next_save = PERIODICITY_FIRST_SAVE;
+    let mut periodic = [false, false];
+
     while remaining > 0 {
         let norm_sqr = f64x2_add(f64x2_mul(z_out_re, z_out_re), f64x2_mul(z_out_im, z_out_im));
         alive = v128_and(alive, f64x2_lt(norm_sqr, radius_squared));
@@ -420,9 +454,43 @@ fn perturbed_escape_iterations_f64_pair(
         z_out_im = v128_bitselect(state.z_im, z_out_im, alive);
         lane_iterations = i64x2_sub(lane_iterations, alive);
         remaining -= 1;
+
+        steps_done += 1;
+        if steps_done % PERIODICITY_CHECK_STRIDE == 0 {
+            let cycled = v128_and(
+                v128_and(
+                    f64x2_eq(state.dz_re, saved_dz_re),
+                    f64x2_eq(state.dz_im, saved_dz_im),
+                ),
+                alive,
+            );
+            if v128_any_true(cycled) {
+                let cycled_first =
+                    i64x2_extract_lane::<0>(cycled) != 0 && state.index[0] == saved_index[0];
+                let cycled_second =
+                    i64x2_extract_lane::<1>(cycled) != 0 && state.index[1] == saved_index[1];
+                if cycled_first || cycled_second {
+                    periodic[0] |= cycled_first;
+                    periodic[1] |= cycled_second;
+                    alive = v128_andnot(
+                        alive,
+                        i64x2(-(cycled_first as i64), -(cycled_second as i64)),
+                    );
+                    if !v128_any_true(alive) {
+                        break;
+                    }
+                }
+            }
+            if steps_done == next_save {
+                saved_dz_re = state.dz_re;
+                saved_dz_im = state.dz_im;
+                saved_index = state.index;
+                next_save = next_save.saturating_mul(2);
+            }
+        }
     }
 
-    [
+    let lane_results = [
         (
             i64x2_extract_lane::<0>(lane_iterations) as u32,
             Complex64::new(
@@ -437,7 +505,246 @@ fn perturbed_escape_iterations_f64_pair(
                 f64x2_extract_lane::<1>(z_out_im),
             ),
         ),
+    ];
+
+    [
+        if periodic[0] {
+            (max_iterations, lane_results[0].1)
+        } else {
+            lane_results[0]
+        },
+        if periodic[1] {
+            (max_iterations, lane_results[1].1)
+        } else {
+            lane_results[1]
+        },
     ]
+}
+
+// Number of f64x2 vectors the streaming perturbation kernel keeps in flight
+// (2 pixels per vector); mirrors the direct pathway's STREAM_CHAINS.
+#[cfg(target_arch = "wasm32")]
+const PERTURB_STREAM_CHAINS: usize = 4;
+
+// Iterations between bookkeeping passes (retire/refill, budget, periodicity)
+// in the streaming perturbation kernel. Lanes are only loaded at bookkeeping
+// boundaries, so per-lane iteration counts at a pass are multiples of the
+// stride and the Brent save/check schedule stays guaranteed.
+#[cfg(target_arch = "wasm32")]
+const PERTURB_STREAM_STRIDE: u32 = 16;
+
+/// Streaming lane-refill kernel for the f64-delta perturbation path
+/// (quadratic case): keeps `CHAINS` f64x2 vectors of pixels in flight via
+/// `pair_step` and refills a lane as soon as its pixel escapes, is detected
+/// periodic, or exhausts the budget — so no lane idles waiting for a slow
+/// neighbor, unlike the fixed pair batching. Escaped lanes freeze their z and
+/// iteration count exactly at the escape step via the alive mask (they keep
+/// garbage-stepping until the next bookkeeping pass, as in the pair kernel),
+/// so results are bit-identical to `perturbed_escape_iterations_f64`.
+#[cfg(target_arch = "wasm32")]
+fn stream_perturbed_escape_f64<const CHAINS: usize>(
+    orbit: &[(f64, f64)],
+    dc_of: impl Fn(usize) -> Complex64,
+    pixel_count: usize,
+    max_iterations: u32,
+    escape_radius_squared: f64,
+    results: &mut [(u32, Complex64)],
+) {
+    use core::arch::wasm32::*;
+
+    let last_index = orbit.len() - 1;
+    let zero_f = f64x2_splat(0.0);
+    let zero_i = i64x2_splat(0);
+
+    let mut state: [PairState; CHAINS] = core::array::from_fn(|_| PairState {
+        index: [0; 2],
+        dz_re: zero_f,
+        dz_im: zero_f,
+        z_re: zero_f,
+        z_im: zero_f,
+    });
+    let mut dc_re = [zero_f; CHAINS];
+    let mut dc_im = [zero_f; CHAINS];
+    let mut z_out_re = [zero_f; CHAINS];
+    let mut z_out_im = [zero_f; CHAINS];
+    // Alive lanes are all-ones and a subset of occupied; occupied lanes hold
+    // a pixel that has not been retired yet.
+    let mut alive = [zero_i; CHAINS];
+    let mut occupied = [zero_i; CHAINS];
+    let mut iters = [zero_i; CHAINS];
+    // Brent-style periodicity state (dz, index) per lane; see
+    // perturbed_escape_iterations_f64.
+    let mut saved_dz_re = [zero_f; CHAINS];
+    let mut saved_dz_im = [zero_f; CHAINS];
+    let mut saved_index = [[0usize; 2]; CHAINS];
+    let mut next_save = [zero_i; CHAINS];
+    let mut slots = [[IDLE_SLOT; 2]; CHAINS];
+
+    // Loads pixel `pixel` onto lane (chain, sub), applying the un-counted
+    // pre-step that the per-pixel loops perform (afterwards z equals the
+    // pixel's own c); the scalar arithmetic is IEEE-identical to a pair_step
+    // from (dz = 0, index = 0).
+    macro_rules! load_lane {
+        ($chain:expr, $sub:expr, $pixel:expr) => {{
+            let chain = $chain;
+            let sub = $sub;
+            let pixel = $pixel;
+            let dc = dc_of(pixel);
+            let z_ref = orbit[0];
+            let mut dz = delta_step_f64(
+                Complex64::new(z_ref.0, z_ref.1),
+                Complex64::new(0.0, 0.0),
+                2,
+            ) + dc;
+            let mut index = 1usize;
+            let z = Complex64::new(orbit[index].0 + dz.re, orbit[index].1 + dz.im);
+            if index == last_index || z.norm_sqr() < dz.norm_sqr() {
+                dz = z;
+                index = 0;
+            }
+            dc_re[chain] = f64x2_with_lane(dc_re[chain], sub, dc.re);
+            dc_im[chain] = f64x2_with_lane(dc_im[chain], sub, dc.im);
+            state[chain].dz_re = f64x2_with_lane(state[chain].dz_re, sub, dz.re);
+            state[chain].dz_im = f64x2_with_lane(state[chain].dz_im, sub, dz.im);
+            state[chain].z_re = f64x2_with_lane(state[chain].z_re, sub, z.re);
+            state[chain].z_im = f64x2_with_lane(state[chain].z_im, sub, z.im);
+            state[chain].index[sub] = index;
+            z_out_re[chain] = f64x2_with_lane(z_out_re[chain], sub, z.re);
+            z_out_im[chain] = f64x2_with_lane(z_out_im[chain], sub, z.im);
+            alive[chain] = i64x2_with_lane(alive[chain], sub, -1);
+            occupied[chain] = i64x2_with_lane(occupied[chain], sub, -1);
+            iters[chain] = i64x2_with_lane(iters[chain], sub, 0);
+            saved_dz_re[chain] = f64x2_with_lane(saved_dz_re[chain], sub, dz.re);
+            saved_dz_im[chain] = f64x2_with_lane(saved_dz_im[chain], sub, dz.im);
+            saved_index[chain][sub] = index;
+            next_save[chain] =
+                i64x2_with_lane(next_save[chain], sub, i64::from(PERIODICITY_FIRST_SAVE));
+            slots[chain][sub] = pixel;
+        }};
+    }
+
+    let mut next_pixel = 0usize;
+    let mut live_lanes = 0usize;
+    for chain in 0..CHAINS {
+        for sub in 0..2 {
+            if next_pixel < pixel_count {
+                load_lane!(chain, sub, next_pixel);
+                next_pixel += 1;
+                live_lanes += 1;
+            }
+        }
+    }
+    if live_lanes == 0 {
+        return;
+    }
+
+    let radius_squared = f64x2_splat(escape_radius_squared);
+    let max_iterations_minus_one = i64x2_splat(i64::from(max_iterations) - 1);
+
+    loop {
+        for _ in 0..PERTURB_STREAM_STRIDE {
+            for chain in 0..CHAINS {
+                let norm_sqr = f64x2_add(
+                    f64x2_mul(z_out_re[chain], z_out_re[chain]),
+                    f64x2_mul(z_out_im[chain], z_out_im[chain]),
+                );
+                alive[chain] = v128_and(alive[chain], f64x2_lt(norm_sqr, radius_squared));
+                pair_step(
+                    orbit,
+                    dc_re[chain],
+                    dc_im[chain],
+                    last_index,
+                    &mut state[chain],
+                );
+                z_out_re[chain] = v128_bitselect(state[chain].z_re, z_out_re[chain], alive[chain]);
+                z_out_im[chain] = v128_bitselect(state[chain].z_im, z_out_im[chain], alive[chain]);
+                iters[chain] = i64x2_sub(iters[chain], alive[chain]);
+            }
+        }
+
+        for chain in 0..CHAINS {
+            // A lane is finished when it escaped (occupied but no longer
+            // alive), ran out its budget, or is a periodicity candidate (dz
+            // matches the save; the scalar index is confirmed at retirement).
+            let out_of_budget = i64x2_gt(iters[chain], max_iterations_minus_one);
+            let dz_match = v128_and(
+                v128_and(
+                    f64x2_eq(state[chain].dz_re, saved_dz_re[chain]),
+                    f64x2_eq(state[chain].dz_im, saved_dz_im[chain]),
+                ),
+                alive[chain],
+            );
+            let finished = v128_or(
+                v128_andnot(occupied[chain], alive[chain]),
+                v128_and(alive[chain], v128_or(out_of_budget, dz_match)),
+            );
+
+            if v128_any_true(finished) {
+                for sub in 0..2 {
+                    if i64x2_lane(finished, sub) == 0 {
+                        continue;
+                    }
+                    let lane_alive = i64x2_lane(alive[chain], sub) != 0;
+                    if lane_alive {
+                        let over_budget =
+                            i64x2_lane(iters[chain], sub) > i64::from(max_iterations) - 1;
+                        let cycled = i64x2_lane(dz_match, sub) != 0
+                            && state[chain].index[sub] == saved_index[chain][sub];
+                        if !over_budget && !cycled {
+                            // dz matched at a different orbit index: not a
+                            // state recurrence, keep iterating.
+                            continue;
+                        }
+                    }
+                    // Alive-but-finished lanes are periodic or out of budget:
+                    // both report max_iterations (out-of-budget lanes may
+                    // have overshot by masked steps, hence the min below).
+                    let escape_iterations = if lane_alive {
+                        max_iterations
+                    } else {
+                        (i64x2_lane(iters[chain], sub) as u32).min(max_iterations)
+                    };
+                    let z = Complex64::new(
+                        f64x2_lane(z_out_re[chain], sub),
+                        f64x2_lane(z_out_im[chain], sub),
+                    );
+                    results[slots[chain][sub]] = (escape_iterations, z);
+
+                    if next_pixel < pixel_count {
+                        load_lane!(chain, sub, next_pixel);
+                        next_pixel += 1;
+                    } else {
+                        alive[chain] = i64x2_with_lane(alive[chain], sub, 0);
+                        occupied[chain] = i64x2_with_lane(occupied[chain], sub, 0);
+                        slots[chain][sub] = IDLE_SLOT;
+                        live_lanes -= 1;
+                    }
+                }
+            }
+
+            // Periodicity saves land at per-lane iteration counts that are
+            // multiples of the stride, keeping detection guaranteed as in
+            // the scalar loop.
+            let save_due = v128_andnot(alive[chain], i64x2_gt(next_save[chain], iters[chain]));
+            if v128_any_true(save_due) {
+                saved_dz_re[chain] =
+                    v128_bitselect(state[chain].dz_re, saved_dz_re[chain], save_due);
+                saved_dz_im[chain] =
+                    v128_bitselect(state[chain].dz_im, saved_dz_im[chain], save_due);
+                next_save[chain] =
+                    v128_bitselect(i64x2_shl(next_save[chain], 1), next_save[chain], save_due);
+                for sub in 0..2 {
+                    if i64x2_lane(save_due, sub) != 0 {
+                        saved_index[chain][sub] = state[chain].index[sub];
+                    }
+                }
+            }
+        }
+
+        if live_lanes == 0 {
+            break;
+        }
+    }
 }
 
 /// Thresholds for the hybrid float-exp fast path. While every quantity stays
@@ -472,8 +779,8 @@ impl HybridState<'_> {
     /// loop's `advance` (quadratic case).
     fn small_step(&mut self) {
         let z_ref = self.orbit[self.reference_index];
-        self.dz_small = delta_step_float_exp(Complex64::new(z_ref.0, z_ref.1), self.dz_small, 2)
-            .add(&self.dc);
+        self.dz_small =
+            delta_step_float_exp(Complex64::new(z_ref.0, z_ref.1), self.dz_small, 2).add(&self.dc);
         self.reference_index += 1;
 
         let z_ref_next = self.orbit[self.reference_index];
@@ -581,7 +888,12 @@ fn perturbed_escape_iterations_float_exp(
     // at plain-f64 speed. `dc` must itself be a safely normal f64 so its
     // conversion and every `+ dc` round identically in both representations.
     if exponent == 2 && !dc.is_zero() && dc.exp >= HYBRID_DC_MIN_EXP {
-        return perturbed_escape_iterations_hybrid(orbit, dc, max_iterations, escape_radius_squared);
+        return perturbed_escape_iterations_hybrid(
+            orbit,
+            dc,
+            max_iterations,
+            escape_radius_squared,
+        );
     }
 
     let last_index = orbit.len() - 1;
@@ -706,12 +1018,60 @@ impl PerturbedFrame {
         })
     }
 
-    /// Escape iterations and final value for the pixel at (column, row).
-    pub fn escape_iterations(&self, column: usize, row: usize) -> (u32, Complex64) {
+    /// The pixel's perturbation delta from the reference point as a plain
+    /// f64 (only meaningful on the f64-delta path).
+    fn pixel_dc_f64(&self, column: usize, row: usize) -> Complex64 {
         let re_offset = self.first_column_offset + self.column_step * column as f64;
         let im_offset = self.first_row_offset + self.row_step * row as f64;
+        Complex64::new(
+            ldexp(re_offset, -self.zoom_offset),
+            ldexp(im_offset, -self.zoom_offset),
+        )
+    }
 
+    /// Escape results for every pixel in row-major order. The f64/quadratic
+    /// path streams all pixels through the lane-refilling kernel on wasm32;
+    /// other paths fall back to the per-pixel loops in pairs.
+    pub fn compute_all(&self, image_width: usize, image_height: usize) -> Vec<(u32, Complex64)> {
+        let pixel_count = image_width * image_height;
+        let mut results = vec![(0u32, Complex64::new(0.0, 0.0)); pixel_count];
+
+        #[cfg(target_arch = "wasm32")]
+        if !self.use_float_exp && self.exponent == 2 {
+            stream_perturbed_escape_f64::<PERTURB_STREAM_CHAINS>(
+                &self.orbit.values,
+                |pixel| self.pixel_dc_f64(pixel % image_width, pixel / image_width),
+                pixel_count,
+                self.max_iterations,
+                self.escape_radius_squared,
+                &mut results,
+            );
+            return results;
+        }
+
+        for row in 0..image_height {
+            let mut column = 0;
+            while column < image_width {
+                // Batch pairs of pixels into SIMD lanes where a batched
+                // implementation exists; a trailing odd pixel is paired with
+                // itself.
+                let second_column = (column + 1).min(image_width - 1);
+                let pair = self.escape_iterations_pair((column, row), (second_column, row));
+                results[row * image_width + column] = pair[0];
+                if second_column != column {
+                    results[row * image_width + second_column] = pair[1];
+                }
+                column += 2;
+            }
+        }
+        results
+    }
+
+    /// Escape iterations and final value for the pixel at (column, row).
+    pub fn escape_iterations(&self, column: usize, row: usize) -> (u32, Complex64) {
         if self.use_float_exp {
+            let re_offset = self.first_column_offset + self.column_step * column as f64;
+            let im_offset = self.first_row_offset + self.row_step * row as f64;
             let dc = ComplexExp::new(re_offset, im_offset, -self.zoom_offset);
             perturbed_escape_iterations_float_exp(
                 &self.orbit.values,
@@ -721,10 +1081,7 @@ impl PerturbedFrame {
                 self.escape_radius_squared,
             )
         } else {
-            let dc = Complex64::new(
-                ldexp(re_offset, -self.zoom_offset),
-                ldexp(im_offset, -self.zoom_offset),
-            );
+            let dc = self.pixel_dc_f64(column, row);
             perturbed_escape_iterations_f64(
                 &self.orbit.values,
                 dc,
@@ -751,19 +1108,10 @@ impl PerturbedFrame {
             ];
         }
 
-        let dc = |(column, row): (usize, usize)| {
-            let re_offset = self.first_column_offset + self.column_step * column as f64;
-            let im_offset = self.first_row_offset + self.row_step * row as f64;
-            Complex64::new(
-                ldexp(re_offset, -self.zoom_offset),
-                ldexp(im_offset, -self.zoom_offset),
-            )
-        };
-
         perturbed_escape_iterations_f64_pair(
             &self.orbit.values,
-            dc(first),
-            dc(second),
+            self.pixel_dc_f64(first.0, first.1),
+            self.pixel_dc_f64(second.0, second.1),
             self.max_iterations,
             self.escape_radius_squared,
         )

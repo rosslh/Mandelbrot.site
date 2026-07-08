@@ -749,11 +749,8 @@ fn stream_escape_quadratic<const CHAINS: usize>(
                     );
                     results[index] = (escape_iterations, z);
 
-                    match next_streamable_point(points, results, &mut next_point, max_iterations)
-                    {
-                        Some(next_index) => {
-                            lanes.load(chain, sub, next_index, points[next_index])
-                        }
+                    match next_streamable_point(points, results, &mut next_point, max_iterations) {
+                        Some(next_index) => lanes.load(chain, sub, next_index, points[next_index]),
                         None => {
                             lanes.clear(chain, sub);
                             live_lanes -= 1;
@@ -900,18 +897,37 @@ fn stream_tile_subdivided(
                     for x in (rect.x0 + 1)..(rect.x1 - 1) {
                         let pixel_index = y * width + x;
                         if results[pixel_index].0 == UNCOMPUTED {
-                            results[pixel_index] =
-                                (max_iterations, Complex64::new(0.0, 0.0));
+                            results[pixel_index] = (max_iterations, Complex64::new(0.0, 0.0));
                         }
                     }
                 }
             } else {
                 let x_mid = (rect.x0 + rect.x1) / 2;
                 let y_mid = (rect.y0 + rect.y1) / 2;
-                next.push(Rect { x0: rect.x0, y0: rect.y0, x1: x_mid, y1: y_mid });
-                next.push(Rect { x0: x_mid, y0: rect.y0, x1: rect.x1, y1: y_mid });
-                next.push(Rect { x0: rect.x0, y0: y_mid, x1: x_mid, y1: rect.y1 });
-                next.push(Rect { x0: x_mid, y0: y_mid, x1: rect.x1, y1: rect.y1 });
+                next.push(Rect {
+                    x0: rect.x0,
+                    y0: rect.y0,
+                    x1: x_mid,
+                    y1: y_mid,
+                });
+                next.push(Rect {
+                    x0: x_mid,
+                    y0: rect.y0,
+                    x1: rect.x1,
+                    y1: y_mid,
+                });
+                next.push(Rect {
+                    x0: rect.x0,
+                    y0: y_mid,
+                    x1: x_mid,
+                    y1: rect.y1,
+                });
+                next.push(Rect {
+                    x0: x_mid,
+                    y0: y_mid,
+                    x1: rect.x1,
+                    y1: rect.y1,
+                });
             }
         }
         pending = next;
@@ -975,7 +991,8 @@ fn calculate_escape_iterations_quad(
             ESCAPE_RADIUS.powi(2),
         )
     } else {
-        let first = calculate_escape_iterations_pair(points[0], points[1], max_iterations, exponent);
+        let first =
+            calculate_escape_iterations_pair(points[0], points[1], max_iterations, exponent);
         let second =
             calculate_escape_iterations_pair(points[2], points[3], max_iterations, exponent);
         [first[0], first[1], second[0], second[1]]
@@ -1773,50 +1790,36 @@ fn render_tile_precise(
     let mut values: Vec<f32> = vec![f32::INFINITY; image_width * image_height];
     let mut stats = TileIterationStats::default();
 
-    for row in 0..image_height {
-        let mut column = 0;
-        while column < image_width {
-            // Batch pairs of pixels into SIMD lanes; a trailing odd pixel is
-            // paired with itself.
-            let second_column = (column + 1).min(image_width - 1);
-            let results = frame.escape_iterations_pair((column, row), (second_column, row));
+    let escape_results = frame.compute_all(image_width, image_height);
+    for (pixel_index, &(escape_iterations, z)) in escape_results.iter().enumerate() {
+        stats.record(escape_iterations, max_iterations);
 
-            for (lane, &(escape_iterations, z)) in
-                results.iter().take(second_column - column + 1).enumerate()
-            {
-                stats.record(escape_iterations, max_iterations);
+        let smoothed_value = smoothed_escape_value(
+            escape_iterations,
+            z,
+            max_iterations,
+            exponent,
+            smooth_coloring,
+        );
+        values[pixel_index] = smoothed_value as f32;
 
-                let smoothed_value = smoothed_escape_value(
-                    escape_iterations,
-                    z,
-                    max_iterations,
-                    exponent,
-                    smooth_coloring,
-                );
-                let pixel_index = row * image_width + column + lane;
-                values[pixel_index] = smoothed_value as f32;
+        let pixel = color_from_smoothed_value(
+            smoothed_value,
+            palette,
+            should_reverse_colors,
+            &color_space,
+            shift_hue_amount,
+            saturate_amount,
+            lighten_amount,
+            min_iterations_threshold,
+            max_iterations_threshold,
+        );
 
-                let pixel = color_from_smoothed_value(
-                    smoothed_value,
-                    palette,
-                    should_reverse_colors,
-                    &color_space,
-                    shift_hue_amount,
-                    saturate_amount,
-                    lighten_amount,
-                    min_iterations_threshold,
-                    max_iterations_threshold,
-                );
-
-                let index = pixel_index * NUM_COLOR_CHANNELS;
-                img[index] = pixel[0];
-                img[index + 1] = pixel[1];
-                img[index + 2] = pixel[2];
-                img[index + 3] = 255;
-            }
-
-            column += 2;
-        }
+        let index = pixel_index * NUM_COLOR_CHANNELS;
+        img[index] = pixel[0];
+        img[index + 1] = pixel[1];
+        img[index + 2] = pixel[2];
+        img[index + 3] = 255;
     }
 
     RenderedTile {

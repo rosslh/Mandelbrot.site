@@ -766,3 +766,83 @@ Reproduce: `node src/run.mjs --variants scalar-pf64,baseline --filter
 user-z4 --budget-ms 30000`; `node src/run-grid.mjs --variants baseline
 --corpus <z47-grid-case> --rounds 3` (case now in grid-regression.json,
 id grid-z47-i50000-fb5f0315).
+
+## 2026-07-08 — SHIPPED: pf64 lane-refill stream kernel + Brent state-periodicity (backlog #1 + #2)
+
+Machine: mac arm64 (M1 Pro, 8 logical cores), Chrome for Testing 136,
+macOS 14. Code change only (mandelbrot/src/perturbation.rs, lib.rs); no
+flag or config changes. Pre-change ref: 8dd0e98.
+
+**What changed:**
+1. Brent-style periodicity on the *full perturbation state* `(dz,
+   reference_index)` in the scalar f64-delta loop (all exponents) and the
+   pf64 pair kernel. State equality — not reconstructed z as the backlog
+   sketched — is the sound check: the step map is deterministic in that
+   state, so an exact recurrence proves the pixel can never escape, and
+   returning max_iterations is bit-identical to grinding the budget (z is
+   unused for interior pixels). A z-only check can false-positive because
+   distinct states reconstruct the same z.
+2. `stream_perturbed_escape_f64`: the direct pathway's lane-refill stream
+   kernel ported to the exponent-2 f64-delta path — 4 chains x 2 pixels via
+   the existing `pair_step`, bookkeeping (retire/refill, budget, periodicity)
+   every 16 iterations, lanes refilled the moment a pixel finishes. Wired
+   through `PerturbedFrame::compute_all` in `render_tile_precise`.
+   `border_in_set` stays on the early-exit pair path (streaming the whole
+   border would forfeit the first-escaper exit).
+
+**Empirical findings (native probe, 2 minutes, before stage B):** the
+periodicity half of the e2 upside estimate was falsified. Interior e2
+pixels at z48 never rebase — dz stays tiny relative to z, so
+reference_index climbs monotonically to orbit end and the state cannot
+recur within budget (probe: 0 mid-orbit rebases on 8/8 pixels of the
+9d06c2d7 view). Even z-only recurrence fired on just 1/8 pixels (at iter
+20332/25600): index drift changes the rounding path each step. The
+interior-heavy e2 win therefore comes entirely from refill/ILP width. The
+e52 view is the opposite regime: |z|^52 swings force frequent rebases,
+state cycles are short, and scalar periodicity alone cuts the slowest real
+view in the export by 31% (6.40 -> 4.42 s at 64px).
+
+**Wasm-level (full 43-case corpus, 10 samples, baseline vs pf64-stream):**
+pf64 geomean **-38.9%** — every heavy e2 case -42% to -54% (953fa585
+1512 -> 705 ms; 9d06c2d7 1482 -> 677 ms; fb5f0315 3049 -> 1486 ms; dc40277a
+2486 -> 1216 ms), e52 -31.0%, z85 -47.6%; e2 pf64 ms/Miter 6.2 -> ~2.9.
+direct -0.0%, float-exp -0.1% — untouched. Fully-interior e2 tiles
+(da3d5543, cusp synthetics) unchanged as predicted: border_in_set
+dominates them and interior pixels cannot cycle without rebases. Cold
+tracks warm on all pf64 cases (-42% to -52% cold on the heavy cases).
+Chain count: CHAINS=2 is +55% vs 4; CHAINS=8 within noise of 4 (-1%) —
+kept 4, matching the direct kernel. Artifact size 293.1 -> 298.9 KiB
+(+2.0%).
+
+**Correctness:** cargo test 59/59; pixel-check byte-identical on all 43
+corpus cases; enrich --check matches all blessed hashes. Zero output
+change — no re-bless, no --allow-diff.
+
+**Holdout ship gate (seed 2026-07-08, 40 views/tier):** pf64 geomean
+**-39.9%**, direct +0.1%, time-weighted -33.9%; worst mover in the wrong
+direction +0.8% (a fully-interior view, noise-level). No pixel-check run
+on the holdout (no accepted output diff exists).
+
+**E2E ship gate (pre-stream @8dd0e98 vs post-stream, 5 rounds + cold):**
+
+| case | pre | post | warm | cold |
+|---|---|---|---|---|
+| grid-z47-i50000-fb5f0315 | 98955 ms | 59418 ms | **-40.0%*** | -40.9% |
+| grid-z48-i20000-d0ddf3dd | 3378 ms | 2181 ms | **-35.4%*** | -33.0% |
+| grid-z36 / z46 / z20 / z259 | — | — | -0.1..-0.4% | ±1% |
+
+Overall e2e geomean -14.7%. Cold passes track warm everywhere — the
+existing direct-tile tier-up warmup covers the new kernel (standing SIMD
+warmup rule satisfied, no extra warmup tile added). Production wasm
+294.2 -> 300.0 KiB (+5.8 KiB, +2.0%) — the slowest real page load in the
+export drops from ~99 s to ~59 s for that size cost.
+
+**Verdict: shipped.** Backlog #1 and #2 both resolved. Not pursued:
+periodicity for fully-interior e2 pf64 borders (needs rebases that never
+happen; revisit only if in-set pf64 traffic shows up heavy in user data).
+
+Reproduce: `node src/run.mjs --variants baseline,pf64-stream`;
+`node src/validate.mjs --variants baseline,pf64-stream`;
+`node src/build-dist.mjs pre-stream --ref 8dd0e98 && node
+src/build-dist.mjs post-stream && node src/run-e2e.mjs --variants
+pre-stream,post-stream`.
