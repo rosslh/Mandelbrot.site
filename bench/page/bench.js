@@ -108,6 +108,79 @@ window.benchReady = (async () => {
       pool.forEach(assign);
     });
 
+  // Composition probe for enrich.mjs/ingest.mjs: renders through
+  // get_mandelbrot_tile_precise with include_values so interior pixels come
+  // back as Infinity, and reduces the values buffer to compact stats in-page
+  // (escape counts are variant-invariant, so these stats are safe to commit).
+  window.probeCase = (variantIndex, args) => {
+    const start = performance.now();
+    const tile = variants[variantIndex].get_mandelbrot_tile_precise(
+      ...args,
+      true,
+    );
+    const ms = performance.now() - start;
+    const values = tile.values;
+    tile.free();
+
+    const maxIterations = args[8];
+    const escapers = [];
+    let interior = 0;
+    let iterSum = 0;
+    for (let i = 0; i < values.length; i++) {
+      const value = values[i];
+      if (!Number.isFinite(value)) {
+        interior++;
+        iterSum += maxIterations;
+      } else {
+        const clamped = Math.min(Math.max(value, 0), maxIterations);
+        escapers.push(clamped);
+        iterSum += clamped;
+      }
+    }
+    escapers.sort((a, b) => a - b);
+    const percentile = (fraction) =>
+      escapers.length === 0
+        ? 0
+        : escapers[
+            Math.min(escapers.length - 1, Math.floor(escapers.length * fraction))
+          ];
+    let nearMax50 = 0;
+    let nearMax90 = 0;
+    let escaperSum = 0;
+    for (const value of escapers) {
+      escaperSum += value;
+      if (value > maxIterations * 0.5) nearMax50++;
+      if (value > maxIterations * 0.9) nearMax90++;
+    }
+
+    const bytes = new Uint8Array(
+      values.buffer,
+      values.byteOffset,
+      values.byteLength,
+    );
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < bytes.length; i++) {
+      hash ^= bytes[i];
+      hash = Math.imul(hash, 0x01000193);
+    }
+
+    const total = values.length;
+    const round = (value, digits) => Number(value.toFixed(digits));
+    return {
+      ms,
+      pixels: total,
+      interior: round(interior / total, 4),
+      nearMax50: round(nearMax50 / total, 4),
+      nearMax90: round(nearMax90 / total, 4),
+      escMean: round(escapers.length ? escaperSum / escapers.length : 0, 1),
+      escP50: round(percentile(0.5), 1),
+      escP90: round(percentile(0.9), 1),
+      escP99: round(percentile(0.99), 1),
+      iterSum: Math.round(iterSum),
+      valuesHash: (hash >>> 0).toString(16).padStart(8, "0"),
+    };
+  };
+
   window.getTile = (variantIndex, args) => {
     const data = variants[variantIndex].get_mandelbrot_image_precise(...args);
     let binary = "";

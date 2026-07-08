@@ -14,6 +14,21 @@ function formatDelta(ratio) {
   return `${percent >= 0 ? "+" : ""}${percent.toFixed(1)}%`;
 }
 
+// Weighted geometric mean of ratios: exp(sum(w*ln r)/sum(w)).
+function weightedGeomean(entries) {
+  let logSum = 0;
+  let weightSum = 0;
+  for (const { ratio, weight } of entries) {
+    logSum += weight * Math.log(ratio);
+    weightSum += weight;
+  }
+  return weightSum > 0 ? Math.exp(logSum / weightSum) : null;
+}
+
+function formatPercent(fraction) {
+  return fraction === undefined ? "" : `${(fraction * 100).toFixed(0)}%`;
+}
+
 function table(rows) {
   const widths = rows[0].map((_, column) =>
     Math.max(...rows.map((row) => String(row[column]).length)),
@@ -46,8 +61,14 @@ export function formatComparison(output, baselineName) {
   const sections = [];
 
   for (const candidate of candidates) {
-    const rows = [["case", "pathway", `${baseline} ms`, `${candidate} ms`, "delta", "sig"]];
+    // int%/nm90% come from the corpus rows' committed probe stats
+    // (enrich.mjs): interior fraction and near-max (>90% of budget) escaper
+    // fraction. ms/Mi is the candidate's median per million iterations of
+    // probe-measured work - the structural-slowness detector.
+    const rows = [["case", "pathway", "int%", "nm90%", `${baseline} ms`, `${candidate} ms`, "ms/Mi", "delta", "sig"]];
     const ratiosByPathway = new Map();
+    const timeWeighted = [];
+    const userWeighted = [];
     const coldRows = [["case", `${baseline} cold ms`, `${candidate} cold ms`, "delta"]];
 
     for (const [caseId, variants] of byCase) {
@@ -59,13 +80,20 @@ export function formatComparison(output, baselineName) {
       rows.push([
         caseId,
         base.pathway,
+        formatPercent(base.composition?.interior),
+        formatPercent(base.composition?.nearMax90),
         base.median.toFixed(2),
         cand.median.toFixed(2),
+        cand.msPerMiter !== undefined ? cand.msPerMiter.toFixed(3) : "",
         formatDelta(ratio),
         significant ? "*" : "",
       ]);
       if (!ratiosByPathway.has(base.pathway)) ratiosByPathway.set(base.pathway, []);
       ratiosByPathway.get(base.pathway).push(ratio);
+      timeWeighted.push({ ratio, weight: base.median });
+      if (base.userWeight !== undefined) {
+        userWeighted.push({ ratio, weight: base.userWeight });
+      }
       if (base.pathway !== "direct") {
         coldRows.push([
           caseId,
@@ -84,6 +112,23 @@ export function formatComparison(output, baselineName) {
     }
     summaryRows.push(["overall", formatDelta(geomean(allRatios)), allRatios.length]);
 
+    // Weighted views of the same deltas: by baseline median ms (absolute
+    // wall-time saved - the skill's primary criterion) and by user
+    // frequency (how much real usage the change touches).
+    const weightedLines = [];
+    const timeWeightedMean = weightedGeomean(timeWeighted);
+    if (timeWeightedMean !== null) {
+      weightedLines.push(
+        `time-weighted delta (by ${baseline} median ms): ${formatDelta(timeWeightedMean)} over ${timeWeighted.length} cases`,
+      );
+    }
+    const userWeightedMean = weightedGeomean(userWeighted);
+    if (userWeightedMean !== null) {
+      weightedLines.push(
+        `user-weighted delta (by view frequency): ${formatDelta(userWeightedMean)} over ${userWeighted.length} user cases`,
+      );
+    }
+
     const baseSize = output.meta.variants[baseline]?.wasmSize;
     const candSize = output.meta.variants[candidate]?.wasmSize;
     const sizeLine =
@@ -100,6 +145,7 @@ export function formatComparison(output, baselineName) {
         "Negative delta = candidate is faster. * = significant (clears max(3%, 2*(MAD_a+MAD_b)/median_a)).",
         "",
         table(summaryRows),
+        ...(weightedLines.length > 0 ? ["", ...weightedLines] : []),
         "",
         sizeLine,
         "",

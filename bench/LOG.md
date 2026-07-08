@@ -581,3 +581,91 @@ iteration target, the holdout guards tuned constants and accepted diffs.
 Possible follow-up flagged: the e2e grid corpus has no heavyweight pf64
 case; the z47 i50000 view would represent real ~90 s page loads but would
 roughly double e2e runtime — decide deliberately.
+
+## 2026-07-08 — Composition-aware corpus pipeline + holdout validator (harness only)
+
+Machine: mac arm64 (M1 Pro), Chrome for Testing 136. No production code
+change — bench harness, corpus, and skill docs only. Baseline artifacts
+built at 29e7970 (== HEAD wasm; later commits are docs/corpus only).
+
+**New probe stage (bench/src/enrich.mjs + window.probeCase in page/bench.js):**
+every corpus row and every ingest candidate is rendered at 64x64 through
+`get_mandelbrot_tile_precise(include_values=true)` and reduced in-page to a
+compact stats block: interior (= did-not-escape) fraction, near-max escaper
+fractions (>50%/>90% of budget), escaper mean/p50/p90/p99, total iteration
+sum (machine-independent work proxy), and an FNV-1a hash of the values
+buffer (blessed-output hash). Stats are variant-invariant (escape counts are
+the correctness invariant) and committed into corpus rows with provenance
+(generator version, artifact sha, date); probe wall times are advisory only.
+Probes are cached (results/probe-cache.json, machine-local), watchdogged
+(default 15 s budget, skip-and-flag with session restart), and re-runs are
+idempotent — unchanged stats keep their original provenance, and a third
+`--write` left corpus.json byte-identical. `node src/enrich.mjs --check
+<variant>` is the drift detector (all 43 cases matched blessed hashes for
+baseline); `--check <v> --bless` is the documented re-bless flow for
+intentional output changes.
+
+**Selection rework (bench/src/ingest.mjs):** replaces pathway x
+iteration-tercile bucketing. All 24,328 export rows -> 18,370 deduped
+candidate views (16,644 direct / 1,725 pf64 / 1 float-exp), all probed in
+~2.5 min (cold cache). Per tier: heaviest by iteration sum (in-set class
+excluded from heavy slots — nominal sums are huge but rect_in_set renders
+them in ~0 ms), border-heavy by near-max escaper fraction, one
+most-frequented pick (per-view user weight: distinct sessions + 365-day
+recency-decayed sum, aggregated in ingest — session ids never reach the
+corpus), coverage picks per composition class (in-set, interior, trapped,
+border, multibrot, low-iter), and a zoom-max pick for perturbation tiers
+(orbit-length coverage). The 7 hand-picked 2026-07-08 pf64 cases are pinned
+(`"pinned": true`) and their stats backfilled; notes/overrides preserved.
+
+Why terciles failed: the raw `iterations` parameter is a poor work proxy.
+The old tercile-selected user set had NO direct-tier case above 3.5M probe
+iterations; the export's real heavy direct views run 68–204M (e.g. z28
+i50000 border view: 1.3 s/tile, escaper mean 41k). Old->new: 26 -> 27 user
+cases (11 direct / 15 pf64 / 1 fexp), 17 light incumbents dropped (all
+<=6.4M iterSum, <=47 ms probes — reviewed side by side in the ingest
+report), 10 new heavy/border cases added, z85 (deepest real pf64 view) and
+z259 kept. Corpus 42 -> 43 cases; two-variant full run ~13 min (recorded
+samples+cold 553 s; tileSize overrides at 100/64 keep the 9 heavy cases in
+budget). Dropped z0 whole-set user views were the accepted-cost +18-24%
+(~3 ms) cases from the Mariani entry; syn-direct-z3-home remains the
+small-tile overhead guard.
+
+**Runner integration:** run.mjs prints ms per million iterations (probe
+iterSum scaled to case tileSize) next to each median — the structural
+slowness detector. On the A/A run pf64 escaper cases cluster at 6.2–6.8
+ms/Miter while the e52 Horner case sits at 202.7 (O(exponent) delta step)
+and direct multibrot at 11.7 — exactly the signal that would have exposed
+the z259 ComplexExp misattribution (LOG 2026-07-07) immediately.
+compare.mjs adds interior%/near-max90% composition columns and two weighted
+summary lines (weighted geomean by baseline median ms, and by user
+frequency) alongside the geomeans.
+
+**A/A validation (baseline vs baseline2, 10 samples, full new corpus):**
+zero false significants across 43 cases; geomeans direct +0.4% / pf64 +0.0%
+/ float-exp +0.2% / overall +0.2%; time-weighted -0.0%; user-weighted
+-0.4%. No drift against blessed hashes.
+
+**Holdout validator (bench/src/validate.mjs, skill ship gate):** dedupes
+the export, excludes corpus views, stratified-samples per tier (seeded;
+default seed = today's date so each experiment gets a fresh sample), runs
+a/b run.mjs-style at --samples 3 / --budget-ms 8000 / tileSize 100, reports
+per-tier geomeans, worst movers, time-weighted delta; --pixel-check mode
+byte-diffs outputs on the holdout. A/A noise floor (seed aa-noise-floor,
+40/tier): all aggregates within +/-0.1%; three sub-ms/13-ms views
+false-flagged at up to +5.9% (MAD unreliable at n=3) — judge on aggregates,
+re-run single movers with --samples 10. Float-exp holdout pool is empty
+(the export's only fexp view is in the corpus) — synthetic cases remain the
+only deep-zoom guard. Pixel-check mode verified byte-identical on an A/A
+sample. Full 80-view timing run ~5 min.
+
+**Flagged, not changed:** corpus/grid-regression.json still has no
+heavyweight pf64 e2e case (backlog #4 decides this deliberately — the z47
+i50000 view represents real ~90 s page loads but roughly doubles e2e
+runtime). The composition stats now on every corpus row are the input that
+decision needs.
+
+Reproduce: `node src/ingest.mjs ../events_rows.csv --artifact baseline`
+(report only; --write to apply), `node src/enrich.mjs --check baseline`,
+`node src/run.mjs --variants baseline,baseline2`,
+`node src/validate.mjs --variants baseline,baseline2 --seed aa-noise-floor`.

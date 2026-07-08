@@ -21,7 +21,22 @@
       "im": "0",
       "zoom": 3,
       "iterations": 200,
-      "note": "Default home view"
+      "note": "Default home view",
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.9041,
+        "nearMax50": 0.0059,
+        "nearMax90": 0.0005,
+        "escMean": 29.6,
+        "escP50": 16.9,
+        "escP90": 67.4,
+        "escP99": 177.8,
+        "iterSum": 752222,
+        "valuesHash": "2775ac6b"
+      }
     },
     {
       "id": "syn-direct-z10-seahorse",
@@ -30,7 +45,22 @@
       "im": "0.1318259042053119",
       "zoom": 10,
       "iterations": 500,
-      "note": "Seahorse valley, boundary-rich"
+      "note": "Seahorse valley, boundary-rich",
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.0461,
+        "nearMax50": 0.0869,
+        "nearMax90": 0.0076,
+        "escMean": 99,
+        "escP50": 53.5,
+        "escP90": 237.5,
+        "escP99": 446.7,
+        "iterSum": 481354,
+        "valuesHash": "5e82af8d"
+      }
     },
     {
       "id": "syn-direct-z30-seahorse",
@@ -39,7 +69,22 @@
       "im": "0.1318259042053119",
       "zoom": 30,
       "iterations": 1500,
-      "note": "Deepest practical f64 zoom before perturbation threshold"
+      "note": "Deepest practical f64 zoom before perturbation threshold",
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.01,
+        "nearMax50": 0.99,
+        "nearMax90": 0.0212,
+        "escMean": 1064.8,
+        "escP50": 1026.7,
+        "escP90": 1187.1,
+        "escP99": 1402.7,
+        "iterSum": 4379326,
+        "valuesHash": "c6283e11"
+      }
     },
     {
       "id": "syn-direct-z8-interior",
@@ -48,7 +93,22 @@
       "im": "0",
       "zoom": 8,
       "iterations": 1500,
-      "note": "Fully interior tile; exercises the rect_in_set short-circuit"
+      "note": "Fully interior tile; exercises the rect_in_set short-circuit",
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 1,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 0,
+        "escP50": 0,
+        "escP90": 0,
+        "escP99": 0,
+        "iterSum": 6144000,
+        "valuesHash": "eec31dc5"
+      }
     },
     {
       "id": "syn-direct-z5-multibrot3",
@@ -60,7 +120,22 @@
       "overrides": {
         "exponent": 3
       },
-      "note": "Cubic multibrot near its real-axis cusp; general escape loop"
+      "note": "Cubic multibrot near its real-axis cusp; general escape loop",
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.8716,
+        "nearMax50": 0.001,
+        "nearMax90": 0,
+        "escMean": 20.3,
+        "escP50": 8.2,
+        "escP90": 42.8,
+        "escP99": 230.5,
+        "iterSum": 1795670,
+        "valuesHash": "e8a98931"
+      }
     },
     {
       "id": "syn-pf64-z100-multibrot3",
@@ -72,7 +147,22 @@
       "overrides": {
         "exponent": 3
       },
-      "note": "General-exponent perturbation (Horner) loop, fully interior"
+      "note": "General-exponent perturbation (Horner) loop, fully interior",
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 1,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 0,
+        "escP50": 0,
+        "escP90": 0,
+        "escP99": 0,
+        "iterSum": 6144000,
+        "valuesHash": "eec31dc5"
+      }
     },
     {
       "id": "syn-pf64-z60-cusp",
@@ -81,7 +171,22 @@
       "im": "0",
       "zoom": 60,
       "iterations": 500,
-      "note": "Cardioid cusp just past the perturbation threshold"
+      "note": "Cardioid cusp just past the perturbation threshold",
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 1,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 0,
+        "escP50": 0,
+        "escP90": 0,
+        "escP99": 0,
+        "iterSum": 2048000,
+        "valuesHash": "eec31dc5"
+      }
     },
     {
       "id": "syn-pf64-z100-dendrite",
@@ -90,7 +195,22 @@
       "im": "1",
       "zoom": 100,
       "iterations": 1500,
-      "note": "Misiurewicz dendrite; mixed escape times"
+      "note": "Misiurewicz dendrite; mixed escape times",
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 82.5,
+        "escP50": 81.3,
+        "escP90": 86.9,
+        "escP99": 94.3,
+        "iterSum": 337742,
+        "valuesHash": "f1b590cd"
+      }
     },
     {
       "id": "syn-pf64-z100-dendrite-400px",
@@ -102,7 +222,22 @@
       "overrides": {
         "tileSize": 400
       },
-      "note": "tileSize scaling pair for syn-pf64-z100-dendrite"
+      "note": "tileSize scaling pair for syn-pf64-z100-dendrite",
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 82.5,
+        "escP50": 81.3,
+        "escP90": 86.9,
+        "escP99": 94.3,
+        "iterSum": 337742,
+        "valuesHash": "f1b590cd"
+      }
     },
     {
       "id": "syn-pf64-z100-dendrite-nosmooth",
@@ -114,7 +249,22 @@
       "overrides": {
         "smoothColoring": false
       },
-      "note": "smoothColoring cost pair for syn-pf64-z100-dendrite"
+      "note": "smoothColoring cost pair for syn-pf64-z100-dendrite",
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 83,
+        "escP50": 82,
+        "escP90": 87,
+        "escP99": 95,
+        "iterSum": 339859,
+        "valuesHash": "5d03c163"
+      }
     },
     {
       "id": "syn-pf64-z150-cusp",
@@ -123,7 +273,22 @@
       "im": "0",
       "zoom": 150,
       "iterations": 5000,
-      "note": "Near-parabolic: most pixels run full max_iterations"
+      "note": "Near-parabolic: most pixels run full max_iterations",
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 1,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 0,
+        "escP50": 0,
+        "escP90": 0,
+        "escP99": 0,
+        "iterSum": 20480000,
+        "valuesHash": "eec31dc5"
+      }
     },
     {
       "id": "syn-pf64-z200-needle",
@@ -132,7 +297,22 @@
       "im": "0",
       "zoom": 200,
       "iterations": 1500,
-      "note": "Needle tip; reference orbit sits at |z|=2"
+      "note": "Needle tip; reference orbit sits at |z|=2",
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 100.9,
+        "escP50": 100.6,
+        "escP90": 102.6,
+        "escP99": 105.9,
+        "iterSum": 413424,
+        "valuesHash": "ca921ef1"
+      }
     },
     {
       "id": "syn-fexp-z300-dendrite",
@@ -141,7 +321,22 @@
       "im": "1",
       "zoom": 300,
       "iterations": 1500,
-      "note": "Extended-exponent deltas, mixed escape times"
+      "note": "Extended-exponent deltas, mixed escape times",
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 242.5,
+        "escP50": 241.3,
+        "escP90": 246.9,
+        "escP99": 254.3,
+        "iterSum": 993102,
+        "valuesHash": "3c5206ba"
+      }
     },
     {
       "id": "syn-fexp-z300-cusp",
@@ -150,7 +345,22 @@
       "im": "0",
       "zoom": 300,
       "iterations": 3000,
-      "note": "Extended-exponent, all pixels at max_iterations"
+      "note": "Extended-exponent, all pixels at max_iterations",
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 1,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 0,
+        "escP50": 0,
+        "escP90": 0,
+        "escP99": 0,
+        "iterSum": 12288000,
+        "valuesHash": "eec31dc5"
+      }
     },
     {
       "id": "syn-fexp-z500-needle",
@@ -159,7 +369,22 @@
       "im": "0",
       "zoom": 500,
       "iterations": 3000,
-      "note": "Very deep needle zoom"
+      "note": "Very deep needle zoom",
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 250.9,
+        "escP50": 250.6,
+        "escP90": 252.6,
+        "escP99": 255.9,
+        "iterSum": 1027824,
+        "valuesHash": "4c719143"
+      }
     },
     {
       "id": "syn-fexp-z500-cusp-hi",
@@ -168,115 +393,365 @@
       "im": "0",
       "zoom": 500,
       "iterations": 10000,
-      "note": "Heaviest case: full max_iterations on every pixel"
+      "note": "Heaviest case: full max_iterations on every pixel",
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 1,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 0,
+        "escP50": 0,
+        "escP90": 0,
+        "escP99": 0,
+        "iterSum": 40960000,
+        "valuesHash": "eec31dc5"
+      }
     },
     {
-      "id": "user-z0-06283db6",
+      "id": "user-z2-bb677798",
       "source": "user",
-      "re": "2.8125",
-      "im": "-1.25",
-      "zoom": 0,
-      "iterations": 900,
-      "overrides": {
-        "exponent": 5
+      "re": "-0.002565622329711914",
+      "im": "0.14321064949035645",
+      "zoom": 2,
+      "iterations": 999,
+      "note": "direct/low-iter; auto-selected (coverage:low-iter)",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.338
       },
-      "note": "direct/high-iter"
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.4978,
+        "nearMax50": 0.0012,
+        "nearMax90": 0.001,
+        "escMean": 13.4,
+        "escP50": 4.4,
+        "escP90": 18.3,
+        "escP99": 188.6,
+        "iterSum": 2064438,
+        "valuesHash": "afc4d148"
+      }
     },
     {
-      "id": "user-z0-29487536",
+      "id": "user-z3-f2e51586",
       "source": "user",
-      "re": "3.5",
-      "im": "-2.0468750000000004",
-      "zoom": 0,
-      "iterations": 200,
-      "note": "direct/low-iter"
+      "re": "-0.5",
+      "im": "0",
+      "zoom": 3,
+      "iterations": 32768,
+      "note": "direct/interior; auto-selected (most-frequented)",
+      "weight": {
+        "sessions": 501,
+        "recency": 311.945
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.8979,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 66.9,
+        "escP50": 17.7,
+        "escP90": 117.9,
+        "escP99": 553.1,
+        "iterSum": 120548678,
+        "valuesHash": "d32b1acb"
+      }
     },
     {
-      "id": "user-z0-8c898eb5",
+      "id": "user-z11-d222e410",
       "source": "user",
-      "re": "-3.25",
-      "im": "3.9999999999982956",
-      "zoom": 0,
-      "iterations": 254,
-      "note": "direct/mid-iter"
+      "re": "0.338653564453125",
+      "im": "0.08525848388671875",
+      "zoom": 11,
+      "iterations": 50000,
+      "note": "direct/in-set; auto-selected (coverage:in-set)",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.328
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 1,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 0,
+        "escP50": 0,
+        "escP90": 0,
+        "escP99": 0,
+        "iterSum": 204800000,
+        "valuesHash": "eec31dc5"
+      }
     },
     {
-      "id": "user-z10-c5c187be",
+      "id": "user-z14-a8d71690",
       "source": "user",
-      "re": "-0.6405275799334049",
-      "im": "-0.401486929506063",
-      "zoom": 10,
-      "iterations": 200,
-      "note": "direct/low-iter"
+      "re": "-0.8709327697288245",
+      "im": "-0.22968637540683945",
+      "zoom": 14,
+      "iterations": 40000,
+      "note": "direct/interior; auto-selected (heaviest)",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.334
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.8572,
+        "nearMax50": 0.002,
+        "nearMax90": 0,
+        "escMean": 2353.5,
+        "escP50": 1060.3,
+        "escP90": 4848.7,
+        "escP99": 21477,
+        "iterSum": 141816783,
+        "valuesHash": "02f174c8"
+      }
     },
     {
-      "id": "user-z15-cc35d2c9",
+      "id": "user-z14-b86f9dbc",
       "source": "user",
-      "re": "-0.24461574549786747",
-      "im": "0.8838829040760174",
-      "zoom": 15,
-      "iterations": 800,
-      "note": "direct/mid-iter"
+      "re": "-0.8709968567127357",
+      "im": "-0.22967719612602133",
+      "zoom": 14,
+      "iterations": 50000,
+      "note": "direct/interior; auto-selected (heaviest)",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.334
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.8787,
+        "nearMax50": 0.0015,
+        "nearMax90": 0,
+        "escMean": 2662.2,
+        "escP50": 1135.1,
+        "escP90": 5281.5,
+        "escP99": 32217.9,
+        "iterSum": 181273126,
+        "valuesHash": "f2988e06"
+      }
     },
     {
-      "id": "user-z20-d0989824",
+      "id": "user-z20-3b671cc3",
       "source": "user",
-      "re": "0.25301945209503174",
-      "im": "-0.00028127431869506836",
+      "re": "-0.7507218718528748",
+      "im": "0.01990731060504869",
       "zoom": 20,
-      "iterations": 1600,
-      "note": "direct/high-iter"
-    },
-    {
-      "id": "user-z46-25e95432",
-      "source": "user",
-      "re": "-0.6173597732160516",
-      "im": "-0.4045964293189659",
-      "zoom": 46,
-      "iterations": 6400,
-      "note": "direct/high-iter"
-    },
-    {
-      "id": "user-z46-8b68dd5a",
-      "source": "user",
-      "re": "-0.35316309295142023",
-      "im": "1.086760506849422",
-      "zoom": 46,
-      "iterations": 200,
-      "overrides": {
-        "exponent": 6
+      "iterations": 40896,
+      "note": "direct/interior; auto-selected (heaviest)",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.955
       },
-      "note": "direct/low-iter"
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.8584,
+        "nearMax50": 0.0217,
+        "nearMax90": 0.0024,
+        "escMean": 11883.7,
+        "escP50": 9017.9,
+        "escP90": 25125.8,
+        "escP99": 38828.6,
+        "iterSum": 150682901,
+        "valuesHash": "8caca97f"
+      }
     },
     {
-      "id": "user-z46-c24110d7",
+      "id": "user-z28-543f9cfa",
       "source": "user",
-      "re": "-0.691218754826016",
-      "im": "0.3479960700262912",
-      "zoom": 46,
-      "iterations": 400,
-      "note": "direct/mid-iter"
-    },
-    {
-      "id": "user-z47-29403cc2",
-      "source": "user",
-      "re": "-0.19851392584029703",
-      "im": "-1.0999806021988747",
-      "zoom": 47,
-      "iterations": 800,
-      "note": "perturbation-f64/mid-iter"
-    },
-    {
-      "id": "user-z47-366205b7",
-      "source": "user",
-      "re": "0.6913935035696124",
-      "im": "-0.505937053643061",
-      "zoom": 47,
-      "iterations": 200,
-      "overrides": {
-        "exponent": 7
+      "re": "-0.6977273122174665",
+      "im": "-0.2589795459061861",
+      "zoom": 28,
+      "iterations": 50000,
+      "note": "direct/border; auto-selected (heaviest)",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.434
       },
-      "note": "perturbation-f64/low-iter"
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.2317,
+        "nearMax50": 0.7683,
+        "nearMax90": 0.136,
+        "escMean": 41379.2,
+        "escP50": 40563.8,
+        "escP90": 46871.7,
+        "escP99": 49670.8,
+        "iterSum": 177670280,
+        "valuesHash": "75ad944f"
+      }
+    },
+    {
+      "id": "user-z30-f8a50601",
+      "source": "user",
+      "re": "0.1672615953721106",
+      "im": "-0.626567840110511",
+      "zoom": 30,
+      "iterations": 25600,
+      "overrides": {
+        "exponent": 6,
+        "tileSize": 100
+      },
+      "note": "direct/multibrot; auto-selected (coverage:multibrot)",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.834
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.916,
+        "nearMax50": 0.0674,
+        "nearMax90": 0.0288,
+        "escMean": 17596,
+        "escP50": 18496,
+        "escP90": 23099.4,
+        "escP99": 23226.2,
+        "iterSum": 102104216,
+        "valuesHash": "6f67e811"
+      }
+    },
+    {
+      "id": "user-z37-3d1291d3",
+      "source": "user",
+      "re": "-0.7416104104273473",
+      "im": "-0.10584029278796203",
+      "zoom": 37,
+      "iterations": 25600,
+      "note": "direct/border; auto-selected (border-heavy)",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.415
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0,
+        "nearMax50": 1,
+        "nearMax90": 0,
+        "escMean": 16753.5,
+        "escP50": 16753.5,
+        "escP90": 16753.7,
+        "escP99": 16753.8,
+        "iterSum": 68622454,
+        "valuesHash": "64f60da1"
+      }
+    },
+    {
+      "id": "user-z38-ca7e190c",
+      "source": "user",
+      "re": "0.2500000552756214",
+      "im": "-3.991917907342213e-12",
+      "zoom": 38,
+      "iterations": 13400,
+      "note": "direct/trapped; auto-selected (border-heavy)",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.677
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0,
+        "nearMax50": 1,
+        "nearMax90": 1,
+        "escMean": 13359.8,
+        "escP50": 13359.8,
+        "escP90": 13361.1,
+        "escP99": 13362.5,
+        "iterSum": 54721839,
+        "valuesHash": "7e937722"
+      }
+    },
+    {
+      "id": "user-z44-b1cf403c",
+      "source": "user",
+      "re": "-1.24968957446016",
+      "im": "-0.015827867967567855",
+      "zoom": 44,
+      "iterations": 10000,
+      "note": "direct/trapped; auto-selected (border-heavy)",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.3
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0,
+        "nearMax50": 1,
+        "nearMax90": 1,
+        "escMean": 9723.7,
+        "escP50": 9723.5,
+        "escP90": 9724.9,
+        "escP99": 9726.3,
+        "iterSum": 39828194,
+        "valuesHash": "b3ca901d"
+      }
+    },
+    {
+      "id": "user-z47-953fa585",
+      "source": "user",
+      "re": "0.2500041326416138",
+      "im": "1.3249754182709239e-8",
+      "zoom": 47,
+      "iterations": 25600,
+      "overrides": {
+        "tileSize": 100
+      },
+      "note": "perturbation-f64/border; auto-selected (heaviest)",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.389
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.8606,
+        "nearMax50": 0.1064,
+        "nearMax90": 0.0229,
+        "escMean": 17188.5,
+        "escP50": 17907.3,
+        "escP90": 24119,
+        "escP99": 25558.1,
+        "iterSum": 100054643,
+        "valuesHash": "7914f9f5"
+      }
     },
     {
       "id": "user-z47-da3d5543",
@@ -285,16 +760,27 @@
       "im": "-0.000016024103453915473",
       "zoom": 47,
       "iterations": 25600,
-      "note": "perturbation-f64/high-iter; fully in-set view: exercises border_in_set shortcut with 25.6k-iteration border pixels"
-    },
-    {
-      "id": "user-z47-f37e5416",
-      "source": "user",
-      "re": "-0.5496041100592572",
-      "im": "-0.627270971070018",
-      "zoom": 47,
-      "iterations": 2001,
-      "note": "perturbation-f64/high-iter"
+      "note": "perturbation-f64/high-iter; fully in-set view: exercises border_in_set shortcut with 25.6k-iteration border pixels",
+      "pinned": true,
+      "weight": {
+        "sessions": 1,
+        "recency": 0.299
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 1,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 0,
+        "escP50": 0,
+        "escP90": 0,
+        "escP99": 0,
+        "iterSum": 104857600,
+        "valuesHash": "eec31dc5"
+      }
     },
     {
       "id": "user-z47-fb5f0315",
@@ -306,7 +792,27 @@
       "overrides": {
         "tileSize": 100
       },
-      "note": "perturbation-f64/high-iter; heaviest real e2 view: 62% interior, escaper mean 49.7k/50k (trapped needle channel); tileSize 100 keeps samples in budget"
+      "note": "perturbation-f64/high-iter; heaviest real e2 view: 62% interior, escaper mean 49.7k/50k (trapped needle channel); tileSize 100 keeps samples in budget",
+      "pinned": true,
+      "weight": {
+        "sessions": 1,
+        "recency": 0.587
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.624,
+        "nearMax50": 0.376,
+        "nearMax90": 0.376,
+        "escMean": 49746.9,
+        "escP50": 49750.7,
+        "escP90": 49949.9,
+        "escP99": 49993.3,
+        "iterSum": 204410219,
+        "valuesHash": "c320817a"
+      }
     },
     {
       "id": "user-z48-0611aae8",
@@ -319,7 +825,27 @@
         "exponent": 52,
         "tileSize": 64
       },
-      "note": "perturbation-f64/high-iter; slowest real view in export (~60 s/tile at 200px): exponent-52 Horner delta step dominates, escaper mean only 100; tileSize 64 keeps samples in budget"
+      "note": "perturbation-f64/high-iter; slowest real view in export (~60 s/tile at 200px): exponent-52 Horner delta step dominates, escaper mean only 100; tileSize 64 keeps samples in budget",
+      "pinned": true,
+      "weight": {
+        "sessions": 1,
+        "recency": 0.344
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.1711,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 100,
+        "escP50": 82.2,
+        "escP90": 138,
+        "escP99": 324.2,
+        "iterSum": 32584823,
+        "valuesHash": "10449585"
+      }
     },
     {
       "id": "user-z48-0a309fb2",
@@ -331,25 +857,86 @@
       "overrides": {
         "tileSize": 100
       },
-      "note": "perturbation-f64/high-iter; cusp channel: 68% interior + trapped escapers (mean 32k/48k); tileSize 100 keeps samples in budget"
+      "note": "perturbation-f64/high-iter; cusp channel: 68% interior + trapped escapers (mean 32k/48k); tileSize 100 keeps samples in budget",
+      "pinned": true,
+      "weight": {
+        "sessions": 1,
+        "recency": 0.906
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.6768,
+        "nearMax50": 0.2993,
+        "nearMax90": 0.0247,
+        "escMean": 32034.8,
+        "escP50": 30803.1,
+        "escP90": 41997.9,
+        "escP99": 47201.8,
+        "iterSum": 175470019,
+        "valuesHash": "d76b395f"
+      }
     },
     {
-      "id": "user-z48-15d70019",
+      "id": "user-z48-3e744c34",
       "source": "user",
-      "re": "-0.7563561801300023",
-      "im": "-0.06321457224170057",
+      "re": "-0.753397087713056",
+      "im": "0.047002243276934585",
       "zoom": 48,
-      "iterations": 800,
-      "note": "perturbation-f64/mid-iter"
+      "iterations": 8192,
+      "note": "perturbation-f64/border; auto-selected (border-heavy)",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.919
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0,
+        "nearMax50": 1,
+        "nearMax90": 0.0002,
+        "escMean": 4935.3,
+        "escP50": 4868.4,
+        "escP90": 5196,
+        "escP99": 5831.7,
+        "iterSum": 20214922,
+        "valuesHash": "fd13fb91"
+      }
     },
     {
-      "id": "user-z48-22bba2c0",
+      "id": "user-z48-4ef9f039",
       "source": "user",
-      "re": "0.35464082784355266",
-      "im": "-0.5219029276928122",
+      "re": "-1.2449248015777261",
+      "im": "-0.09344586633364171",
       "zoom": 48,
-      "iterations": 500,
-      "note": "perturbation-f64/mid-iter"
+      "iterations": 25600,
+      "overrides": {
+        "tileSize": 100
+      },
+      "note": "perturbation-f64/trapped; auto-selected (heaviest)",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.817
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.4788,
+        "nearMax50": 0.5212,
+        "nearMax90": 0.3533,
+        "escMean": 23717.4,
+        "escP50": 23779.3,
+        "escP90": 25274.2,
+        "escP99": 25566.7,
+        "iterSum": 100838302,
+        "valuesHash": "c988dd17"
+      }
     },
     {
       "id": "user-z48-58cd3904",
@@ -361,7 +948,27 @@
       "overrides": {
         "exponent": 4
       },
-      "note": "perturbation-f64/high-iter; fully in-set multibrot: general-exponent Horner loop on border pixels only"
+      "note": "perturbation-f64/high-iter; fully in-set multibrot: general-exponent Horner loop on border pixels only",
+      "pinned": true,
+      "weight": {
+        "sessions": 1,
+        "recency": 0.34
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 1,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 0,
+        "escP50": 0,
+        "escP90": 0,
+        "escP99": 0,
+        "iterSum": 104857600,
+        "valuesHash": "eec31dc5"
+      }
     },
     {
       "id": "user-z48-6481040a",
@@ -370,34 +977,145 @@
       "im": "-0.5605623670010154",
       "zoom": 48,
       "iterations": 999,
-      "note": "perturbation-f64/low-iter; 60% interior + near-max escapers (mean 962/999) at low absolute budget"
+      "note": "perturbation-f64/low-iter; 60% interior + near-max escapers (mean 962/999) at low absolute budget",
+      "pinned": true,
+      "weight": {
+        "sessions": 1,
+        "recency": 0.373
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.6025,
+        "nearMax50": 0.3975,
+        "nearMax90": 0.3975,
+        "escMean": 961.6,
+        "escP50": 958.5,
+        "escP90": 988.2,
+        "escP99": 996.7,
+        "iterSum": 4031088,
+        "valuesHash": "49a304cb"
+      }
     },
     {
-      "id": "user-z48-ccbd4f51",
+      "id": "user-z48-85c3859b",
       "source": "user",
-      "re": "-0.5521237057520008",
-      "im": "-0.6257350281858378",
+      "re": "0.33260077192171966",
+      "im": "0.5745793274081237",
       "zoom": 48,
-      "iterations": 200,
-      "note": "perturbation-f64/low-iter"
+      "iterations": 800,
+      "note": "perturbation-f64/low-iter; auto-selected (coverage:low-iter)",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.407
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0,
+        "nearMax50": 0.019,
+        "nearMax90": 0.0002,
+        "escMean": 298.6,
+        "escP50": 286.5,
+        "escP90": 338.2,
+        "escP99": 424.1,
+        "iterSum": 1223197,
+        "valuesHash": "ecdec508"
+      }
     },
     {
-      "id": "user-z48-d0ddf3dd",
+      "id": "user-z48-9d06c2d7",
       "source": "user",
-      "re": "-0.8288522349647183",
-      "im": "-0.18903007374364744",
+      "re": "-1.4064639243139756",
+      "im": "-0.00002245443456150298",
       "zoom": 48,
-      "iterations": 20000,
-      "note": "perturbation-f64/high-iter"
+      "iterations": 25600,
+      "overrides": {
+        "tileSize": 100
+      },
+      "note": "perturbation-f64/interior; auto-selected (coverage:interior)",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.679
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.8831,
+        "nearMax50": 0.0356,
+        "nearMax90": 0.0032,
+        "escMean": 11593.4,
+        "escP50": 10134.8,
+        "escP90": 18834.9,
+        "escP99": 24719.4,
+        "iterSum": 98148447,
+        "valuesHash": "a77c458c"
+      }
     },
     {
-      "id": "user-z48-d692d8e0",
+      "id": "user-z48-d0e211ec",
       "source": "user",
-      "re": "-1.7401534966541048",
-      "im": "-0.02803387560274384",
+      "re": "-1.4739395392171728",
+      "im": "0.0007618796514439197",
       "zoom": 48,
-      "iterations": 9000,
-      "note": "perturbation-f64/high-iter"
+      "iterations": 32768,
+      "overrides": {
+        "tileSize": 100
+      },
+      "note": "perturbation-f64/trapped; auto-selected (heaviest)",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.396
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.085,
+        "nearMax50": 0.915,
+        "nearMax90": 0.915,
+        "escMean": 31377,
+        "escP50": 31312.2,
+        "escP90": 31968.6,
+        "escP99": 32602.4,
+        "iterSum": 129004427,
+        "valuesHash": "314fbbb0"
+      }
+    },
+    {
+      "id": "user-z48-dc40277a",
+      "source": "user",
+      "re": "-1.3778495543648615",
+      "im": "0.014769422435958912",
+      "zoom": 48,
+      "iterations": 16000,
+      "note": "perturbation-f64/border; auto-selected (border-heavy)",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.974
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0,
+        "nearMax50": 1,
+        "nearMax90": 0,
+        "escMean": 10073.4,
+        "escP50": 10056.7,
+        "escP90": 10120.8,
+        "escP99": 10320.1,
+        "iterSum": 41260460,
+        "valuesHash": "16b7b8a0"
+      }
     },
     {
       "id": "user-z48-f36112fd",
@@ -409,7 +1127,27 @@
       "overrides": {
         "tileSize": 100
       },
-      "note": "perturbation-f64/high-iter; border band: 19% interior, escaper mean 40k/50k near-max; tileSize 100 keeps samples in budget"
+      "note": "perturbation-f64/high-iter; border band: 19% interior, escaper mean 40k/50k near-max; tileSize 100 keeps samples in budget",
+      "pinned": true,
+      "weight": {
+        "sessions": 1,
+        "recency": 0.558
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0.1887,
+        "nearMax50": 0.8113,
+        "nearMax90": 0.1528,
+        "escMean": 40269.3,
+        "escP50": 39918.1,
+        "escP90": 47092.5,
+        "escP99": 49618.1,
+        "iterSum": 172465019,
+        "valuesHash": "401ed65c"
+      }
     },
     {
       "id": "user-z85-c163744e",
@@ -418,7 +1156,26 @@
       "im": "-0.076342380269949609648412912019177464",
       "zoom": 85,
       "iterations": 200,
-      "note": "perturbation-f64/low-iter"
+      "note": "perturbation-f64/low-iter",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.999
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0,
+        "nearMax50": 1,
+        "nearMax90": 0,
+        "escMean": 179.2,
+        "escP50": 179.2,
+        "escP90": 179.4,
+        "escP99": 179.5,
+        "iterSum": 734065,
+        "valuesHash": "06b0bf31"
+      }
     },
     {
       "id": "user-z259-3898a95f",
@@ -427,7 +1184,26 @@
       "im": "0.0281753397792110489924115211443195096875390767429906085704117981640017204417954754911743",
       "zoom": 259,
       "iterations": 1600,
-      "note": "float-exp/high-iter"
+      "note": "float-exp/high-iter",
+      "weight": {
+        "sessions": 1,
+        "recency": 0.999
+      },
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-08",
+        "sha": "29e79707",
+        "probeSize": 64,
+        "interior": 0,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 542.6,
+        "escP50": 542.2,
+        "escP90": 544,
+        "escP99": 547.9,
+        "iterSum": 2222301,
+        "valuesHash": "7c52f2cc"
+      }
     }
   ]
 }

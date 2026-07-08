@@ -71,6 +71,11 @@ node src/run-grid.mjs --variants baseline,myexp   # grid realism (worker pool)
 node src/build-dist.mjs base-dist --ref HEAD      # or a pre-change ref
 node src/build-dist.mjs exp-dist                  # current tree (applies your change)
 node src/run-e2e.mjs --variants base-dist,exp-dist
+
+# Algorithmic winners additionally pass the holdout ship gate before applying
+# (fresh sample from the events export; see "Holdout validation" below):
+node src/validate.mjs --variants baseline,myexp
+node src/validate.mjs --variants baseline,myexp --pixel-check   # if any accepted diff
 ```
 
 run-e2e measures navigation → last tile done on the real client (includes
@@ -181,6 +186,11 @@ below).
 - **Rust code change**: `cargo test` must pass (insta snapshot suite). Use
   `cargo insta test --accept` only when the visual diff is understood and
   intended. Then rebuild the variant and re-run the benchmark.
+- **Drift detector (either kind of change):** `node src/enrich.mjs --check
+  <variant>` re-probes every corpus case and compares the values buffer
+  against the committed blessed hashes (`stats.valuesHash`) — catches output
+  changes that snuck in across experiments. Intentional changes are
+  re-blessed with `--check <variant> --bless` plus a LOG.md justification.
 
 ## Applying a winner
 
@@ -196,6 +206,9 @@ below).
    --variants pre,post`. The win must survive on real client builds,
    including cold passes. A wasm-level win that disappears or regresses cold
    starts here does not ship without a written justification in LOG.md.
+   For algorithmic winners, also pass the holdout gate first:
+   `node src/validate.mjs --variants <pre>,<post>` (plus `--pixel-check` if
+   any output diff was accepted) — see "Holdout validation" below.
 4. Append the entry to `bench/LOG.md` and commit with the numbers: e2e
    deltas (warm and cold), wasm-level geomean delta per pathway, size delta,
    and how to reproduce.
@@ -206,23 +219,54 @@ below).
 all three pathways using exact boundary points (cardioid cusp `0.25`,
 dendrite `i`, needle `-2`) that stay meaningful at any zoom depth, plus
 tileSize and smoothColoring pairs. User cases (`user-*`) come from a Supabase
-`events` export via `node src/ingest.mjs <export.csv> --write` (validates,
-dedupes, buckets by pathway x iteration tercile, samples a few per bucket).
+`events` export via `node src/ingest.mjs <export.csv> --artifact <name>
+--write`. Ingest validates and dedupes the rows, **probes every surviving
+candidate at 64x64 through the wasm** (enrich.mjs; interior fraction,
+near-max escaper fractions, escaper mean/p50/p90/p99, total iteration sum),
+then selects per pathway tier by composition/cost: heaviest views by
+iteration sum, border-heavy views by near-max escaper fraction, the
+most-frequented view, plus one coverage pick per distinctive composition
+class (in-set, interior-heavy, trapped/throughput, multibrot, low-iter).
+The raw `iterations` parameter is deliberately not the work proxy — a
+50k-iteration empty-exterior view is cheap, a 1k-iteration trapped channel
+is not. Review the printed old-vs-new selection report before `--write`.
 An export is checked out at the repo root as `events_rows.csv` (~24k rows:
 id, created_at, share_url, re, im, zoom, iterations, event_name,
 session_id) — use it for ingest, frequency weighting, or finding real slow
 views; never copy session_ids or share URLs into committed corpus rows.
 Keep the corpus small enough that a two-variant run finishes in minutes.
 
+Each written corpus row carries a generated `stats` block (probe composition
++ iteration sum + provenance: generator version, artifact sha, date) and a
+`weight` block (distinct sessions + recency-decayed user frequency). Stats
+are **generated, never hand-edited** — re-run `node src/enrich.mjs --write`
+(or ingest) to refresh them; unchanged stats keep their provenance so
+re-runs are idempotent. Hand-maintained `note` text, `overrides`, and
+`pinned` rows are always preserved: set `"pinned": true` on a hand-added
+case to exempt it from selection pressure. `stats.valuesHash` is the blessed
+FNV-1a hash of the probe's values buffer; `node src/enrich.mjs --check
+<variant>` re-probes and reports output drift (the re-bless flow for an
+intentional output change is `--check <variant> --bless`, justified in
+LOG.md). Composition stats and iteration sums are variant-invariant (escape
+counts are the correctness invariant) and safe to commit; probe wall times
+are machine-dependent and never committed.
+
 When adding or choosing cases, **favor views with many border pixels** —
 pixels close to but outside the set, escaping at high-but-not-max counts.
 That is where users park and where the real work is (interior-heavy tiles
 short-circuit via rect_in_set/periodicity; low-iteration exteriors are
-cheap). Verify a candidate's composition with a small offline probe (interior
-fraction, escaper mean/p90) before trusting it, and keep each pathway tier
+cheap). The probe stats make this checkable; keep each pathway tier
 represented by its realistic worst case. Heavy cases may carry a `tileSize`
 override (100 or 64) so a sample fits the per-case budget: per-pixel cost is
-size-invariant, so relative deltas are preserved.
+size-invariant, so relative deltas are preserved (ingest suggests the
+override automatically from the probe time). run.mjs scales each case's
+iteration sum to its tileSize and prints **ms per million iterations** next
+to the median — watch that column: a case whose ms/Miter is far off its
+pathway's norm is structurally slow for a reason iteration counts don't
+explain (this is what would have caught the z259 ComplexExp misattribution
+immediately). compare.mjs prints composition columns (interior %, near-max
+%) plus time-weighted and user-frequency-weighted delta summaries alongside
+the geomeans.
 What the export says about real usage (probed 2026-07-07): the pf64 tier is
 effectively all z47–59 (one lone view past z60), there is exactly one
 float-exp view (z259), and the slowest real views are 25k–50k-iteration
@@ -235,15 +279,35 @@ The fixed corpus is what you iterate against, and that also makes it easy to
 overfit: tuned constants and accepted trade-offs are only ever validated on
 its ~40 views. Before shipping an algorithmic winner — especially one with
 tuned thresholds (e.g. the hybrid promote/floor exponents) or deliberately
-accepted pixel diffs — validate against a *fresh* sample: dedupe
-events_rows.csv, exclude views already in the corpus, stratified-sample
-~40–60 per pathway tier (seeded for reproducibility; use a fresh seed per
-experiment so the holdout does not become a second training set), and run
-pre/post at low sample count with budget caps. Check per-tier geomeans, the
-worst movers, and the time-weighted delta; run pixel-check on the holdout
-too when the change has any accepted output diff — artifact classes can hide
-on view shapes the fixed corpus lacks. The fixed corpus stays the fast
-iteration target; the holdout is a ship gate, paid once per experiment.
+accepted pixel diffs — validate against a *fresh* sample with
+`src/validate.mjs`:
+
+```sh
+node src/validate.mjs --variants baseline,myexp            # timing gate
+node src/validate.mjs --variants baseline,myexp --pixel-check   # output gate
+```
+
+It dedupes events_rows.csv, excludes views already in corpus.json,
+stratified-samples `--per-tier N` (default 40) per pathway tier with a
+seeded RNG, and runs a/b like run.mjs at low sample count
+(`--samples 3`, `--budget-ms 8000`, tiles at `--tile-size 100` — per-pixel
+cost is size-invariant, so relative deltas are preserved while heavyweight
+views stay in budget). The default seed derives from today's date: a rerun
+the same day reproduces, but each experiment gets a fresh sample so the
+holdout does not become a second training set (pin `--seed` only to
+reproduce a specific run). It reports per-tier geomeans, the worst movers,
+and a time-weighted delta (weighted by variant-a median ms). Judge on those
+aggregates: the measured A/A noise floor (2026-07-08) is <=0.1% on every
+aggregate, but at `--samples 3` individual sub-millisecond views can
+false-flag up to ~6% — re-run a suspicious single mover with `--samples 10`
+before believing it. Run
+`--pixel-check` (byte-diffs the two variants' output on the holdout) whenever
+the change has any accepted output diff — artifact classes can hide on view
+shapes the fixed corpus lacks. The fixed corpus stays the fast iteration
+target; the holdout is a ship gate, paid once per experiment. Note the
+export's tier skew: the float-exp tier has ~1 real view (already in the
+corpus), so the float-exp holdout is empty — synthetic corpus cases remain
+the only deep-zoom guard.
 
 ## Experiment log — read it first, then append to it
 

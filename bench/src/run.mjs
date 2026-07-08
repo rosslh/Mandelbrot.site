@@ -51,10 +51,14 @@ function parseArgs(argv) {
 
 function loadCases(corpusPath, filter) {
   const corpus = JSON.parse(readFileSync(corpusPath, "utf8"));
-  let cases = corpus.cases.map((benchCase) => ({
-    ...benchCase,
-    pathway: pathwayFor(benchCase.zoom),
-  }));
+  let cases = corpus.cases.map((benchCase) => {
+    const merged = { ...corpus.defaults, ...(benchCase.overrides ?? {}) };
+    return {
+      ...benchCase,
+      pathway: pathwayFor(benchCase.zoom, merged.exponent),
+      tileSize: merged.tileSize,
+    };
+  });
   for (const benchCase of cases) {
     const problems = validateCase(benchCase);
     if (problems.length > 0) {
@@ -160,10 +164,30 @@ async function main() {
           bytes: state.bytes,
           hash: [...state.hashes][0],
         };
+        // Corpus rows carry probe stats (enrich.mjs): scale the probe's
+        // iteration sum to this case's tileSize (per-pixel work is
+        // size-invariant) for a machine-independent work proxy, and derive
+        // ms per million iterations - the structural-slowness detector (a
+        // case whose ms/Miter is far off its pathway's norm is slow for a
+        // reason iteration counts don't explain).
+        let miterNote = "";
+        if (benchCase.stats?.iterSum) {
+          const scale = (benchCase.tileSize / benchCase.stats.probeSize) ** 2;
+          row.iterSum = Math.round(benchCase.stats.iterSum * scale);
+          row.msPerMiter = row.median / (row.iterSum / 1e6);
+          row.composition = {
+            interior: benchCase.stats.interior,
+            nearMax90: benchCase.stats.nearMax90,
+          };
+          miterNote = `, ${row.msPerMiter.toFixed(3)} ms/Miter`;
+        }
+        if (benchCase.weight) {
+          row.userWeight = benchCase.weight.recency ?? benchCase.weight.sessions;
+        }
         results.push(row);
         console.log(
           `${benchCase.id} [${name}] median ${row.median.toFixed(2)} ms ` +
-            `(n=${state.samplesMs.length}, cold ${state.coldMs.toFixed(2)} ms)`,
+            `(n=${state.samplesMs.length}, cold ${state.coldMs.toFixed(2)} ms${miterNote})`,
         );
       }
     }

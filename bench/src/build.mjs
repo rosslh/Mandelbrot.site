@@ -22,7 +22,7 @@ const benchDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoDir = resolve(benchDir, "..");
 const crateDir = join(repoDir, "mandelbrot");
 
-const PRODUCTION_DEFAULTS = {
+export const PRODUCTION_DEFAULTS = {
   optLevel: "3",
   lto: "true",
   codegenUnits: "1",
