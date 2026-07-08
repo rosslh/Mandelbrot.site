@@ -1469,18 +1469,38 @@ impl PerturbedFrame {
 
         #[cfg(target_arch = "wasm32")]
         if !self.use_float_exp {
-            let dc_of = |pixel: usize| self.pixel_dc_f64(pixel % image_width, pixel / image_width);
             if self.exponent == 2 {
-                stream_perturbed_escape_f64::<PERTURB_STREAM_CHAINS, false>(
-                    &self.orbit.values,
-                    dc_of,
-                    pixel_count,
+                // Mariani–Silver subdivision over the stream kernel: interior
+                // pixels at these depths never rebase, so periodicity can't
+                // retire them and only the ring-fill saves their full budget.
+                // Multibrot tiles stay on the plain stream call: the one real
+                // multibrot pf64 view has scattered interior that never fills,
+                // so it pays only the wave overhead.
+                results.fill((crate::UNCOMPUTED, Complex64::new(0.0, 0.0)));
+                crate::subdivide_tile_streamed(
+                    image_width,
+                    image_height,
                     self.max_iterations,
-                    self.exponent,
-                    self.escape_radius_squared,
                     &mut results,
+                    |pixels, wave_results| {
+                        let dc_of = |position: usize| {
+                            let pixel = pixels[position];
+                            self.pixel_dc_f64(pixel % image_width, pixel / image_width)
+                        };
+                        stream_perturbed_escape_f64::<PERTURB_STREAM_CHAINS, false>(
+                            &self.orbit.values,
+                            dc_of,
+                            pixels.len(),
+                            self.max_iterations,
+                            self.exponent,
+                            self.escape_radius_squared,
+                            wave_results,
+                        );
+                    },
                 );
             } else {
+                let dc_of =
+                    |pixel: usize| self.pixel_dc_f64(pixel % image_width, pixel / image_width);
                 stream_perturbed_escape_f64::<PERTURB_STREAM_CHAINS, true>(
                     &self.orbit.values,
                     dc_of,

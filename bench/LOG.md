@@ -1103,3 +1103,81 @@ float-exp`; `node src/validate.mjs --variants baseline,fexp-stream`;
 `node src/build-dist.mjs pre-fexp --ref cc36994 && node
 src/build-dist.mjs post-fexp && node src/run-e2e.mjs --variants
 pre-fexp,post-fexp --rounds 3`.
+
+## 2026-07-08 — SHIPPED: Mariani–Silver subdivision for the pf64 pathway (exponent 2)
+
+Machine: mac arm64 (M1 Pro, 8 logical cores), Chrome for Testing 136,
+macOS 14. Code change only (mandelbrot/src/lib.rs, perturbation.rs); no
+flag, config, or client JS changes. Pre-change ref: fa6d90b.
+
+Motivation: after the pf64 stream-kernel ship, interior pixels on *mixed*
+e2 tiles were the last untouched cost — they never rebase at pf64 depths,
+so (dz, index) periodicity provably cannot retire them, and border_in_set
+only catches fully-interior tiles. The heaviest real e2 views are 62–88%
+interior, each interior pixel grinding the full 25–50k budget.
+
+**Change 1 (lib.rs):** the Mariani–Silver wave/worklist machinery moved
+out of `stream_tile_subdivided` into `subdivide_tile_streamed`, generic
+over a compute-wave closure (uncomputed ring pixel indices → results);
+the direct pathway is now a thin wrapper around it. Verified neutral for
+direct: wasm-level geomean −0.1%, e2e standard corpus ±1%.
+
+**Change 2 (perturbation.rs):** exponent-2 f64-delta tiles route
+`compute_all` through the driver over `stream_perturbed_escape_f64`, so
+all-max-iter rings fill their inside without computing it. **Multibrot
+pf64 deliberately stays on the plain stream call:** the only real
+multibrot pf64 view (e52 0611aae8 — 17% *scattered* interior, escapers
+dead by ~100 iters) never fills a ring and paid +2.7% (~+2 s at e2e grid
+scale on the slowest real view) of pure wave/drain-tail overhead in the
+ungated build; the gate returns it to −0.0%.
+
+No new tier-up warmup needed, with one subtlety worth recording: the wave
+call site is a *new monomorphization* of the kernel (generic `dc_of`), but
+`warmupDeep`'s tile renders through the subdivided path itself, so the new
+instantiation is warmed automatically — e2e colds confirm (below).
+
+Wasm-level (run.mjs, full 43-case corpus, 10 samples): pf64 geomean
+**−14.0%**, time-weighted −20.3%. Interior-heavy real views:
+
+| case | int% | delta |
+|---|---|---|
+| user-z47-953fa585 | 86% | **−69.3%** (688 → 211 ms) |
+| user-z48-9d06c2d7 | 88% | **−63.9%** (665 → 240 ms) |
+| user-z48-0a309fb2 | 68% | **−57.2%** (1196 → 512 ms) |
+| user-z48-6481040a | 60% | −17.3% |
+| user-z47-fb5f0315 | 62% | −4.3% (trapped *needle channel*: interior too thin for rings to land) |
+
+Fully-interior (border_in_set) and 0%-interior cases neutral; direct
+−0.1%; float-exp noise. Artifact 315.8 → 318.8 KiB (+1.0%).
+
+Correctness: cargo test 59/59; pixel-check byte-identical on all 43
+corpus cases (the ring-fill produced zero output change); enrich --check
+matches all blessed hashes. No re-bless, no --allow-diff.
+
+Holdout ship gate (seed 2026-07-08, 40/tier): pf64 geomean **−10.3%**,
+direct −0.9%, no significant wrong-direction mover. Ran `--pixel-check`
+despite zero accepted diffs (fill artifacts are exactly the class that
+hides on shapes the corpus lacks): all 80 holdout views byte-identical.
+
+E2E ship gate (complete builds pre=fa6d90b / post, 3 rounds): standard
+grid corpus all neutral-or-better — overall geomean −0.3%, grid-z47
+−1.0% (−450 ms; its grid's makespan is set by trapped-channel tiles where
+fills rarely land), light/tax guards within ±1.3%, colds track warm. The
+interior-heavy composition class had no e2e representative, so
+grid-z48-i48000-0a309fb2 is now a committed grid-regression case:
+warm **−9.7%** (17.04 → 15.38 s), cold **−11.2%** (17.25 → 15.32 s).
+
+Size: production module wasm 317.0 → 320.0 KiB (+3.0 KiB).
+
+Verdict: shipped. Interior-heavy deep-zoom loads drop ~10% e2e and up to
+~70% per tile at wasm level, output byte-identical everywhere measured.
+Not pursued: a finer MARIANI_LEAF might fill fb5f0315's thin channel, but
+the direct-pathway leaf sweep showed leaf 4 misfills single-pixel escaper
+specks — not worth risking output diffs for one view's remaining −few %.
+
+Reproduce: `node src/run.mjs --variants baseline,pf64-mariani --filter
+perturbation-f64`; `node src/validate.mjs --variants baseline,pf64-mariani
+--pixel-check`; `node src/build-dist.mjs pre-mariani --ref fa6d90b && node
+src/build-dist.mjs post-mariani && node src/run-e2e.mjs --variants
+pre-mariani,post-mariani --rounds 3` (plus `--filter 0a309fb2` for the new
+case).

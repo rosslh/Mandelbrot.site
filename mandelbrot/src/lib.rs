@@ -51,7 +51,7 @@ const MARIANI_LEAF: usize = 8;
 
 // Sentinel iteration count for pixels not yet computed during subdivision.
 #[cfg(target_arch = "wasm32")]
-const UNCOMPUTED: u32 = u32::MAX;
+pub(crate) const UNCOMPUTED: u32 = u32::MAX;
 
 /// True when `c = re + im*i` lies inside (or on) the main cardioid or the
 /// period-2 bulb. Closed-form membership: such points never escape, so the
@@ -802,6 +802,43 @@ fn stream_tile_subdivided(
     max_iterations: u32,
     results: &mut [(u32, Complex64)],
 ) {
+    let width = re_values.len();
+    let mut points: Vec<(f64, f64)> = Vec::new();
+    subdivide_tile_streamed(
+        width,
+        im_values.len(),
+        max_iterations,
+        results,
+        |pixels, wave_results| {
+            points.clear();
+            points.extend(
+                pixels
+                    .iter()
+                    .map(|&pixel| (re_values[pixel % width], im_values[pixel / width])),
+            );
+            stream_escape_quadratic::<STREAM_CHAINS>(
+                &points,
+                max_iterations,
+                ESCAPE_RADIUS.powi(2),
+                wave_results,
+            );
+        },
+    );
+}
+
+/// The Mariani–Silver wave/worklist machinery, generic over the streaming
+/// kernel: each wave hands `compute_wave` the pending rects' uncomputed
+/// pixel indices (row-major) to resolve into the matching slots of the
+/// output slice in one kernel call. `results` must arrive filled with
+/// `UNCOMPUTED`.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn subdivide_tile_streamed(
+    width: usize,
+    height: usize,
+    max_iterations: u32,
+    results: &mut [(u32, Complex64)],
+    mut compute_wave: impl FnMut(&[usize], &mut [(u32, Complex64)]),
+) {
     #[derive(Clone, Copy)]
     struct Rect {
         x0: usize,
@@ -814,28 +851,22 @@ fn stream_tile_subdivided(
         rect.x1 - rect.x0 <= MARIANI_LEAF || rect.y1 - rect.y0 <= MARIANI_LEAF
     }
 
-    let width = re_values.len();
-    let height = im_values.len();
-
     let mut pending = vec![Rect {
         x0: 0,
         y0: 0,
         x1: width,
         y1: height,
     }];
-    let mut wave_points: Vec<(f64, f64)> = Vec::new();
     let mut wave_pixels: Vec<usize> = Vec::new();
     let mut wave_results: Vec<(u32, Complex64)> = Vec::new();
 
     while !pending.is_empty() {
-        wave_points.clear();
         wave_pixels.clear();
 
         {
             let mut schedule = |x: usize, y: usize| {
                 let pixel_index = y * width + x;
                 if results[pixel_index].0 == UNCOMPUTED {
-                    wave_points.push((re_values[x], im_values[y]));
                     wave_pixels.push(pixel_index);
                 }
             };
@@ -858,13 +889,8 @@ fn stream_tile_subdivided(
         }
 
         wave_results.clear();
-        wave_results.resize(wave_points.len(), (0, Complex64::new(0.0, 0.0)));
-        stream_escape_quadratic::<STREAM_CHAINS>(
-            &wave_points,
-            max_iterations,
-            ESCAPE_RADIUS.powi(2),
-            &mut wave_results,
-        );
+        wave_results.resize(wave_pixels.len(), (0, Complex64::new(0.0, 0.0)));
+        compute_wave(&wave_pixels, &mut wave_results);
         for (position, &pixel_index) in wave_pixels.iter().enumerate() {
             results[pixel_index] = wave_results[position];
         }

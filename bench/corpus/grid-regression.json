@@ -60,6 +60,15 @@
       "note": "Heaviest real pf64 view (62% interior, escaper mean 49.7k/50k trapped needle channel): ~100 s wall per grid pass on 7 workers, so it adds ~100 s per round per variant to an e2e run — use --filter to skip it during iteration; it is the ship-gate case for the heavyweight pf64 regime (added 2026-07-08, LOG items 1-4 entry)"
     },
     {
+      "id": "grid-z48-i48000-0a309fb2",
+      "source": "corpus:user-z48-0a309fb2",
+      "re": "0.2500612710671293",
+      "im": "-7.752127428872768e-7",
+      "zoom": 48,
+      "iterations": 48000,
+      "note": "Interior-heavy pf64 regime (68% interior cusp channel, trapped escapers mean 32k/48k): representative of the composition class the pf64 Mariani–Silver ring-fill targets — grid-z47-i50000 covers the trapped-channel regime where fills rarely land (added 2026-07-08, pf64 Mariani entry)"
+    },
+    {
       "id": "grid-z259-i1600-3898a95f",
       "source": "corpus:user-z259-3898a95f",
       "re": "-1.7400623825793399052208441670658256382966417204361718668798613188202595326994356178513819",
