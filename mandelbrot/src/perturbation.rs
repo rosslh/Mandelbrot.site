@@ -101,6 +101,47 @@ fn complex_big_pow(base: &(BigFloat, BigFloat), exponent: u32) -> (BigFloat, Big
 struct ReferenceOrbit {
     values: Vec<(f64, f64)>,
     escaped: bool,
+    /// For general exponents, the Horner terms `C(e,k) * Z_n^(e-k)` of the
+    /// delta step depend only on the orbit index `n`, so they are precomputed
+    /// here once per orbit instead of once per pixel-step: `exponent - 1`
+    /// `[re, im]` entries per index in the loop's evaluation order, flattened
+    /// index-major. Each entry is built by the exact operation sequence the
+    /// per-step Horner loop performs, so consuming the table is bit-identical
+    /// to recomputing the terms. Empty for exponent 2 (whose delta step has a
+    /// closed form) and for orbits past `COEFF_TABLE_MAX_ENTRIES` (consumers
+    /// fall back to the on-the-fly loop). Only the wasm32 SIMD kernels read
+    /// it; the scalar loops keep recomputing terms (identical results).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    coeff_table: Vec<[f64; 2]>,
+}
+
+/// Size cap for the precomputed Horner-term table, in `[f64; 2]` entries
+/// (8 MiB). Real multibrot orbits are far smaller (a high exponent makes the
+/// reference escape quickly); the cap only guards degenerate long-orbit,
+/// high-exponent combinations from ballooning memory.
+const COEFF_TABLE_MAX_ENTRIES: usize = 512 * 1024;
+
+/// Builds the per-orbit-index Horner term table for `delta_step_f64`'s
+/// general-exponent loop. Term `j` of row `n` is `coefficient * Z_n^(e-k)`
+/// for `k = e-1-j`, computed with the same expressions (and therefore the
+/// same IEEE roundings) as the in-loop code it replaces.
+fn compute_coeff_table(values: &[(f64, f64)], exponent: u32) -> Vec<[f64; 2]> {
+    let terms = (exponent - 1) as usize;
+    if exponent == 2 || values.len().saturating_mul(terms) > COEFF_TABLE_MAX_ENTRIES {
+        return Vec::new();
+    }
+
+    let mut table = Vec::with_capacity(values.len() * terms);
+    for &(z_ref_re, z_ref_im) in values {
+        let mut z_power = Complex64::new(1.0, 0.0);
+        let mut coefficient = 1.0_f64;
+        for k in (1..exponent).rev() {
+            z_power *= Complex64::new(z_ref_re, z_ref_im);
+            coefficient = coefficient * (k + 1) as f64 / (exponent - k) as f64;
+            table.push([z_power.re * coefficient, z_power.im * coefficient]);
+        }
+    }
+    table
 }
 
 fn compute_reference_orbit(
@@ -136,7 +177,12 @@ fn compute_reference_orbit(
         };
     }
 
-    ReferenceOrbit { values, escaped }
+    let coeff_table = compute_coeff_table(&values, exponent);
+    ReferenceOrbit {
+        values,
+        escaped,
+        coeff_table,
+    }
 }
 
 #[derive(PartialEq, Eq, Clone)]
@@ -387,6 +433,56 @@ fn pair_delta_step<const GENERAL: bool>(
     )
 }
 
+/// `pair_delta_step::<true>` with the per-index Horner terms read from the
+/// precomputed table instead of recomputed per step. Each loaded entry is the
+/// f64 pair the in-loop code would have produced (see `compute_coeff_table`),
+/// and the surviving arithmetic is unchanged, so results stay bit-identical —
+/// the win is dropping the serial `z_power` recurrence and the coefficient
+/// scaling from every pixel-step.
+#[cfg(target_arch = "wasm32")]
+#[inline]
+fn pair_delta_step_table(
+    table: &[[f64; 2]],
+    terms: usize,
+    index_first: usize,
+    index_second: usize,
+    dz_re: core::arch::wasm32::v128,
+    dz_im: core::arch::wasm32::v128,
+) -> (core::arch::wasm32::v128, core::arch::wasm32::v128) {
+    use core::arch::wasm32::*;
+
+    let row_first = &table[index_first * terms..index_first * terms + terms];
+    let row_second = &table[index_second * terms..index_second * terms + terms];
+
+    let mut sum_re = f64x2_splat(1.0);
+    let mut sum_im = f64x2_splat(0.0);
+
+    for (entry_first, entry_second) in row_first.iter().zip(row_second) {
+        // Each row entry is one [re, im] pair; shuffle two of them into the
+        // lanewise (re, re) / (im, im) vectors the sum update consumes.
+        let first = unsafe { v128_load(entry_first.as_ptr() as *const v128) };
+        let second = unsafe { v128_load(entry_second.as_ptr() as *const v128) };
+        let term_re = i64x2_shuffle::<0, 2>(first, second);
+        let term_im = i64x2_shuffle::<1, 3>(first, second);
+
+        let next_sum_re = f64x2_add(
+            f64x2_sub(f64x2_mul(sum_re, dz_re), f64x2_mul(sum_im, dz_im)),
+            term_re,
+        );
+        let next_sum_im = f64x2_add(
+            f64x2_add(f64x2_mul(sum_re, dz_im), f64x2_mul(sum_im, dz_re)),
+            term_im,
+        );
+        sum_re = next_sum_re;
+        sum_im = next_sum_im;
+    }
+
+    (
+        f64x2_sub(f64x2_mul(sum_re, dz_re), f64x2_mul(sum_im, dz_im)),
+        f64x2_add(f64x2_mul(sum_re, dz_im), f64x2_mul(sum_im, dz_re)),
+    )
+}
+
 /// One perturbation step for both lanes: advances the deltas, recombines with
 /// the reference orbit, and rebases lanes whose delta stopped being small.
 /// Escaped lanes keep stepping on garbage values (their output is frozen by
@@ -395,6 +491,7 @@ fn pair_delta_step<const GENERAL: bool>(
 #[cfg(target_arch = "wasm32")]
 fn pair_step<const GENERAL: bool>(
     orbit: &[(f64, f64)],
+    coeff_table: &[[f64; 2]],
     dc_re: core::arch::wasm32::v128,
     dc_im: core::arch::wasm32::v128,
     last_index: usize,
@@ -403,15 +500,45 @@ fn pair_step<const GENERAL: bool>(
 ) {
     use core::arch::wasm32::*;
 
-    let z_ref_first = orbit[state.index[0]];
-    let z_ref_second = orbit[state.index[1]];
-    let (step_re, step_im) = pair_delta_step::<GENERAL>(
-        f64x2(z_ref_first.0, z_ref_second.0),
-        f64x2(z_ref_first.1, z_ref_second.1),
-        state.dz_re,
-        state.dz_im,
-        exponent,
-    );
+    let (step_re, step_im) = if GENERAL && !coeff_table.is_empty() {
+        pair_delta_step_table(
+            coeff_table,
+            (exponent - 1) as usize,
+            state.index[0],
+            state.index[1],
+            state.dz_re,
+            state.dz_im,
+        )
+    } else {
+        let z_ref_first = orbit[state.index[0]];
+        let z_ref_second = orbit[state.index[1]];
+        pair_delta_step::<GENERAL>(
+            f64x2(z_ref_first.0, z_ref_second.0),
+            f64x2(z_ref_first.1, z_ref_second.1),
+            state.dz_re,
+            state.dz_im,
+            exponent,
+        )
+    };
+    pair_step_commit(orbit, dc_re, dc_im, last_index, state, step_re, step_im);
+}
+
+/// The tail of `pair_step` after the delta step: applies `+ dc`, recombines
+/// with the reference orbit, and rebases lanes whose delta stopped being
+/// small. Shared by the per-chain step and the fused general-exponent step.
+#[cfg(target_arch = "wasm32")]
+#[inline]
+fn pair_step_commit(
+    orbit: &[(f64, f64)],
+    dc_re: core::arch::wasm32::v128,
+    dc_im: core::arch::wasm32::v128,
+    last_index: usize,
+    state: &mut PairState,
+    step_re: core::arch::wasm32::v128,
+    step_im: core::arch::wasm32::v128,
+) {
+    use core::arch::wasm32::*;
+
     let new_dz_re = f64x2_add(step_re, dc_re);
     let new_dz_im = f64x2_add(step_im, dc_im);
 
@@ -448,6 +575,87 @@ fn pair_step<const GENERAL: bool>(
     state.z_im = new_z_im;
 }
 
+/// Advances every chain by one general-exponent perturbation step with the
+/// Horner terms from the coefficient table, running all chains' Horner
+/// recurrences in one fused loop. Each chain's Horner sum is a serial
+/// mul-add dependency chain; interleaving the chains gives the pipeline
+/// `CHAINS` independent chains per term instead of one. Per-lane operations
+/// and their order are identical to `pair_step`'s table path, so results are
+/// bit-identical.
+#[cfg(target_arch = "wasm32")]
+#[inline]
+fn fused_general_table_step<const CHAINS: usize>(
+    orbit: &[(f64, f64)],
+    coeff_table: &[[f64; 2]],
+    terms: usize,
+    dc_re: &[core::arch::wasm32::v128; CHAINS],
+    dc_im: &[core::arch::wasm32::v128; CHAINS],
+    last_index: usize,
+    state: &mut [PairState; CHAINS],
+) {
+    use core::arch::wasm32::*;
+
+    let mut sum_re = [f64x2_splat(1.0); CHAINS];
+    let mut sum_im = [f64x2_splat(0.0); CHAINS];
+    let mut offsets = [[0usize; 2]; CHAINS];
+    for chain in 0..CHAINS {
+        offsets[chain] = [state[chain].index[0] * terms, state[chain].index[1] * terms];
+    }
+
+    for j in 0..terms {
+        for chain in 0..CHAINS {
+            // In-bounds by construction: index <= last_index - 1 on entry
+            // (the commit rebases any lane that reaches last_index) and the
+            // table has a row of `terms` entries for every orbit index.
+            let first = unsafe {
+                v128_load(coeff_table.as_ptr().add(offsets[chain][0] + j) as *const v128)
+            };
+            let second = unsafe {
+                v128_load(coeff_table.as_ptr().add(offsets[chain][1] + j) as *const v128)
+            };
+            let term_re = i64x2_shuffle::<0, 2>(first, second);
+            let term_im = i64x2_shuffle::<1, 3>(first, second);
+
+            let next_sum_re = f64x2_add(
+                f64x2_sub(
+                    f64x2_mul(sum_re[chain], state[chain].dz_re),
+                    f64x2_mul(sum_im[chain], state[chain].dz_im),
+                ),
+                term_re,
+            );
+            let next_sum_im = f64x2_add(
+                f64x2_add(
+                    f64x2_mul(sum_re[chain], state[chain].dz_im),
+                    f64x2_mul(sum_im[chain], state[chain].dz_re),
+                ),
+                term_im,
+            );
+            sum_re[chain] = next_sum_re;
+            sum_im[chain] = next_sum_im;
+        }
+    }
+
+    for chain in 0..CHAINS {
+        let step_re = f64x2_sub(
+            f64x2_mul(sum_re[chain], state[chain].dz_re),
+            f64x2_mul(sum_im[chain], state[chain].dz_im),
+        );
+        let step_im = f64x2_add(
+            f64x2_mul(sum_re[chain], state[chain].dz_im),
+            f64x2_mul(sum_im[chain], state[chain].dz_re),
+        );
+        pair_step_commit(
+            orbit,
+            dc_re[chain],
+            dc_im[chain],
+            last_index,
+            &mut state[chain],
+            step_re,
+            step_im,
+        );
+    }
+}
+
 /// Escape iterations for two pixels at once using f64 deltas with rebasing,
 /// one pixel per 128-bit SIMD lane. Lane arithmetic is IEEE-identical to
 /// `perturbed_escape_iterations_f64`, so results match it bit-for-bit; lanes
@@ -455,6 +663,7 @@ fn pair_step<const GENERAL: bool>(
 #[cfg(target_arch = "wasm32")]
 fn perturbed_escape_iterations_f64_pair<const GENERAL: bool>(
     orbit: &[(f64, f64)],
+    coeff_table: &[[f64; 2]],
     dc_first: Complex64,
     dc_second: Complex64,
     max_iterations: u32,
@@ -478,7 +687,15 @@ fn perturbed_escape_iterations_f64_pair<const GENERAL: bool>(
 
     // Pre-step, mirroring the scalar version: afterwards z equals each
     // pixel's own c.
-    pair_step::<GENERAL>(orbit, dc_re, dc_im, last_index, exponent, &mut state);
+    pair_step::<GENERAL>(
+        orbit,
+        coeff_table,
+        dc_re,
+        dc_im,
+        last_index,
+        exponent,
+        &mut state,
+    );
 
     let mut z_out_re = state.z_re;
     let mut z_out_im = state.z_im;
@@ -504,7 +721,15 @@ fn perturbed_escape_iterations_f64_pair<const GENERAL: bool>(
             break;
         }
 
-        pair_step::<GENERAL>(orbit, dc_re, dc_im, last_index, exponent, &mut state);
+        pair_step::<GENERAL>(
+            orbit,
+            coeff_table,
+            dc_re,
+            dc_im,
+            last_index,
+            exponent,
+            &mut state,
+        );
         z_out_re = v128_bitselect(state.z_re, z_out_re, alive);
         z_out_im = v128_bitselect(state.z_im, z_out_im, alive);
         lane_iterations = i64x2_sub(lane_iterations, alive);
@@ -599,6 +824,7 @@ const PERTURB_STREAM_STRIDE: u32 = 16;
 #[cfg(target_arch = "wasm32")]
 fn stream_perturbed_escape_f64<const CHAINS: usize, const GENERAL: bool>(
     orbit: &[(f64, f64)],
+    coeff_table: &[[f64; 2]],
     dc_of: impl Fn(usize) -> Complex64,
     pixel_count: usize,
     max_iterations: u32,
@@ -699,6 +925,36 @@ fn stream_perturbed_escape_f64<const CHAINS: usize, const GENERAL: bool>(
 
     loop {
         for _ in 0..PERTURB_STREAM_STRIDE {
+            if GENERAL && !coeff_table.is_empty() {
+                // Escape checks first (they only read the frozen z_out), then
+                // all chains' delta steps fused so their serial Horner
+                // recurrences overlap, then the commits. Per-lane values are
+                // identical to the per-chain order below.
+                for chain in 0..CHAINS {
+                    let norm_sqr = f64x2_add(
+                        f64x2_mul(z_out_re[chain], z_out_re[chain]),
+                        f64x2_mul(z_out_im[chain], z_out_im[chain]),
+                    );
+                    alive[chain] = v128_and(alive[chain], f64x2_lt(norm_sqr, radius_squared));
+                }
+                fused_general_table_step::<CHAINS>(
+                    orbit,
+                    coeff_table,
+                    (exponent - 1) as usize,
+                    &dc_re,
+                    &dc_im,
+                    last_index,
+                    &mut state,
+                );
+                for chain in 0..CHAINS {
+                    z_out_re[chain] =
+                        v128_bitselect(state[chain].z_re, z_out_re[chain], alive[chain]);
+                    z_out_im[chain] =
+                        v128_bitselect(state[chain].z_im, z_out_im[chain], alive[chain]);
+                    iters[chain] = i64x2_sub(iters[chain], alive[chain]);
+                }
+                continue;
+            }
             for chain in 0..CHAINS {
                 let norm_sqr = f64x2_add(
                     f64x2_mul(z_out_re[chain], z_out_re[chain]),
@@ -707,6 +963,7 @@ fn stream_perturbed_escape_f64<const CHAINS: usize, const GENERAL: bool>(
                 alive[chain] = v128_and(alive[chain], f64x2_lt(norm_sqr, radius_squared));
                 pair_step::<GENERAL>(
                     orbit,
+                    coeff_table,
                     dc_re[chain],
                     dc_im[chain],
                     last_index,
@@ -1482,6 +1739,7 @@ impl PerturbedFrame {
                         };
                         stream_perturbed_escape_f64::<PERTURB_STREAM_CHAINS, false>(
                             &self.orbit.values,
+                            &self.orbit.coeff_table,
                             dc_of,
                             pixels.len(),
                             self.max_iterations,
@@ -1496,6 +1754,7 @@ impl PerturbedFrame {
                     |pixel: usize| self.pixel_dc_f64(pixel % image_width, pixel / image_width);
                 stream_perturbed_escape_f64::<PERTURB_STREAM_CHAINS, true>(
                     &self.orbit.values,
+                    &self.orbit.coeff_table,
                     dc_of,
                     pixel_count,
                     self.max_iterations,
@@ -1570,6 +1829,7 @@ impl PerturbedFrame {
         if self.exponent == 2 {
             perturbed_escape_iterations_f64_pair::<false>(
                 &self.orbit.values,
+                &self.orbit.coeff_table,
                 dc_first,
                 dc_second,
                 self.max_iterations,
@@ -1579,6 +1839,7 @@ impl PerturbedFrame {
         } else {
             perturbed_escape_iterations_f64_pair::<true>(
                 &self.orbit.values,
+                &self.orbit.coeff_table,
                 dc_first,
                 dc_second,
                 self.max_iterations,

@@ -1281,3 +1281,119 @@ Reproduce: `cargo test --release bla_probe -- --ignored --nocapture` and
 (probes committed in mandelbrot/src/perturbation_test.rs);
 `CARGO_PROFILE_RELEASE_PANIC=abort node src/build.mjs panic-abort && node
 src/run.mjs --variants baseline,panic-abort --filter syn-`.
+
+## 2026-07-09 — SHIPPED: per-orbit-index Horner coefficient table + fused-chain general step (e52 e2e −73.3%)
+
+Machine: mac arm64 (M1 Pro, 8 logical cores), Chrome for Testing 136,
+macOS 14. Code change only (mandelbrot/src/perturbation.rs); no flag,
+config, or client JS changes. Pre-change ref: d85d0cb.
+
+Session directive: "try ideas implemented in performant Mandelbrot set
+projects which we haven't tried." Survey outcome: the canon is nearly
+exhausted here — perturbation+rebasing, Mariani–Silver, periodicity,
+cardioid/bulb, SIMD kernels, warmups all shipped; BLA/SA and multiplier
+interior detection settled negative at real pf64 depths; rescaled-epoch
+loops traffic-gated (no z400+ views); XaoS-style pixel reuse violates the
+output bar. Two untried ideas remained: conjugation-symmetry mirroring
+(structural negative, see next entry) and this one — precomputing the
+reference-orbit-derived Horner terms of the general-exponent (multibrot)
+delta step once per orbit instead of once per pixel-step, the standard
+practice in KF/Imagina-class renderers. Target: the e52 view
+(user-z48-0611aae8), still the slowest real view in the export (~74 s
+e2e) after the general-exponent stream kernel ship.
+
+**Change 1 — coefficient table:** `ReferenceOrbit` gains `coeff_table`:
+for exponent != 2, the Horner terms `C(e,k)·Z_n^(e-k)` depend only on the
+orbit index n, so they are built once per orbit (`compute_coeff_table`)
+with the exact operation sequence the in-loop code used — consuming them
+is bit-identical. `pair_delta_step_table` replaces the per-step serial
+`z_power` complex-mul recurrence + coefficient scaling with two v128
+loads + two shuffles per term. Capped at 512Ki entries / 8 MiB
+(`COEFF_TABLE_MAX_ENTRIES`); over-cap orbits fall back to the on-the-fly
+loop. e52 real table: 85-entry orbit × 51 terms ≈ 69 KB. Alone: e52
+−33.5% wasm-level (74.5 → 49.5 ms/Miter).
+
+**Change 2 — fused-chain step (the bigger half):** the Horner sum is a
+serial mul→add dependency chain (51 dependent steps per pixel-step for
+e52), and the stream kernel ran each chain's Horner loop to completion
+before the next chain's — latency-bound, not throughput-bound.
+`fused_general_table_step` advances all 4 chains' Horner recurrences in
+one interleaved loop over terms (per-lane op order unchanged →
+bit-identical), giving the pipeline 4 independent chains. On top of the
+table: another −60.4% (49.5 → 19.5 ms/Miter). The unfused pair kernel
+still serves `border_in_set` early-exit probes.
+
+Wasm-level (run.mjs, full 43-case corpus, 10 samples, baseline vs
+coeff-fused, baseline built from clean tree @d85d0cb):
+
+| case | delta |
+|---|---|
+| user-z48-0611aae8 (e52, i45999) | **−73.7%** (2475 → 651 ms @64px; 74.5 → 20.0 ms/Miter; cold −73.9%) |
+| user-z48-58cd3904 (e4 in-set) / syn-pf64-z100-multibrot3 | +1.3% / +0.7% at n=15 (not significant; ~3 ms absolute, accepted) |
+| direct / pf64 / float-exp geomean | +0.0% / −5.8% (all from e52) / +0.3% |
+
+Correctness: cargo test 59/59; pixel-check byte-identical on all 43
+corpus cases; enrich --check matches all blessed hashes. Zero output
+change — no re-bless, no --allow-diff.
+
+Holdout ship gate (seed 2026-07-09, 40/tier): direct +0.4%, pf64 −1.3%,
+time-weighted −0.7%; one real mover, a multibrot holdout view
+(hold-z48-2e40c56e) at **−52.0%**. The n=3 pass flagged several sub-10 ms
+views at +6–8%; the full re-run at --samples 10 dissolved all of them
+(two flipped sign) — the validator's noise-floor note strikes again.
+
+E2E ship gate (complete builds pre=d85d0cb / post, 3 rounds standard +
+2 rounds multibrot 800x600):
+- Standard grid corpus: all eight cases within ±2.9%, overall geomean
+  −0.5%; colds track warm; no warmup tax anywhere.
+- grid-z48-e52-0611aae8: **73977 → 19758 ms (−73.3%, cold −73.3%)**.
+  No new warmup needed: the fused step lives inside the kernel
+  `warmupGeneral` already renders through, so tier-up covers it — the
+  identical cold deltas confirm.
+
+Size: bench artifact 318.8 → 323.3 KiB (+1.4%); production module wasm
+320.0 → 324.6 KiB (+4.6 KiB).
+
+Verdict: shipped. The slowest real view in the export drops 133 s → 74 s
+→ **19.8 s** across three days of experiments; all other traffic
+unaffected. Mechanism note that survives: when a SIMD kernel's per-step
+work contains a long *serial* recurrence, chain-interleaving it is worth
+more than removing ops (−60% vs −33% here) — check latency-boundedness
+before micro-optimizing op counts.
+
+Reproduce: `node src/run.mjs --variants baseline,coeff-fused --filter
+user-z48-0611aae8 --budget-ms 30000`; `node src/validate.mjs --variants
+baseline,coeff-fused --samples 10`; `node src/build-dist.mjs pre-coeff
+--ref d85d0cb && node src/build-dist.mjs post-coeff && node
+src/run-e2e.mjs --variants pre-coeff,post-coeff` plus `--corpus
+corpus/grid-multibrot.json --viewport 800x600 --rounds 2 --warmup 0`.
+
+## 2026-07-09 — NEGATIVE (structural, no benchmark): conjugation-symmetry tile mirroring
+
+Settled by arithmetic, not measurement — recording it so nobody probes it
+again. The classic fractint "symmetry" trick (tiles below the real axis
+are exact vertical mirrors of tiles above it; escape counts are exactly
+conjugation-symmetric, and IEEE negation is exact, so mirrored output
+would be byte-identical) cannot apply to this client's tile pyramid:
+
+1. **The axis never lands on a tile or pixel boundary.** The tile→complex
+   mapping is `(v / 2^(tz-2)) · (200/128) − 4` scaled by `2^-zoomOffset`
+   from the view origin (lib.rs `render_tile_precise` docs,
+   perturbation.rs `tile_coordinate_offset`). With `origin_im = 0` the
+   axis sits at fractional tile coordinate `0.64·2^tz`; the factor
+   200/128 = 25/16 puts a 25 in the denominator, so `16·2^tz/25` is never
+   an integer or half-integer — no whole-tile mirror pairs exist at any
+   zoom, and within a tile the axis is never at a pixel-symmetric offset.
+   Pixel rows below the axis are near-mirrors offset by an arbitrary
+   sub-pixel amount → not byte-exact → fails the output bar.
+2. **The traffic isn't there anyway.** Mirroring needs the axis *in the
+   visible grid*. The heavy deep views sit near but not on the axis at
+   scales where "near" is astronomically far: grid-z47-i50000 has
+   im ≈ 4.4e-3 against a ~4.4e-14 tile span (~10^11 tiles from the axis);
+   grid-z48-i48000 similar. Only shallow on-axis views (home view, whole
+   needle/cusp) could ever pair tiles, and those are millisecond grids.
+
+Consequence: exact-mirror reuse would require re-anchoring the tile grid
+to the axis (a client architecture change that breaks for arbitrary
+origins) to save time on views that cost almost nothing. Do not revisit
+within the current tile addressing scheme.

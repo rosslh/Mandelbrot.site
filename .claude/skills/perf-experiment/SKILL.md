@@ -270,8 +270,10 @@ the geomeans.
 What the export says about real usage (probed 2026-07-07): the pf64 tier is
 effectively all z47–59 (one lone view past z60), there is exactly one
 float-exp view (z259), and the slowest real views are 25k–50k-iteration
-pf64 tiles — including an exponent-52 view (~60 s/tile at 200px) where the
-O(exponent) Horner delta step, not the iteration count, is the cost.
+pf64 tiles — including an exponent-52 view whose O(exponent) Horner delta
+step, not the iteration count, was the cost (~60 s/tile at 200px when
+found; ~6 s/tile after the 2026-07-08/09 general-kernel + coefficient-table
+ships).
 
 ### Holdout validation (anti-overfitting ship gate)
 
@@ -410,6 +412,13 @@ effect of an experiment.
    (nightly -Zbuild-std + panic_immediate_abort) is out of scope on the
    stable-toolchain policy.
 
+**SETTLED 2026-07-09 (structural negative — do not revisit):
+conjugation-symmetry tile mirroring.** The 200/128 = 25/16 factor in the
+tile→complex mapping puts the real axis at fractional tile coordinate
+0.64·2^tz — never on a tile or pixel boundary at any zoom, so exact mirror
+pairs cannot exist in this pyramid; and the heavy deep views sit ~10^11
+tiles off-axis anyway. Full arithmetic in the LOG entry.
+
 Shipped milestones: manual f64x2 pixel pairing + tier-up warmup (2026-07-04,
 −16.8% e2e; **standing rule: hand-written SIMD hot loops ship only with a
 tier-up warmup and an e2e cold-pass check**); quad batching + interior checks
@@ -418,4 +427,7 @@ f64/ComplexExp float-exp loop (2026-07-07, z259 e2e −84.7%); pf64 lane-refill
 stream kernel + (dz, index) Brent periodicity (2026-07-08, grid-z47 e2e
 −40%, e52 −31%); general-exponent pf64 stream kernel + conditional warmups
 (2026-07-08, e52 e2e −44.6%); pf64 Mariani–Silver + hybrid float-exp stream
-kernel (2026-07-08).
+kernel (2026-07-08); per-orbit-index Horner coefficient table + fused-chain
+general step (2026-07-09, e52 e2e −73.3%, 74 → 19.8 s — mechanism note: a
+long *serial* recurrence inside a SIMD step is latency-bound; interleaving
+independent chains beat removing ops, −60% vs −33%).
