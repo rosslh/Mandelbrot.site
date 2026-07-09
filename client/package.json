@@ -9,7 +9,7 @@
     "dev": "webpack-dev-server --mode development --open --port 9090",
     "serve": "npx http-server dist -p 9090",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . --ignore-path ../.gitignore && cd ../mandelbrot && cargo clippy",
+    "lint": "eslint . --ignore-path ../.gitignore && cd ../mandelbrot && cargo clippy --all-targets",
     "format": "prettier --ignore-path ../.gitignore --write . && cd ../mandelbrot && cargo fmt",
     "format:check": "prettier --ignore-path ../.gitignore --check . && cd ../mandelbrot && cargo fmt -- --check",
     "test": "cargo test",

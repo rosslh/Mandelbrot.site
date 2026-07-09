@@ -343,14 +343,8 @@ fn pair_delta_step<const GENERAL: bool>(
         let doubled_re = f64x2_add(f64x2_mul(f64x2_splat(2.0), z_ref_re), dz_re);
         let doubled_im = f64x2_add(f64x2_mul(f64x2_splat(2.0), z_ref_im), dz_im);
         return (
-            f64x2_sub(
-                f64x2_mul(doubled_re, dz_re),
-                f64x2_mul(doubled_im, dz_im),
-            ),
-            f64x2_add(
-                f64x2_mul(doubled_re, dz_im),
-                f64x2_mul(doubled_im, dz_re),
-            ),
+            f64x2_sub(f64x2_mul(doubled_re, dz_re), f64x2_mul(doubled_im, dz_im)),
+            f64x2_add(f64x2_mul(doubled_re, dz_im), f64x2_mul(doubled_im, dz_re)),
         );
     }
 
@@ -1033,8 +1027,13 @@ fn hybrid_warm_in(
     escape_radius_squared: f64,
 ) -> HybridWarmIn<'_> {
     if dc.is_zero() || dc.exp < HYBRID_DC_MIN_EXP {
-        let (iterations, z) =
-            perturbed_escape_iterations_float_exp(orbit, dc, max_iterations, 2, escape_radius_squared);
+        let (iterations, z) = perturbed_escape_iterations_float_exp(
+            orbit,
+            dc,
+            max_iterations,
+            2,
+            escape_radius_squared,
+        );
         return HybridWarmIn::Finished(iterations, z);
     }
 
@@ -1174,12 +1173,8 @@ fn stream_hybrid_escape<const CHAINS: usize>(
                 scalar.big = false;
             }
             let start = (i64x2_lane(iters[chain], sub) as u32).min(max_iterations);
-            results[pixel] = run_hybrid_to_completion(
-                &mut scalar,
-                start,
-                max_iterations,
-                escape_radius_squared,
-            );
+            results[pixel] =
+                run_hybrid_to_completion(&mut scalar, start, max_iterations, escape_radius_squared);
             refill_lane!(chain, sub);
         }};
     }
@@ -1256,10 +1251,8 @@ fn stream_hybrid_escape<const CHAINS: usize>(
                 let z_next_second = orbit[index_second];
                 let new_z_re = f64x2_add(f64x2(z_next_first.0, z_next_second.0), new_dz_re);
                 let new_z_im = f64x2_add(f64x2(z_next_first.1, z_next_second.1), new_dz_im);
-                let z_norm_sqr = f64x2_add(
-                    f64x2_mul(new_z_re, new_z_re),
-                    f64x2_mul(new_z_im, new_z_im),
-                );
+                let z_norm_sqr =
+                    f64x2_add(f64x2_mul(new_z_re, new_z_re), f64x2_mul(new_z_im, new_z_im));
 
                 let at_orbit_end = i64x2(
                     -((index_first == last_index) as i64),

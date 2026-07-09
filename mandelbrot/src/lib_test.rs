@@ -1,5 +1,9 @@
 use super::*;
 
+// Renaming this module to the conventional `tests` would rename the module
+// path baked into every checked-in insta snapshot filename
+// (mandelbrot__lib_test__lib_test__*.snap), so the inception stays.
+#[allow(clippy::module_inception)]
 #[cfg(test)]
 mod lib_test {
     use rayon::prelude::*;
@@ -416,15 +420,15 @@ mod lib_test {
                 0,
                 as_i32(MAX_ITERATIONS),
             );
-            for n in response.iter() {
-                assert!(
-                    *n <= u8::MAX,
-                    "Invalid color value: {} at tile: ({}, {}, {}, {})",
-                    n,
-                    x_min,
-                    x_max,
-                    y_min,
-                    y_max
+            assert_eq!(
+                response.len(),
+                256 * 256 * 4,
+                "wrong image size at tile: ({x_min}, {x_max}, {y_min}, {y_max})"
+            );
+            for pixel in response.chunks_exact(4) {
+                assert_eq!(
+                    pixel[3], 255,
+                    "non-opaque pixel at tile: ({x_min}, {x_max}, {y_min}, {y_max})"
                 );
             }
         }
@@ -1058,7 +1062,7 @@ mod lib_test {
             0.0,
             false,
             50.0,
-            (50.0 as f64).max(50.0 + f64::EPSILON),
+            50.0_f64.max(50.0 + f64::EPSILON),
         );
 
         // When parameters are correctly ordered
@@ -1393,8 +1397,9 @@ mod lib_test {
         // The function returns a color for NaN inputs because they escape immediately
         assert_eq!(color, [34, 23, 27]);
 
-        // Test extreme color transformations
-        let color = super::compute_pixel_color(
+        // Extreme color transformations should not panic; the exact output
+        // is not pinned down.
+        let _ = super::compute_pixel_color(
             2.0,
             2.0,
             100,
@@ -1409,8 +1414,6 @@ mod lib_test {
             0.0,
             100.0,
         );
-        // Should return a valid color after transformation (just check it doesn't panic)
-        assert!(color.iter().all(|&c| c <= u8::MAX));
     }
 
     #[test]
@@ -1763,7 +1766,7 @@ mod lib_test {
             0.0,
             false,
             0.0,
-            (0.0 as f64).max(0.0 + f64::EPSILON),
+            0.0_f64.max(0.0 + f64::EPSILON),
         );
 
         // When min equals max, max gets clamped to min+epsilon

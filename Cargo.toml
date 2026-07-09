@@ -1,6 +1,7 @@
 [workspace]
 
 members = ["mandelbrot"]
+resolver = "2"
 
 # opt-level 3 (not "s") because LLVM only autovectorizes the escape loops at
 # 2+; combined with simd128 (.cargo/config.toml) it cuts deep-zoom tile times
