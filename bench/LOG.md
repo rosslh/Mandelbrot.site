@@ -1763,3 +1763,72 @@ artifacts gendefer/gendefer6/gendefer8/gendefer6s32/gendefer6s64;
 src/build-dist.mjs post-gendefer && node src/run-e2e.mjs --variants
 pre-gendefer,post-gendefer --rounds 3 --warmup 0` (and the same with
 `--corpus corpus/grid-multibrot.json`).
+
+## 2026-07-10 — SHIPPED: initial tile batch dispatches at pool-ready + 100 ms instead of waiting out the 350 ms debounce
+
+Machine: Rosss-MacBook-Pro.local darwin/arm64 Apple M1 Pro, Chrome 136.
+Client-JS change only (MandelbrotLayer.ts, MandelbrotMap.ts); wasm untouched
+and byte-identical, so pixel-check/enrich/holdout do not apply — run-e2e on
+complete builds is the whole gate.
+
+First audit of the fixed per-load floor (new territory under the direct-tier
+focus: it taxes 100% of loads, and the 91%-of-traffic direct tier is mostly
+light views that are all floor). Decomposition probe: on desktop, every view
+with iterations > 500 routes tiles through a 350 ms trailing debounce
+(MandelbrotLayer.debounceTileGeneration); the initial burst arrives in one
+tick, so the whole grid idles until t≈375 ms while the pool is spawned and
+warmed by ~140 ms. Measured by flipping one view across the i≤500
+immediate-path boundary (same compute): z20 load 239 ms immediate vs 569 ms
+debounced — ~330 ms of pure latency on essentially every real shared-link
+load (export views run i800–51200).
+
+The fix took three iterations — the intermediate failures are the durable
+lesson:
+1. Flush at t≈0 (setTimeout 0): light views −31..−52%, but grid-z28
+   +8.0% warm / +15.8% cold *. Tile-completion curves showed first tiles
+   per worker at 1.6–2.2x normal: the debounce had been accidentally
+   serving as a TurboFan tier-up shadow. The spawn warmups only *trigger*
+   tiering; dispatching before the compile lands runs each worker's
+   in-flight stream-kernel call (one call per wave) at Liftoff speed.
+2. Flush at pool-ready (~140 ms, new MandelbrotMap.poolSpawned promise):
+   z28 flipped to −5.8% in an isolated probe but stayed bimodal across
+   rounds (5279 vs 6710 ms samples, 2 of 5 curve-probe passes bad) — with
+   all 7 workers dispatching real tiles immediately, Liftoff execution
+   occupies every core and starves the compile threads, so whether the
+   compile wins is a coin flip.
+3. Flush at pool-ready + TIER_UP_GRACE_MS = 100 of idle: the compile gets
+   a quiet machine; 7/7 curve-probe passes clean (first tiles ~965–1235 ms,
+   tight), and z28 becomes a small outright win.
+
+E2E ship gate (complete builds pre=bb5e75e / post=this change, 3 rounds,
+warmup 0, 1600x900), grid-regression all 10 cases:
+- grid-z20-i1600 615 → 378 ms (−38.6%, cold −35.4%); grid-z46-i6400
+  −33.9%; grid-z36-i51200 −30.0%; grid-z48-i800 −18.3%; grid-z259 −11.4%;
+  grid-z48-i20000 −7.9% — all *.
+- grid-z28-i50000 5586 → 5415 ms (−3.0%*, cold −3.4%, MAD ±25 — no
+  bimodality); grid-z47 −0.2%, grid-z48-i48000 −0.9%, grid-z85-i200 −3.4%
+  (all n.s. guards).
+- Overall geomean −16.0%. grid-multibrot: z30-e6 −5.0%*, z48-e52 −0.8%.
+- Wasm size unchanged (byte-identical module).
+
+Interaction behavior is untouched: the flush consumes a once-per-layer flag
+on the first debounced batch (which is always a full-view burst — the
+debounced path only activates at i>500, reachable from an i≤500 start only
+via a settings refresh), and pan/zoom flurries plus the existing drag-flush
+keep the 350 ms debounce.
+
+Mechanism notes that survive: (1) the per-load floor decomposes as ~140 ms
+pool spawn+warmup, ~235 ms of pure debounce idle, and the debounce idle was
+also hiding TurboFan compile latency — any future change to warmups, pool
+size, or dispatch timing must re-check the z28-class first-tile curves for
+Liftoff staggering (probe pattern: first-8 tile completion times, bad passes
+show 1.6–2.4x stagger); (2) "budget consumed" ≠ "tiered" — spawn warmups
+guarantee the trigger, not the swap, and the swap needs idle CPU headroom;
+(3) an isolated single-case e2e probe can miss an intermittent regression —
+the bimodality only showed up across repeated passes (re-run suspicious
+heavy-case results with a multi-pass curve probe, not one more 3-round run).
+
+Reproduce: node src/build-dist.mjs pre-flush --ref bb5e75e && node
+src/build-dist.mjs post-flush3 && node src/run-e2e.mjs --variants
+pre-flush,post-flush3 --rounds 3 --warmup 0 (and the same with --corpus
+corpus/grid-multibrot.json).

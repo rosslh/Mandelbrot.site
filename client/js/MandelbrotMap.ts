@@ -166,6 +166,10 @@ class MandelbrotMap extends L.Map {
   initialConfig: MandelbrotConfig;
   config: MandelbrotConfig;
   pool: Pool<TaskThread>;
+  // Resolves once every worker in the current pool has spawned and finished
+  // its warmup renders; the tile layer holds the initial batch until then
+  // (see queueTileGeneration).
+  poolSpawned: Promise<void>;
   imageSaver: ImageSaver;
   queuedTileTasks: QueuedTileTask[] = [];
   origin: { re: string; im: string };
@@ -652,6 +656,12 @@ class MandelbrotMap extends L.Map {
       !isMultibrot &&
       !warmFloatExpKernel &&
       initialZoom >= DEEP_ZOOM_THRESHOLD;
+    const poolSize = renderPoolSize();
+    let spawnedWorkers = 0;
+    let signalPoolSpawned: () => void;
+    this.poolSpawned = new Promise((resolve) => {
+      signalPoolSpawned = resolve;
+    });
     this.pool = Pool(async () => {
       const worker = await spawn(new Worker("./worker.js"));
       if (warmGeneralKernel) {
@@ -666,8 +676,11 @@ class MandelbrotMap extends L.Map {
       if (warmDeepKernel) {
         await worker({ type: "warmupDeep" });
       }
+      if (++spawnedWorkers === poolSize) {
+        signalPoolSpawned();
+      }
       return worker;
-    }, renderPoolSize());
+    }, poolSize);
   }
 
   async refresh(resetView = false) {

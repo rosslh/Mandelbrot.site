@@ -5,6 +5,12 @@ import { MandelbrotResponse, TileRect, WorkerRequest } from "./MandelbrotMap";
 
 type Done = (error: null, tile: HTMLCanvasElement) => void;
 
+// Idle time between the worker pool coming up (spawned + warmup renders done)
+// and the initial tile batch dispatching, so the TurboFan compiles the
+// warmups trigger can land before real tiles occupy every core (see
+// queueTileGeneration).
+const TIER_UP_GRACE_MS = 100;
+
 // Fired (once per page load) when the first map tile finishes rendering.
 // index.ts listens for this as proof that the served asset set is healthy and
 // its one-shot cache-recovery guards can be re-armed.
@@ -51,6 +57,7 @@ class MandelbrotLayer extends L.GridLayer {
   tileSize: number;
   _map: MandelbrotMap;
   tilesToGenerate: TileGenerationTask[] = [];
+  private initialBatchFlushScheduled = false;
 
   constructor() {
     super({
@@ -164,6 +171,26 @@ class MandelbrotLayer extends L.GridLayer {
   ) {
     this.tilesToGenerate.push({ position: tilePosition, canvas, done });
     this.debounceTileGeneration();
+    // The initial page-load burst is requested in a single tick, but the
+    // trailing debounce would leave the worker pool idle for most of its wait
+    // (~330 ms of pure latency on every load; workers are spawned and warmed
+    // by ~140 ms — bench/LOG.md 2026-07-10). Flush shortly after the pool is
+    // fully ready — not immediately: the spawn warmups only *trigger* the
+    // wasm tier-up, and dispatching before that TurboFan compile lands makes
+    // every worker's first heavy tile run its in-flight kernel call at
+    // Liftoff speed while the busy workers starve the compile threads
+    // (measured: intermittent +9..+20% on the heaviest direct grid). The
+    // grace gives the compile a quiet machine to finish on. Later batches
+    // (pan/zoom flurries, setting changes) keep the debounce.
+    if (!this.initialBatchFlushScheduled) {
+      this.initialBatchFlushScheduled = true;
+      void this._map.poolSpawned.then(() => {
+        setTimeout(
+          () => this.debounceTileGeneration.flush(),
+          TIER_UP_GRACE_MS,
+        );
+      });
+    }
   }
 
   refresh() {
