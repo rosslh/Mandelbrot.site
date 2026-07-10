@@ -37,7 +37,10 @@ const PERIODICITY_CHECK_STRIDE: u32 = 4;
 // (2 pixels per vector). Each vector is an independent FP dependency chain.
 // With deferred escape checks both kernels' per-step loops are light enough
 // that 6 chains fit without spills (each re-swept 4/6/8 after its deferral
-// ship: 6 fastest, 8 in between).
+// ship: 6 fastest, 8 in between). The general kernel keeps 6 in BOTH lanes:
+// re-swept 4/6/8 x stride 32/64/128 after the relaxed-FMA fused-c step
+// (2026-07-10) — powu's per-chain temporaries make 8 spill (+9% on the e6
+// heavy) and 4 starve the pipeline (+44%).
 #[cfg(target_arch = "wasm32")]
 const STREAM_CHAINS: usize = 6;
 // The relaxed-simd FMA step has a shorter critical path (2 vs 3), so the
@@ -60,7 +63,14 @@ const QUADRATIC_STREAM_CHAINS: usize = 6;
 // PERIODICITY_CHECK_STRIDE. Both kernels defer all checks to the boundary,
 // making the per-step loops cheap enough that stride 32 pays (each swept
 // 16/32/64: 64 punishes low-iteration escapers via free-run waste).
-#[cfg(target_arch = "wasm32")]
+// The relaxed-simd FMA fused-c powu step is cheaper per iteration, moving
+// the general kernel's stride optimum to 64 (re-swept 2026-07-10 after the
+// general-kernel FMA ship: s64 75.3 ms vs s32 77.8 ms on the e6 heavy;
+// s128 only another -1%, not worth doubling the free-run/replay tax on
+// fast-escaping views). The simd128 fallback keeps its measured 32.
+#[cfg(all(target_arch = "wasm32", target_feature = "relaxed-simd"))]
+const STREAM_STRIDE: u32 = 64;
+#[cfg(all(target_arch = "wasm32", not(target_feature = "relaxed-simd")))]
 const STREAM_STRIDE: u32 = 32;
 #[cfg(all(target_arch = "wasm32", target_feature = "relaxed-simd"))]
 const QUADRATIC_STREAM_STRIDE: u32 = 64;
@@ -929,6 +939,14 @@ fn stream_escape_quadratic<const CHAINS: usize>(
 /// Multiplies two complex numbers held as (re, im) f64x2 lane pairs, with
 /// num-complex's operation order per lane so lane arithmetic is
 /// IEEE-identical to `Complex64` multiplication.
+///
+/// In relaxed-simd builds (the dual-build fast artifact) each component's
+/// second multiply fuses into the combining add/sub — hardware FMA, 6 ops
+/// -> 4 per complex multiply. The result is then rounding-class different
+/// from `Complex64` multiplication; every caller trajectory is judged by
+/// the statistical-equivalence tier, and any scalar recovery path must
+/// replay through these same instructions (see `stream_escape_general`).
+/// The simd128-only artifact keeps the exact form.
 #[cfg(target_arch = "wasm32")]
 #[inline]
 fn complex_mul_lanes(
@@ -938,10 +956,20 @@ fn complex_mul_lanes(
     b_im: core::arch::wasm32::v128,
 ) -> (core::arch::wasm32::v128, core::arch::wasm32::v128) {
     use core::arch::wasm32::*;
-    (
-        f64x2_sub(f64x2_mul(a_re, b_re), f64x2_mul(a_im, b_im)),
-        f64x2_add(f64x2_mul(a_re, b_im), f64x2_mul(a_im, b_re)),
-    )
+    #[cfg(target_feature = "relaxed-simd")]
+    {
+        (
+            f64x2_relaxed_nmadd(a_im, b_im, f64x2_mul(a_re, b_re)),
+            f64x2_relaxed_madd(a_im, b_re, f64x2_mul(a_re, b_im)),
+        )
+    }
+    #[cfg(not(target_feature = "relaxed-simd"))]
+    {
+        (
+            f64x2_sub(f64x2_mul(a_re, b_re), f64x2_mul(a_im, b_im)),
+            f64x2_add(f64x2_mul(a_re, b_im), f64x2_mul(a_im, b_re)),
+        )
+    }
 }
 
 /// Raises every chain's z lanes to `exponent`, replicating num-complex's
@@ -950,7 +978,7 @@ fn complex_mul_lanes(
 /// step in the chain's dependency chain, so all chains advance through each
 /// step together to keep `CHAINS` independent chains in the pipeline (the
 /// same latency-hiding structure as the perturbation fused general step).
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", not(target_feature = "relaxed-simd")))]
 #[inline]
 fn fused_powu_lanes<const CHAINS: usize>(
     z_re: &[core::arch::wasm32::v128; CHAINS],
@@ -1014,12 +1042,145 @@ fn fused_powu_lanes<const CHAINS: usize>(
     (acc_re, acc_im)
 }
 
+/// Complex multiply-add for (re, im) f64x2 lane pairs in relaxed-simd
+/// builds: `a * b + addend` with both the inner cross terms and the addend
+/// fused (4 FMA-class ops, one shorter dependency chain than multiply then
+/// add). Used to fold the escape step's `+ c` into the final multiply of
+/// the powu chain; rounding-class output, judged like `complex_mul_lanes`.
+#[cfg(all(target_arch = "wasm32", target_feature = "relaxed-simd"))]
+#[inline]
+fn complex_mul_add_lanes(
+    a_re: core::arch::wasm32::v128,
+    a_im: core::arch::wasm32::v128,
+    b_re: core::arch::wasm32::v128,
+    b_im: core::arch::wasm32::v128,
+    add_re: core::arch::wasm32::v128,
+    add_im: core::arch::wasm32::v128,
+) -> (core::arch::wasm32::v128, core::arch::wasm32::v128) {
+    use core::arch::wasm32::*;
+    (
+        f64x2_relaxed_madd(a_re, b_re, f64x2_relaxed_nmadd(a_im, b_im, add_re)),
+        f64x2_relaxed_madd(a_re, b_im, f64x2_relaxed_madd(a_im, b_re, add_im)),
+    )
+}
+
+/// The general kernel's full escape step in relaxed-simd builds:
+/// `z = z.powu(exponent) + c` with num-complex's square-and-multiply
+/// structure, every complex multiply on hardware FMA, and `c` fused into
+/// the chain's final multiply (the last even-loop squaring when `exponent`
+/// is a power of two, the last accumulator multiply otherwise — the final
+/// `exp == 1` is odd, so that multiply always runs last).
+#[cfg(all(target_arch = "wasm32", target_feature = "relaxed-simd"))]
+#[inline]
+fn fused_powu_add_c_lanes<const CHAINS: usize>(
+    z_re: &[core::arch::wasm32::v128; CHAINS],
+    z_im: &[core::arch::wasm32::v128; CHAINS],
+    c_re: &[core::arch::wasm32::v128; CHAINS],
+    c_im: &[core::arch::wasm32::v128; CHAINS],
+    exponent: u32,
+) -> (
+    [core::arch::wasm32::v128; CHAINS],
+    [core::arch::wasm32::v128; CHAINS],
+) {
+    use core::arch::wasm32::*;
+
+    let mut base_re = *z_re;
+    let mut base_im = *z_im;
+
+    if exponent <= 1 {
+        // Degenerate exponents (the client clamps to >= 2): plain adds.
+        if exponent == 0 {
+            base_re = [f64x2_splat(1.0); CHAINS];
+            base_im = [f64x2_splat(0.0); CHAINS];
+        }
+        for chain in 0..CHAINS {
+            base_re[chain] = f64x2_add(base_re[chain], c_re[chain]);
+            base_im[chain] = f64x2_add(base_im[chain], c_im[chain]);
+        }
+        return (base_re, base_im);
+    }
+
+    let trailing = exponent.trailing_zeros();
+    let is_power_of_two = exponent >> trailing == 1;
+
+    for squaring in 0..trailing {
+        let fuse_c = is_power_of_two && squaring == trailing - 1;
+        for chain in 0..CHAINS {
+            let (re, im) = if fuse_c {
+                complex_mul_add_lanes(
+                    base_re[chain],
+                    base_im[chain],
+                    base_re[chain],
+                    base_im[chain],
+                    c_re[chain],
+                    c_im[chain],
+                )
+            } else {
+                complex_mul_lanes(
+                    base_re[chain],
+                    base_im[chain],
+                    base_re[chain],
+                    base_im[chain],
+                )
+            };
+            base_re[chain] = re;
+            base_im[chain] = im;
+        }
+    }
+    if is_power_of_two {
+        return (base_re, base_im);
+    }
+
+    let mut exp = exponent >> trailing;
+    let mut acc_re = base_re;
+    let mut acc_im = base_im;
+    while exp > 1 {
+        exp >>= 1;
+        for chain in 0..CHAINS {
+            let (re, im) = complex_mul_lanes(
+                base_re[chain],
+                base_im[chain],
+                base_re[chain],
+                base_im[chain],
+            );
+            base_re[chain] = re;
+            base_im[chain] = im;
+        }
+        if exp & 1 == 1 {
+            let fuse_c = exp == 1;
+            for chain in 0..CHAINS {
+                let (re, im) = if fuse_c {
+                    complex_mul_add_lanes(
+                        acc_re[chain],
+                        acc_im[chain],
+                        base_re[chain],
+                        base_im[chain],
+                        c_re[chain],
+                        c_im[chain],
+                    )
+                } else {
+                    complex_mul_lanes(acc_re[chain], acc_im[chain], base_re[chain], base_im[chain])
+                };
+                acc_re[chain] = re;
+                acc_im[chain] = im;
+            }
+        }
+    }
+    (acc_re, acc_im)
+}
+
 /// Streaming escape-time kernel for general exponents: the lane-refilling
 /// structure of `stream_escape_quadratic` with the iteration step
-/// `z = z.powu(exponent) + c` via `fused_powu_lanes`, so results are
-/// bit-identical to `calculate_escape_iterations_general`. There is no
-/// closed-form interior test for general exponents, so points stream in
-/// unfiltered.
+/// `z = z.powu(exponent) + c` via `fused_powu_lanes`. In simd128-only
+/// builds results are bit-identical to
+/// `calculate_escape_iterations_general`; in relaxed-simd builds the step
+/// is `fused_powu_add_c_lanes` — the powu chain's complex multiplies on
+/// hardware FMA with `c` folded into the final multiply — the escape
+/// replay runs through the same fused instructions in lane 0, and the
+/// output is rounding-class different — gated by the
+/// statistical-equivalence tier, not byte-exactness (LOG.md 2026-07-10).
+/// There is no closed-form interior test for general exponents, so points
+/// stream in unfiltered.
 ///
 /// As in the quadratic kernel, all bookkeeping is deferred to
 /// `STREAM_STRIDE` boundaries, leaving the per-step loop as the bare fused
@@ -1028,9 +1189,10 @@ fn fused_powu_lanes<const CHAINS: usize>(
 /// |z^d + c| >= |z|^d - |z| >= 2|z|, so growth past the radius is monotone
 /// (and inf/NaN blow-ups fail the boundary `lt` the same way). The exact
 /// escape step and frozen z are recovered by replaying at most
-/// `STREAM_STRIDE` scalar `powu` steps from the previous boundary's
-/// checkpoint — `fused_powu_lanes` replicates num-complex's op order, so
-/// the replay is bit-identical to the lane arithmetic.
+/// `STREAM_STRIDE` steps from the previous boundary's checkpoint with the
+/// kernel's own step arithmetic (scalar `powu` in exact builds, lane-0
+/// `fused_powu_lanes` in relaxed builds), so the replay is bit-identical
+/// to the lane arithmetic either way.
 #[cfg(target_arch = "wasm32")]
 fn stream_escape_general<const CHAINS: usize>(
     points: &[(f64, f64)],
@@ -1069,10 +1231,26 @@ fn stream_escape_general<const CHAINS: usize>(
 
     loop {
         for _ in 0..STREAM_STRIDE {
-            let (pow_re, pow_im) = fused_powu_lanes::<CHAINS>(&lanes.z_re, &lanes.z_im, exponent);
-            for chain in 0..CHAINS {
-                lanes.z_re[chain] = f64x2_add(pow_re[chain], lanes.c_re[chain]);
-                lanes.z_im[chain] = f64x2_add(pow_im[chain], lanes.c_im[chain]);
+            #[cfg(target_feature = "relaxed-simd")]
+            {
+                let (next_re, next_im) = fused_powu_add_c_lanes::<CHAINS>(
+                    &lanes.z_re,
+                    &lanes.z_im,
+                    &lanes.c_re,
+                    &lanes.c_im,
+                    exponent,
+                );
+                lanes.z_re = next_re;
+                lanes.z_im = next_im;
+            }
+            #[cfg(not(target_feature = "relaxed-simd"))]
+            {
+                let (pow_re, pow_im) =
+                    fused_powu_lanes::<CHAINS>(&lanes.z_re, &lanes.z_im, exponent);
+                for chain in 0..CHAINS {
+                    lanes.z_re[chain] = f64x2_add(pow_re[chain], lanes.c_re[chain]);
+                    lanes.z_im[chain] = f64x2_add(pow_im[chain], lanes.c_im[chain]);
+                }
             }
         }
 
@@ -1112,29 +1290,72 @@ fn stream_escape_general<const CHAINS: usize>(
                     let index = lanes.slots[chain][sub];
                     let (escape_iterations, z) = if i64x2_lane(escaped, sub) != 0 {
                         // Replay from the previous boundary's checkpoint with
-                        // num-complex's exact op order (which the kernel's
-                        // fused powu replicates) to recover the escape step
-                        // and the frozen z; the loop bound doubles as the
-                        // correctness bound as in the quadratic kernel.
-                        let c = Complex64::new(
-                            f64x2_lane(lanes.c_re[chain], sub),
-                            f64x2_lane(lanes.c_im[chain], sub),
-                        );
-                        let mut z = Complex64::new(
-                            f64x2_lane(checkpoint_re[chain], sub),
-                            f64x2_lane(checkpoint_im[chain], sub),
-                        );
+                        // the kernel's exact op order to recover the escape
+                        // step and the frozen z; the loop bound doubles as
+                        // the correctness bound as in the quadratic kernel.
                         let mut iterations = i64x2_lane(lanes.iters[chain], sub);
-                        for _ in 0..STREAM_STRIDE {
-                            // Not `>=`: a NaN norm must read as escaped, the
-                            // same way it fails the kernel's f64x2_lt.
-                            #[allow(clippy::neg_cmp_op_on_partial_ord)]
-                            if !(z.norm_sqr() < escape_radius_squared) {
-                                break;
+                        // Replay arithmetic must match the kernel step. In
+                        // relaxed-simd builds that means replaying THROUGH
+                        // the same fused powu (value in lane 0) — see the
+                        // quadratic kernel's replay for why f64::mul_add is
+                        // not an option here.
+                        #[cfg(target_feature = "relaxed-simd")]
+                        let z = {
+                            let c_re_v = f64x2_splat(f64x2_lane(lanes.c_re[chain], sub));
+                            let c_im_v = f64x2_splat(f64x2_lane(lanes.c_im[chain], sub));
+                            let mut z_re_v =
+                                [f64x2_splat(f64x2_lane(checkpoint_re[chain], sub))];
+                            let mut z_im_v =
+                                [f64x2_splat(f64x2_lane(checkpoint_im[chain], sub))];
+                            for _ in 0..STREAM_STRIDE {
+                                let re = f64x2_extract_lane::<0>(z_re_v[0]);
+                                let im = f64x2_extract_lane::<0>(z_im_v[0]);
+                                // Not `>=`: a NaN norm must read as escaped,
+                                // the same way it fails the kernel's
+                                // f64x2_lt.
+                                #[allow(clippy::neg_cmp_op_on_partial_ord)]
+                                if !(re * re + im * im < escape_radius_squared) {
+                                    break;
+                                }
+                                let (next_re, next_im) = fused_powu_add_c_lanes::<1>(
+                                    &z_re_v,
+                                    &z_im_v,
+                                    &[c_re_v],
+                                    &[c_im_v],
+                                    exponent,
+                                );
+                                z_re_v = next_re;
+                                z_im_v = next_im;
+                                iterations += 1;
                             }
-                            z = z.powu(exponent) + c;
-                            iterations += 1;
-                        }
+                            Complex64::new(
+                                f64x2_extract_lane::<0>(z_re_v[0]),
+                                f64x2_extract_lane::<0>(z_im_v[0]),
+                            )
+                        };
+                        #[cfg(not(target_feature = "relaxed-simd"))]
+                        let z = {
+                            let c = Complex64::new(
+                                f64x2_lane(lanes.c_re[chain], sub),
+                                f64x2_lane(lanes.c_im[chain], sub),
+                            );
+                            let mut z = Complex64::new(
+                                f64x2_lane(checkpoint_re[chain], sub),
+                                f64x2_lane(checkpoint_im[chain], sub),
+                            );
+                            for _ in 0..STREAM_STRIDE {
+                                // Not `>=`: a NaN norm must read as escaped,
+                                // the same way it fails the kernel's
+                                // f64x2_lt.
+                                #[allow(clippy::neg_cmp_op_on_partial_ord)]
+                                if !(z.norm_sqr() < escape_radius_squared) {
+                                    break;
+                                }
+                                z = z.powu(exponent) + c;
+                                iterations += 1;
+                            }
+                            z
+                        };
                         ((iterations as u32).min(max_iterations), z)
                     } else {
                         // Periodic or out of budget: both report

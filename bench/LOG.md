@@ -2380,3 +2380,96 @@ relaxed-FMA complex-multiply for it is the natural next candidate in the
 sanctioned rounding lane, gated the same way (its heaviest real view is
 z30-e6 at ~3.9 s e2e). Safari stays on the byte-exact lane until
 relaxed-simd exists there at all.
+
+## 2026-07-10 — SHIPPED: general (multibrot) kernel relaxed-FMA + fused `+c` powu step (grid-z30-e6 e2e −16.0%)
+
+Machine: M1 MacBook (AC power). Backlog #1 after the quadratic FMA ship: the
+same rounding-lane treatment for `stream_escape_general`, riding the existing
+dual build and statistical gate. Relaxed lane only; the simd128 fallback keeps
+the exact powu chain and is byte-identical to the anchor.
+
+### The change (mandelbrot/src/lib.rs, all under `target_feature = "relaxed-simd"`)
+
+1. `complex_mul_lanes` gains a relaxed branch: each component's second
+   multiply fuses into the combining add/sub (`nmadd(a_im, b_im,
+   mul(a_re, b_re))` / `madd(a_im, b_re, mul(a_re, b_im))`) — 6 ops → 4 per
+   complex multiply. **Measured alone: only −6.3% on the e6 heavy.** The powu
+   chain is a serial dependency chain per step (the 2026-07-09 lesson holds:
+   latency-bound, not op-bound), so shaving parallel ops barely moves it.
+2. The win came from shortening the chain: `fused_powu_add_c_lanes` folds the
+   escape step's `+ c` into the powu chain's **final** complex multiply via
+   `complex_mul_add_lanes` (`a*b + addend`, both cross terms and the addend
+   fused — replaces final-multiply-then-add, one less serial step). Final-op
+   identification: the last op is the `trailing_zeros`-th squaring when the
+   exponent is a power of two, else the `exp == 1` accumulator multiply (the
+   final `exp` is odd, so that multiply always runs last). **Fusion doubled
+   the win to −18.5%.**
+3. Escape replay runs through `fused_powu_add_c_lanes::<1>` with the value in
+   lane 0 — the same instruction sequence as the vector step, per the
+   quadratic ship's replay rule (never `f64::mul_add` on wasm32).
+
+Re-sweep (chains 4/6/8 × stride 32/64/128 on the e6 heavy): **6 chains / 
+stride 64**, cfg-gated to the relaxed lane (fallback keeps 6/32). Unlike the
+quadratic kernel, 6 chains stays optimal — powu's per-chain temporaries make
+8 spill (+9%) and 4 starve (+44%). Stride 64 beats 32 (75.3 vs 77.8 ms);
+128 buys only another −1% and doubles the free-run/replay tax on
+fast-escaping views — declined.
+
+### Gates (all green)
+
+- cargo test 59/59 (change is wasm-cfg-only).
+- Fallback lane (no-flag build of the edited tree vs clean tree): **43/43
+  byte-identical** — Safari lane provably unchanged, anchor and blessed
+  hashes stay pinned, no re-bless.
+- Fixed corpus statistical gate vs anchor: 43/43 within budget. The
+  general-kernel diffs are tiny (e6: 20 px, 0 flips; multibrot3: 27 px,
+  flip blob 1); the large z28/z44 signatures in the report are the
+  already-shipped quadratic FMA vs the exact anchor, unchanged.
+- Holdout (seed 2026-07-10, 40 direct + 40 pf64, --pixel-check
+  --statistical): **80/80 within budget.** Timing overall +0.2% (the sample
+  is quadratic-dominated; that kernel is untouched). Movers confirmed at
+  --samples 10: hold-z20-1e197d5a (exponent 50, i200) **+29.3% = +1.7 ms**
+  — the documented fast-escaping high-exponent stride-tax class (free-run +
+  replay are fixed per-escaper costs; stride 64 doubles the free-run
+  waste), accepted on absolute-time grounds like the quadratic ship's
+  seahorse tax; hold-z48-c728a5ef pf64 +28.1% = +0.2 ms on a 0.7 ms view
+  (pf64 code and output untouched — sub-ms layout noise class).
+
+### Results
+
+Wasm-level (run.mjs full corpus, n=10, genfma-final vs fma-base = relaxed
+lane @ HEAD): **e6 view 92.7 → 75.3 ms (−18.8%, ms/Miter 0.372 → 0.302)**;
+direct geomean −2.1%; pf64 +0.3%, float-exp +0.2% (controls); overall −0.6%.
+syn-direct-z5-multibrot3 +0.7% n.s. (3.2 ms, Mariani-filled light view —
+the e3 chain is only 2 multiplies, and the view is stride-tax-exposed).
+Size 326.1 → 327.6 KiB (+0.5%).
+
+E2E (run-e2e, genfma-pre@a280634 vs genfma-post, n=5):
+- grid-multibrot corpus: **grid-z30-e6 3386 → 2845 ms (−16.0% warm, −18.2%
+  cold — the existing warmupGeneralDirect tiers the new kernel)**;
+  grid-z48-e52 −0.1% (pf64 general kernel untouched, control flat).
+- grid-regression corpus: overall geomean −0.2%, every case within noise
+  (z28 −1.0%, z47 +0.4%, z48-i48000 −0.0%, z259 +1.3%, z85 −2.1%).
+- Fast-lane wasm 327.4 → 328.9 KiB (+1.5 KiB); fallback lane byte-identical.
+
+### Reproduce
+
+    node src/build.mjs fma-base --ref <pre-sha> --rustflags "-C target-feature=+simd128,+relaxed-simd"
+    node src/build.mjs genfma-final --rustflags "-C target-feature=+simd128,+relaxed-simd"
+    node src/run.mjs --variants fma-base,genfma-final
+    node src/pixel-check.mjs --b genfma-final --statistical
+    node src/validate.mjs --variants fma-base,genfma-final --pixel-check --statistical
+    node src/build-dist.mjs genfma-pre --ref <pre-sha> && node src/build-dist.mjs genfma-post
+    node src/run-e2e.mjs --variants genfma-pre,genfma-post --corpus corpus/grid-multibrot.json
+    node src/run-e2e.mjs --variants genfma-pre,genfma-post
+
+Backlog consequences: backlog #1 (general-kernel relaxed-FMA) is shipped;
+both direct-tier kernels now run hardware-FMA bare recurrences in the fast
+lane. Mechanism notes that survive: (a) FMA on a serial complex-multiply
+chain buys little — the lever is removing a serial step (fold the recurrence
+add into the chain's final multiply); (b) the general kernel's chains
+optimum did NOT move under FMA (6, both lanes) — powu register pressure,
+not step latency, binds it; only the stride moved (64, relaxed lane).
+Remaining rounding-lane candidates in the direct tier: none — the per-step
+op space on both kernels is now the fused bare recurrence. Next absolute-time
+targets stay as ranked (z0 whole-set micro is the only open direct item).
