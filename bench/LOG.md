@@ -1962,3 +1962,93 @@ being auto-rejected at pixel-check; flip-class diffs (Mariani-speck-like)
 still require explicit user acceptance via re-anchor. enrich --check
 re-blessing stays as-is for accepted ships. Moving the anchor is a
 deliberate, logged user decision — never an experiment side effect.
+
+## 2026-07-10 — Backlog #1: FMA/rounding-class calibration — flag space is EMPTY; gate calibrated with a synthetic probe (nothing ships)
+
+Machine: Rosss-MacBook-Pro.local darwin/arm64 Apple M1 Pro, Chrome 136.
+Anchor: 3517e56 (as pinned). Baseline artifact rebuilt from clean HEAD
+(c288faa). Probe code reverted after the experiment; production untouched.
+
+### 1. The flag-only rounding class does not exist on this toolchain (settled)
+
+- `wasm-opt --fast-math` (binaryen 112) on top of the production flags:
+  **byte-identical binary** — verified both via build.mjs and by running
+  wasm-opt by hand on the pre-wasm-opt binary, in both argument orders
+  (`-O3 --fast-math` and `--fast-math -O3`). LLVM at opt-level 3 already
+  canonicalizes every pattern binaryen's fastMath rules can touch.
+- `--rustflags "-C target-feature=+simd128 -C llvm-args=-enable-unsafe-fp-math"`:
+  **byte-identical** too. LLVM IR reassociation is gated on per-instruction
+  fast-math flags that stable rustc never emits (nightly `fadd_fast`
+  intrinsics are out of scope on the stable-toolchain policy), and the wasm
+  target has no FMA instruction for codegen-level contraction to target
+  (relaxed-SIMD stays blocked by the Safari 16.4 floor).
+- Consequence: backlog outcome (a) ("passes + wins → clean ship lane") is
+  unreachable via flags. The only remaining routes to rounding-class wins
+  are a relaxed-SIMD dual-build (price only if a real win is demonstrated)
+  or algorithmic imports from the renderer survey (backlog #2).
+
+### 2. Tolerance tooling verified on both paths — no issues found
+
+The tolerance option was flagged as new/possibly buggy; none surfaced:
+- Fixed corpus, A/A (byte-identical variant vs anchor): all 43 cases
+  "identical to anchor", exit 0.
+- Fixed corpus, real diffs (probe below): 9/43 OVER BUDGET with correct
+  per-axis attribution, exit 1. (An early "exit 0" reading was a shell
+  artifact — `$?` after a pipe reports tail's status, not node's.)
+- Holdout path `validate.mjs --pixel-check --tolerance --per-tier 6`:
+  on-demand anchor reference generation for never-seen views works;
+  stratified sample drew 6 direct + 6 pf64 (float-exp tier empty as
+  expected); 1/12 OVER BUDGET, exit 1.
+
+### 3. Budget calibration with a genuine rounding-class change
+
+Variant `fmaprobe` (experiment-only, reverted): real-part update
+`zr²−zi²` → `(zr+zi)(zr−zi)` — the same ±1-ulp perturbation class as FMA
+contraction — applied consistently at all four quadratic direct-tier
+sites (scalar, pair kernel, quad kernel, stream kernel + its scalar
+replay). Deep tiers and the general (multibrot) kernel untouched, and
+their outputs came back byte-identical — clean isolation control.
+
+Fixed-corpus gate: 9/43 over budget. Two distinct failure classes:
+
+- **Boundary re-roll (dominant, exactly as the backlog predicted):**
+  chaos re-rolls long-orbit boundary pixels rather than shifting them.
+  user-z28-543f9cfa (i50000 border band): 56.1% px differ, 7,059 flips,
+  blob 2,033 px, max |Δ| 12,182 iterations. user-z14/z20 views: 4.3–5.4%
+  px, 17–108 flips, max |Δ| ~26k. syn-direct-z30-seahorse: 23.6% px,
+  210 flips. These fail every axis; the flips and |Δ| axes trigger first
+  and hardest.
+- **Distributional drift (new datum):** user-z44-b1cf403c: 53.4% of px
+  differ but max |Δ| 0.106, ZERO flips, blob 10,634 px — ubiquitous
+  sub-visual drift that PASSES the per-pixel |Δ| budget and fails only
+  the fraction/blob axes (which were designed for specks). Holdout
+  hold-z45-31ff9669 is the same class plus 415 flips at |Δ| ≤ 97.9.
+  Any future "statistical equivalence" tier must be designed to accept
+  exactly the z44 signature while still rejecting the re-roll class —
+  that distinction (zero flips + tiny |Δ| vs re-rolled counts) is the
+  concrete shape of that policy decision.
+- Light/short-orbit views (syn-z3-home, user-z38): 4–6 px at |Δ| ≈ 0.001
+  — within budget, so the gate is not trigger-happy on trivial diffs.
+
+### 4. Rounding freedom would buy nothing on this transform anyway
+
+run.mjs, direct filter, 16 cases: the difference-of-squares form is
+**+39% per iteration** on the stream-kernel heavies (ms/Miter 0.400 →
+0.556 uniformly; z37/z38 with identical/1-px output are +39.0%, so it is
+pure per-step cost, not workload change from flips). Direct geomean
++20.9%; multibrot/general-kernel cases 0.0% (control). Wasm-level op
+counts are identical (−6 mul / +6 add overall) — V8/M1 punishes the
+changed dependency structure; mechanism not chased further since the
+transform is a loss regardless. Size +0.0%.
+
+### Verdict
+
+Backlog item #1 resolved as an informative (b): no flag-level candidate
+exists to ship; the tolerance gate is validated end-to-end on both the
+fixed-corpus and holdout paths; and the committed budgets demonstrably
+reject genuine rounding-class changes — dominated by the zero-flips and
+|Δ| ≤ 1 axes on boundary re-rolls, with the fraction/blob axes binding
+only on the z44-style distributional class. The data a statistical-tier
+policy discussion needs is in §3. Hardware-FMA (relaxed-SIMD dual-build)
+remains blocked/unpriced; rounding-class hopes now ride on backlog #2
+(renderer survey). Artifacts kept: fastmath, unsafefp, preopt, fmaprobe.
