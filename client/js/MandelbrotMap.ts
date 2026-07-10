@@ -256,7 +256,17 @@ class MandelbrotMap extends L.Map {
       this.rebaseOriginIfNeeded();
       this.controls.throttleSetCoordinateInputValues();
     });
-    // Only on-screen tiles should feed the palette range detection.
+    // The fit follows the viewport, so a pan settle can shift the detected
+    // range even when no tile loads or unloads. Pans that do load tiles are
+    // skipped here (applyDetectedPaletteRange refuses mid-load fits) and
+    // handled by the layer's load handler instead.
+    this.on("moveend", () => {
+      if (this.applyDetectedPaletteRange()) {
+        this.recolorVisibleTiles();
+      }
+    });
+    // Keep the cache to Leaflet's loaded tile set; palette detection
+    // further clips it to the pixels actually on screen.
     this.mandelbrotLayer.on("tileunload", (event: L.TileEvent) => {
       this.tileCache.remove(event.coords);
     });
@@ -336,18 +346,18 @@ class MandelbrotMap extends L.Map {
   }
 
   /** In auto palette mode, applies the iteration range detected from the
-   * on-screen tiles to the config and inputs, so the next render or recolor
-   * uses it. Only fits from a settled view: while tiles are still rendering
-   * the cache is a biased sample (fast-escaping exterior tiles land first),
-   * so mid-load callers keep the last settled fit and the load handler —
-   * which runs after the loading flag clears — applies the complete one.
-   * Returns whether the applied values changed. */
+   * visible pixels (center-weighted) to the config and inputs, so the next
+   * render or recolor uses it. Only fits from a settled view: while tiles
+   * are still rendering the cache is a biased sample (fast-escaping exterior
+   * tiles land first), so mid-load callers keep the last settled fit and the
+   * load handler — which runs after the loading flag clears — applies the
+   * complete one. Returns whether the applied values changed. */
   applyDetectedPaletteRange(): boolean {
     if (!this.config.paletteAutoAdjust || this.layerLoading) {
       return false;
     }
 
-    const range = this.tileCache.detectedRange(this.getZoom());
+    const range = this.tileCache.detectedRange(this.mapBoundsInTileSpace);
     if (!range) {
       return false;
     }
