@@ -42,8 +42,8 @@ export type CachedTile = {
 // — filaments, and the glow along the set boundary (interior neighbors are
 // +Infinity) — always has a bright neighbor and keeps its value. With the
 // speck-count burden handled spatially, the percentile can stay gentle:
-// 99.997% (~42 px on a full screen) trims only the residual tail.
-const CEILING_PERCENTILE = 0.99997;
+// 99.999% (~14 px on a full screen) trims only the residual tail.
+const CEILING_PERCENTILE = 0.99999;
 // Symmetric guard for the floor: a few stray fast-escaping pixels would
 // otherwise pin the range bottom and waste the low end of the gradient. The
 // low side is far less skewed than the high side (the exterior mass sits
