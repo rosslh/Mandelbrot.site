@@ -112,6 +112,29 @@ import("../../mandelbrot/pkg")
         imageHeight: 32,
       });
 
+    // The direct-tier general-exponent stream kernel (exponent != 2,
+    // effective zoom < 47) is yet another separate wasm function — distinct
+    // from both the quadratic kernel the init warmup tiers and the deep
+    // general perturbation kernel above — so direct multibrot first tiles
+    // would render at Liftoff speed for their entire duration (the stream
+    // kernel is one call per wave). The pool requests this warmup at spawn
+    // only when the current view uses exponent != 2 at direct depth.
+    // Boundary-rich view just past the degree-6 multibrot cusp (~82%
+    // escapers at ~27 iterations mean, probed 2026-07-10), 128px for
+    // execution volume; the kernel instantiation is shared by all
+    // exponents != 2, so warming with exponent 6 covers every multibrot.
+    const warmupGeneralDirectKernel = () =>
+      warmupRender("direct-general kernel", {
+        originRe: "0.5975",
+        originIm: "0",
+        bounds: { xMin: 655, xMax: 656, yMin: 655, yMax: 656, zoom: 10 },
+        zoomOffset: 0,
+        iterations: 2000,
+        exponent: 6,
+        imageWidth: 128,
+        imageHeight: 128,
+      });
+
     // The perturbation-f64 stream kernel (exponent 2, effective zoom >= 47)
     // is also a separate wasm function from the direct loop the init warmup
     // exercises, so deep-zoom first tiles run it at Liftoff speed: an
@@ -208,6 +231,8 @@ import("../../mandelbrot/pkg")
           return await optimiseImage(request.payload);
         case "warmupGeneral":
           return warmupGeneralKernel();
+        case "warmupGeneralDirect":
+          return warmupGeneralDirectKernel();
         case "warmupDeep":
           return warmupDeepKernel();
         case "warmupFloatExp":

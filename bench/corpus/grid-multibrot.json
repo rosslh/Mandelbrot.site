@@ -14,6 +14,16 @@
  },
  "cases": [
   {
+   "id": "grid-z30-e6-f8a50601",
+   "source": "corpus:user-z30-f8a50601",
+   "re": "0.1672615953721106",
+   "im": "-0.626567840110511",
+   "zoom": 30,
+   "iterations": 25600,
+   "exponent": 6,
+   "note": "direct-tier multibrot (92% interior e6, heaviest real direct view in the export): ship gate for the direct general stream kernel + Mariani path and its spawn warmup (added 2026-07-10)"
+  },
+  {
    "id": "grid-z48-e52-0611aae8",
    "source": "corpus:user-z48-0611aae8",
    "re": "-0.561760682385648",
@@ -24,5 +34,5 @@
    "note": "exponent-52 perturbation-f64; O(exponent) Horner delta step dominates"
   }
  ],
- "comment": "Multibrot (exponent != 2) e2e grid case, kept out of grid-regression.json deliberately: at the default viewport it adds ~2-4 min per round per variant. Run on demand when touching the general-exponent kernels: node src/run-e2e.mjs --corpus corpus/grid-multibrot.json --viewport 800x600 --rounds 2 --warmup 0. The case is the e52 view from corpus.json (user-z48-0611aae8), the slowest real view in the events export."
+ "comment": "Multibrot (exponent != 2) e2e grid cases, kept out of grid-regression.json deliberately: at the default viewport they add minutes per round per variant. Run on demand when touching the general-exponent kernels: node src/run-e2e.mjs --corpus corpus/grid-multibrot.json --viewport 800x600 --rounds 2 --warmup 0. The cases are the e52 view from corpus.json (user-z48-0611aae8), the slowest real view in the events export, and the direct-tier e6 view (user-z30-f8a50601), the slowest real direct view."
 }

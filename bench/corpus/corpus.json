@@ -624,18 +624,18 @@
       },
       "stats": {
         "generator": "enrich-v1",
-        "date": "2026-07-08",
-        "sha": "29e79707",
+        "date": "2026-07-10",
+        "sha": "633ad350",
         "probeSize": 64,
-        "interior": 0.916,
-        "nearMax50": 0.0674,
+        "interior": 0.9167,
+        "nearMax50": 0.0669,
         "nearMax90": 0.0288,
-        "escMean": 17596,
-        "escP50": 18496,
+        "escMean": 17624.7,
+        "escP50": 18500.8,
         "escP90": 23099.4,
         "escP99": 23226.2,
-        "iterSum": 102104216,
-        "valuesHash": "6f67e811"
+        "iterSum": 102138036,
+        "valuesHash": "693532ad"
       }
     },
     {

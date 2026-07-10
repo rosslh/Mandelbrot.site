@@ -208,7 +208,7 @@ fn calculate_escape_iterations_quadratic(
 /// # Parameters
 /// - `c`: The complex number to iterate on.
 /// - `max_iterations`: The maximum number of iterations to perform.
-/// - `escape_radius`: The escape radius.
+/// - `escape_radius_squared`: The square of the escape radius.
 /// - `exponent`: The exponent used in the iteration formula.
 ///
 /// # Returns
@@ -216,7 +216,7 @@ fn calculate_escape_iterations_quadratic(
 fn calculate_escape_iterations_general(
     c: Complex64,
     max_iterations: u32,
-    escape_radius: f64,
+    escape_radius_squared: f64,
     exponent: u32,
 ) -> (u32, Complex64) {
     let mut z = c;
@@ -227,7 +227,7 @@ fn calculate_escape_iterations_general(
     let mut saved = z;
     let mut next_save = PERIODICITY_FIRST_SAVE;
 
-    while z.norm() < escape_radius && iter < max_iterations {
+    while z.norm_sqr() < escape_radius_squared && iter < max_iterations {
         z = z.powu(exponent) + c;
         iter += 1;
 
@@ -783,6 +783,226 @@ fn stream_escape_quadratic<const CHAINS: usize>(
     }
 }
 
+/// Multiplies two complex numbers held as (re, im) f64x2 lane pairs, with
+/// num-complex's operation order per lane so lane arithmetic is
+/// IEEE-identical to `Complex64` multiplication.
+#[cfg(target_arch = "wasm32")]
+#[inline]
+fn complex_mul_lanes(
+    a_re: core::arch::wasm32::v128,
+    a_im: core::arch::wasm32::v128,
+    b_re: core::arch::wasm32::v128,
+    b_im: core::arch::wasm32::v128,
+) -> (core::arch::wasm32::v128, core::arch::wasm32::v128) {
+    use core::arch::wasm32::*;
+    (
+        f64x2_sub(f64x2_mul(a_re, b_re), f64x2_mul(a_im, b_im)),
+        f64x2_add(f64x2_mul(a_re, b_im), f64x2_mul(a_im, b_re)),
+    )
+}
+
+/// Raises every chain's z lanes to `exponent`, replicating num-complex's
+/// square-and-multiply sequence (`powu`) so per-lane results are
+/// bit-identical to `z.powu(exponent)`. Each squaring/multiply is a serial
+/// step in the chain's dependency chain, so all chains advance through each
+/// step together to keep `CHAINS` independent chains in the pipeline (the
+/// same latency-hiding structure as the perturbation fused general step).
+#[cfg(target_arch = "wasm32")]
+#[inline]
+fn fused_powu_lanes<const CHAINS: usize>(
+    z_re: &[core::arch::wasm32::v128; CHAINS],
+    z_im: &[core::arch::wasm32::v128; CHAINS],
+    exponent: u32,
+) -> (
+    [core::arch::wasm32::v128; CHAINS],
+    [core::arch::wasm32::v128; CHAINS],
+) {
+    use core::arch::wasm32::*;
+
+    if exponent == 0 {
+        return ([f64x2_splat(1.0); CHAINS], [f64x2_splat(0.0); CHAINS]);
+    }
+
+    let mut exp = exponent;
+    let mut base_re = *z_re;
+    let mut base_im = *z_im;
+
+    while exp & 1 == 0 {
+        for chain in 0..CHAINS {
+            let (re, im) = complex_mul_lanes(
+                base_re[chain],
+                base_im[chain],
+                base_re[chain],
+                base_im[chain],
+            );
+            base_re[chain] = re;
+            base_im[chain] = im;
+        }
+        exp >>= 1;
+    }
+
+    if exp == 1 {
+        return (base_re, base_im);
+    }
+
+    let mut acc_re = base_re;
+    let mut acc_im = base_im;
+    while exp > 1 {
+        exp >>= 1;
+        for chain in 0..CHAINS {
+            let (re, im) = complex_mul_lanes(
+                base_re[chain],
+                base_im[chain],
+                base_re[chain],
+                base_im[chain],
+            );
+            base_re[chain] = re;
+            base_im[chain] = im;
+        }
+        if exp & 1 == 1 {
+            for chain in 0..CHAINS {
+                let (re, im) =
+                    complex_mul_lanes(acc_re[chain], acc_im[chain], base_re[chain], base_im[chain]);
+                acc_re[chain] = re;
+                acc_im[chain] = im;
+            }
+        }
+    }
+    (acc_re, acc_im)
+}
+
+/// Streaming escape-time kernel for general exponents: the lane-refilling
+/// structure of `stream_escape_quadratic` with the iteration step
+/// `z = z.powu(exponent) + c` via `fused_powu_lanes`, so results are
+/// bit-identical to `calculate_escape_iterations_general`. There is no
+/// closed-form interior test for general exponents, so points stream in
+/// unfiltered.
+#[cfg(target_arch = "wasm32")]
+fn stream_escape_general<const CHAINS: usize>(
+    points: &[(f64, f64)],
+    max_iterations: u32,
+    escape_radius_squared: f64,
+    exponent: u32,
+    results: &mut [(u32, Complex64)],
+) {
+    use core::arch::wasm32::*;
+
+    let mut lanes = StreamLanes::<CHAINS>::new();
+    let mut next_point = 0usize;
+    let mut live_lanes = 0usize;
+
+    for chain in 0..CHAINS {
+        for sub in 0..2 {
+            if next_point < points.len() {
+                lanes.load(chain, sub, next_point, points[next_point]);
+                next_point += 1;
+                live_lanes += 1;
+            }
+        }
+    }
+    if live_lanes == 0 {
+        return;
+    }
+
+    let radius_squared = f64x2_splat(escape_radius_squared);
+    let max_iterations_minus_one = i64x2_splat(i64::from(max_iterations) - 1);
+
+    loop {
+        for _ in 0..STREAM_STRIDE {
+            // Escape test on the current z, then one masked powu step; the
+            // alive masks are computed for every chain up front so the powu
+            // steps stay a pure fused sequence.
+            let mut alive = [i64x2_splat(0); CHAINS];
+            for (chain, lane_alive) in alive.iter_mut().enumerate() {
+                let z_re = lanes.z_re[chain];
+                let z_im = lanes.z_im[chain];
+                let norm_sqr = f64x2_add(f64x2_mul(z_re, z_re), f64x2_mul(z_im, z_im));
+                *lane_alive = v128_and(lanes.alive[chain], f64x2_lt(norm_sqr, radius_squared));
+            }
+
+            let (pow_re, pow_im) = fused_powu_lanes::<CHAINS>(&lanes.z_re, &lanes.z_im, exponent);
+
+            for chain in 0..CHAINS {
+                let next_re = f64x2_add(pow_re[chain], lanes.c_re[chain]);
+                let next_im = f64x2_add(pow_im[chain], lanes.c_im[chain]);
+                lanes.z_re[chain] = v128_bitselect(next_re, lanes.z_re[chain], alive[chain]);
+                lanes.z_im[chain] = v128_bitselect(next_im, lanes.z_im[chain], alive[chain]);
+                lanes.iters[chain] = i64x2_sub(lanes.iters[chain], alive[chain]);
+                lanes.alive[chain] = alive[chain];
+            }
+        }
+
+        for chain in 0..CHAINS {
+            // A lane is finished when it escaped (occupied but no longer
+            // alive), ran out its budget, or exactly revisited a saved z.
+            let out_of_budget = i64x2_gt(lanes.iters[chain], max_iterations_minus_one);
+            let cycled = v128_and(
+                v128_and(
+                    f64x2_eq(lanes.z_re[chain], lanes.saved_re[chain]),
+                    f64x2_eq(lanes.z_im[chain], lanes.saved_im[chain]),
+                ),
+                lanes.alive[chain],
+            );
+            let finished = v128_or(
+                v128_andnot(lanes.occupied[chain], lanes.alive[chain]),
+                v128_and(lanes.alive[chain], v128_or(out_of_budget, cycled)),
+            );
+
+            if v128_any_true(finished) {
+                for sub in 0..2 {
+                    if i64x2_lane(finished, sub) == 0 {
+                        continue;
+                    }
+                    let index = lanes.slots[chain][sub];
+                    let escaped = i64x2_lane(lanes.alive[chain], sub) == 0;
+                    // Alive-but-finished lanes are periodic or out of budget:
+                    // both report max_iterations (out-of-budget lanes may have
+                    // overshot by up to stride-1 masked steps, hence the min).
+                    let escape_iterations = if escaped {
+                        (i64x2_lane(lanes.iters[chain], sub) as u32).min(max_iterations)
+                    } else {
+                        max_iterations
+                    };
+                    let z = Complex64::new(
+                        f64x2_lane(lanes.z_re[chain], sub),
+                        f64x2_lane(lanes.z_im[chain], sub),
+                    );
+                    results[index] = (escape_iterations, z);
+
+                    if next_point < points.len() {
+                        lanes.load(chain, sub, next_point, points[next_point]);
+                        next_point += 1;
+                    } else {
+                        lanes.clear(chain, sub);
+                        live_lanes -= 1;
+                    }
+                }
+            }
+
+            // Periodicity saves land at per-lane iteration counts that are
+            // multiples of the stride (8, 16, 32, ... plus masked-step skew of
+            // 0), keeping detection guaranteed as in the scalar loop.
+            let save_due = v128_andnot(
+                lanes.alive[chain],
+                i64x2_gt(lanes.next_save[chain], lanes.iters[chain]),
+            );
+            lanes.saved_re[chain] =
+                v128_bitselect(lanes.z_re[chain], lanes.saved_re[chain], save_due);
+            lanes.saved_im[chain] =
+                v128_bitselect(lanes.z_im[chain], lanes.saved_im[chain], save_due);
+            lanes.next_save[chain] = v128_bitselect(
+                i64x2_shl(lanes.next_save[chain], 1),
+                lanes.next_save[chain],
+                save_due,
+            );
+        }
+
+        if live_lanes == 0 {
+            break;
+        }
+    }
+}
+
 /// Renders the full pixel grid via Mariani–Silver subdivision. Each wave
 /// streams the pending rects' uncomputed border-ring pixels through the
 /// lane-refilling kernel in one call; a rect whose entire ring reports
@@ -793,13 +1013,15 @@ fn stream_escape_quadratic<const CHAINS: usize>(
 ///
 /// The fill assumes a ring of max-iteration pixels never encloses a pixel
 /// that escapes within budget — exact in the continuum (maximum principle on
-/// the Green's function), and breakable only by sub-pixel exterior channels:
-/// the same assumption `rect_in_set` already makes at tile level.
+/// the Green's function, which holds for every multibrot degree), and
+/// breakable only by sub-pixel exterior channels: the same assumption
+/// `rect_in_set` already makes at tile level for every exponent.
 #[cfg(target_arch = "wasm32")]
 fn stream_tile_subdivided(
     re_values: &[f64],
     im_values: &[f64],
     max_iterations: u32,
+    exponent: u32,
     results: &mut [(u32, Complex64)],
 ) {
     let width = re_values.len();
@@ -816,12 +1038,22 @@ fn stream_tile_subdivided(
                     .iter()
                     .map(|&pixel| (re_values[pixel % width], im_values[pixel / width])),
             );
-            stream_escape_quadratic::<STREAM_CHAINS>(
-                &points,
-                max_iterations,
-                ESCAPE_RADIUS.powi(2),
-                wave_results,
-            );
+            if exponent == 2 {
+                stream_escape_quadratic::<STREAM_CHAINS>(
+                    &points,
+                    max_iterations,
+                    ESCAPE_RADIUS.powi(2),
+                    wave_results,
+                );
+            } else {
+                stream_escape_general::<STREAM_CHAINS>(
+                    &points,
+                    max_iterations,
+                    ESCAPE_RADIUS.powi(2),
+                    exponent,
+                    wave_results,
+                );
+            }
         },
     );
 }
@@ -1058,7 +1290,7 @@ fn calculate_escape_iterations(
     if exponent == 2 {
         calculate_escape_iterations_quadratic(c, max_iterations, ESCAPE_RADIUS.powi(2))
     } else {
-        calculate_escape_iterations_general(c, max_iterations, ESCAPE_RADIUS, exponent)
+        calculate_escape_iterations_general(c, max_iterations, ESCAPE_RADIUS.powi(2), exponent)
     }
 }
 
@@ -1532,30 +1764,28 @@ fn render_mandelbrot_set(
         img[index + 2] = pixel[2];
     };
 
-    // Quadratic tiles render via Mariani–Silver subdivision over the
-    // lane-refilling stream kernel; other exponents fall through to the
-    // fixed-batch loop below.
+    // Tiles render via Mariani–Silver subdivision over the lane-refilling
+    // stream kernel matching the exponent (quadratic or general); non-wasm
+    // builds use the fixed-batch loop instead.
     #[cfg(target_arch = "wasm32")]
     {
-        if exponent == 2 {
-            let im_values: Vec<f64> = im_range.collect();
-            let mut results =
-                vec![(UNCOMPUTED, Complex64::new(0.0, 0.0)); re_values.len() * im_values.len()];
-            stream_tile_subdivided(&re_values, &im_values, max_iterations, &mut results);
+        let im_values: Vec<f64> = im_range.collect();
+        let mut results =
+            vec![(UNCOMPUTED, Complex64::new(0.0, 0.0)); re_values.len() * im_values.len()];
+        stream_tile_subdivided(
+            &re_values,
+            &im_values,
+            max_iterations,
+            exponent,
+            &mut results,
+        );
 
-            for (pixel_index, &(escape_iterations, z)) in results.iter().enumerate() {
-                write_pixel(pixel_index, escape_iterations, z);
-            }
-
-            drop(write_pixel);
-            return RenderedTile {
-                image: img,
-                values,
-                stats,
-            };
+        for (pixel_index, &(escape_iterations, z)) in results.iter().enumerate() {
+            write_pixel(pixel_index, escape_iterations, z);
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     for (x, im) in im_range.enumerate() {
         let mut y = 0;
         while y + 3 < re_values.len() {

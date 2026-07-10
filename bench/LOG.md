@@ -1432,3 +1432,101 @@ direct-tier kernel instantiation), #2 heavy-direct e2e coverage
 warmups), #4 trapped/border direct throughput (likely irreducible, per the
 iteration-skipping verdict), #5 z0 wave/gather micro. Deep items parked
 under "deprioritized" with their existing gates.
+
+## 2026-07-10 — SHIPPED: direct-tier multibrot modernization (sqrt drop + general stream kernel + Mariani–Silver)
+
+Backlog item #1 under the 2026-07-09 direct-tier focus directive. Exponent
+!= 2 direct tiles previously ran the fully scalar
+`calculate_escape_iterations_general` — `z.powu(e) + c` with a `z.norm()`
+(hypot) call every iteration, no SIMD, no stream kernel, no Mariani fill.
+
+**Change 1 — sqrt drop (scalar loop):** compare `z.norm_sqr()` against
+ESCAPE_RADIUS² (9.0, exactly representable) instead of `z.norm()` (hypot)
+against 3.0. Alone: −27.8% on user-z30-f8a50601, byte-identical on all 43
+corpus cases (the hypot↔norm_sqr comparison never flips on real data).
+
+**Change 2 — general stream kernel (lib.rs `stream_escape_general`):** the
+lane-refilling stream structure of `stream_escape_quadratic` with the step
+`z = z.powu(e) + c`, where the power replicates num-complex 0.3.1's
+square-and-multiply sequence exactly (same multiply operand order per lane
+→ bit-identical to the scalar loop). The powu chain is a serial recurrence
+(e6 = 3 dependent complex multiplies per step), so `fused_powu_lanes`
+advances all chains through each multiply together — the same
+latency-hiding structure as the perturbation fused general step. Chain
+sweep: 4 chains best (6: +14.9%, 8: +30.3% on the e6 view — bookkeeping
+overhead and small Mariani waves punish wider kernels). No closed-form
+interior test exists for e != 2, so points stream unfiltered.
+
+**Change 3 — Mariani–Silver for general exponents:** `stream_tile_subdivided`
+takes the exponent and dispatches per wave (branch is per-wave, not
+per-step, so the quadratic path is untouched — measured flat). The
+ring-fill maximum-principle argument holds for every multibrot degree; same
+assumption rect_in_set makes at tile level for all exponents.
+
+Wasm-level (run.mjs, full 43-case corpus, 10 samples, baseline @633ad35):
+- user-z30-f8a50601 (e6, i25600, 92% interior — slowest direct corpus
+  case): **2931 → 151 ms (−94.9%)**; ms/Miter 11.8 → 0.60, from 16x the
+  direct escaper norm to on it.
+- syn-direct-z5-multibrot3: −94.0%.
+- Everything else flat: direct geomean −31.5% (all from the two multibrot
+  cases), pf64 +0.0%, float-exp −0.2%; quadratic direct cases within noise.
+
+Correctness: cargo test 59/59 (scalar loop still the native arbiter).
+Pixel-check: 42/43 byte-identical; user-z30-f8a50601 differs on 16/10000
+pixels — verified individually: every one an isolated escaper speck
+(baseline colored, 6–8 of 8 neighbors interior-black) on a sub-pixel
+exterior channel, now ring-filled as interior. Same artifact class the
+2026-07-07 quadratic Mariani ship accepted deliberately and that tile-level
+rect_in_set produces resolution-dependently. Kernel-vs-scalar bit-exactness
+verified separately: a MARIANI_LEAF=100000 diagnostic build (fill disabled,
+every pixel through the kernel) is byte-identical to baseline on the case.
+valuesHash re-blessed 6f67e811 → 693532ad with this justification (probe
+composition ticks: interior 0.916 → 0.9167).
+
+Holdout ship gate (seed 2026-07-10, 40/tier): direct geomean **−23.3%**
+(four fresh multibrot views −83..−94%), pf64 −0.4%, time-weighted −21.9%;
+positive movers all sub-10 ms n=3 noise-floor class. --pixel-check: 79/80
+identical; hold-z6-ee5b9472 (e3) differs on exactly 1/10000 pixels —
+verified: isolated escaper speck, 8/8 neighbors interior. Total accepted
+artifact rate: 17 pixels across 123 validated views, all multibrot
+interior-region specks.
+
+Warmup (client): the direct general kernel is a separate wasm function from
+both the quadratic kernel (init warmup) and the deep general perturbation
+kernel (warmupGeneral renders an effective-z50 e52 tile), so direct
+multibrot first tiles would run Liftoff for their full duration. New
+`warmupGeneralDirect` (worker.js): 2 renders of a 128px e6 tile just past
+the degree-6 cusp (0.5975, 0) at z10 — probed ~82% escapers, escMean 27,
+~360k kernel-iterations per render (the shipped pf64-general warmup
+succeeded on ~150k). The pool picks general vs general-direct warmup by
+initialZoom against DEEP_ZOOM_THRESHOLD (exclusive, like deep/float-exp);
+exponent-2 loads pay nothing.
+
+E2E ship gate (complete builds pre=633ad35 / post):
+- Standard grid corpus (2 rounds, warmup 0): all nine cases within ±5.6%
+  at n=2, overall geomean −2.0%; colds track warm (single-sample ±8%
+  swings on untouched exponent-2 views only).
+- grid-multibrot corpus (800x600, 2 rounds, warmup 0):
+  - grid-z30-e6-f8a50601 (NEW committed case, heaviest real direct view in
+    the export): **34539 → 4351 ms (−87.4%), cold 35821 → 4323 ms
+    (−87.9%)** — cold tracks warm, so warmupGeneralDirect covers tier-up
+    per the standing SIMD-warmup rule.
+  - grid-z48-e52-0611aae8: +0.3% (cold −0.6%) — deep multibrot untouched.
+
+Size: bench artifact 323.3 → 324.2 KiB (+0.3%); production module wasm
+324.6 → 328.2 KiB (+3.6 KiB).
+
+Verdict: shipped. The slowest real direct view drops ~8x end to end
+(~11.6 s/tile → ~1.4 s/tile at production tile size), closing the last
+structural ms/Miter outlier in the direct tier; all exponent-2 and deep
+traffic unaffected. Backlog effects: item #1 done; item #2 partially done
+(grid-z30-e6 committed to grid-multibrot.json; the z28 border-band direct
+case remains uncommitted); item #4's "no byte-exact lever" verdict now
+extends to multibrot escaper bands (same structural norm).
+
+Reproduce: `node src/run.mjs --variants baseline,genstream --filter
+user-z30-f8a50601`; `node src/validate.mjs --variants baseline,genstream
+--pixel-check`; `node src/build-dist.mjs pre-genstream --ref 633ad35 &&
+node src/build-dist.mjs post-genstream && node src/run-e2e.mjs --variants
+pre-genstream,post-genstream --rounds 2 --warmup 0` plus `--corpus
+corpus/grid-multibrot.json --viewport 800x600 --rounds 2 --warmup 0`.

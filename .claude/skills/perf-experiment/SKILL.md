@@ -402,44 +402,38 @@ effect of an experiment.
 
 ### Direct (f64) tier — the active focus (2026-07-09 directive)
 
-1. **Direct multibrot modernization.** Exponent ≠ 2 direct tiles run a
-   fully scalar loop (lib.rs `calculate_escape_iterations_general`):
-   `z.powu(e) + c` with a `z.norm()` **sqrt every iteration** (the
-   quadratic loops compare squared norms), scalar Brent periodicity, no
-   pairing/stream kernel, no Mariani fill, no closed-form interior test
-   (none exists for e ≠ 2). Evidence: user-z30-f8a50601 (e6, i25600, 92%
-   interior) is the slowest direct corpus case — 2.9 s at its 100px
-   override (~11.6 s/tile at production 200px) and 11.8 ms/Miter vs the
-   ~0.75 direct escaper norm, the same structural-slowness signature that
-   flagged the e52 pf64 view. Mechanisms, in expected order: drop the
-   sqrt (compare `norm_sqr` against radius², byte-exact iff radius² is
-   exact — verify), lane-parallel general stream kernel (mirror of the
-   pf64 general one; monomorphize per exponent-class), Mariani wave for
-   its 92% interior. Warmup caveat: a new kernel instantiation needs its
-   own tier-up volume; `warmupGeneral` fires on exponent ≠ 2 pools but
-   renders a *pf64-depth* tile — a direct-multibrot kernel is a separate
-   wasm function, check what the pool's initial view needs.
-2. **Heavy-direct e2e coverage gap.** grid-regression.json's direct cases
-   top out at grid-z36-i51200 (~1.6 s post-ships); the export's heaviest
-   real direct views are absent: user-z28-543f9cfa (i50000 border band,
-   177M probe iters, escaper mean 41k, ~1.3 s/tile at 200px → roughly a
-   9 s grid) and the z30 e6 multibrot above (~75 s grid at 200px). Add
-   the z28 view to grid-regression.json, and give item 1 a direct-
-   multibrot grid case beside corpus/grid-multibrot.json as its ship
-   gate — decide deliberately, both add per-round runtime.
-3. **Pool-cap re-audit for throughput-bound direct grids.** The
+Item #1 (direct multibrot modernization) **shipped 2026-07-10** — see the
+LOG entry: sqrt drop + `stream_escape_general` (powu-exact SIMD, fused
+across chains) + Mariani dispatch for all exponents; the e6 view −94.9%
+wasm-level, grid-z30-e6 e2e 34.5 → 4.35 s (−87.4%, cold tracks warm via
+the new `warmupGeneralDirect`). Mechanism notes that survive: replicate
+num-complex's square-and-multiply order exactly for bit-exactness; 4
+chains beat 6/8 (small Mariani waves + refill bookkeeping punish wider
+kernels); the accepted output-diff class is isolated escaper specks
+ring-filled as interior (17 px across 123 validated views, same class as
+tile-level rect_in_set) — any future fill-related diff must match that
+signature or it's a bug. grid-z30-e6-f8a50601 is committed to
+grid-multibrot.json as the direct-multibrot regression guard.
+
+1. **Heavy-direct e2e coverage gap (remaining half).** The export's
+   heaviest real *quadratic* direct view is absent from every e2e corpus:
+   user-z28-543f9cfa (i50000 border band, 177M probe iters, escaper mean
+   41k, ~1.3 s/tile at 200px → roughly a 9 s grid). Add it to
+   grid-regression.json — decide deliberately, it adds per-round runtime.
+   (The multibrot half shipped 2026-07-10 as grid-z30-e6-f8a50601.)
+2. **Pool-cap re-audit for throughput-bound direct grids.** The
    hardwareConcurrency−1 cap (32a1c7d) cost mid-weight grids ~5.7% e2e
    when measured 2026-07-04; its motivation — TurboFan compile contention
    during first-load tier-up — is since mitigated by the spawn warmups.
    Re-measure 7 vs 8 workers on current builds (client-JS-only change,
    run-e2e decides; watch the heavy pf64 cases for the old contention).
-4. **Trapped/border direct throughput views** (the z28-i50000 class):
+3. **Trapped/border direct throughput views** (the z28-i50000 class):
    escaper work at the structural norm — the direct analogue of
    grid-z47's irreducible verdict. Periodicity/fill don't apply to
    escapers and no byte-exact iteration-skipping exists at any f64 depth
    (see the settled entry above). Only per-step micro-headroom; don't
    burn sessions here without a genuinely new mechanism.
-5. z0 whole-set small-tile wave/gather overhead — micro (accepted
+4. z0 whole-set small-tile wave/gather overhead — micro (accepted
    +0.6 ms/tile from the Mariani ship); only if whole-set loads ever
    matter in user data.
 

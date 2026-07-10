@@ -55,9 +55,14 @@ export type RecolorPayload = {
   paletteMaxIter: number;
 };
 export type RecolorRequest = { type: "recolor"; payload: RecolorPayload };
-// Tier-up warmup for the general-exponent (multibrot) wasm kernel; returns
-// nothing. Sent once per worker at pool spawn when the view's exponent != 2.
+// Tier-up warmup for the deep general-exponent (multibrot) perturbation
+// kernel; returns nothing. Sent once per worker at pool spawn when the
+// view's exponent != 2 and it is already at deep-zoom depth.
 export type WarmupGeneralRequest = { type: "warmupGeneral" };
+// Tier-up warmup for the direct-tier general-exponent stream kernel;
+// returns nothing. Sent once per worker at pool spawn when the view's
+// exponent != 2 at direct depth (effective zoom < DEEP_ZOOM_THRESHOLD).
+export type WarmupGeneralDirectRequest = { type: "warmupGeneralDirect" };
 // Tier-up warmup for the perturbation-f64 stream kernel; returns nothing.
 // Sent once per worker at pool spawn when the view is already at deep-zoom
 // depth (exponent 2, effective zoom >= DEEP_ZOOM_THRESHOLD).
@@ -71,6 +76,7 @@ export type WorkerRequest =
   | OptimiseRequest
   | RecolorRequest
   | WarmupGeneralRequest
+  | WarmupGeneralDirectRequest
   | WarmupDeepRequest
   | WarmupFloatExpRequest;
 
@@ -621,28 +627,38 @@ class MandelbrotMap extends L.Map {
       await this.pool.terminate(true);
     }
     const { Worker, spawn } = await import("threads");
-    // Multibrot views run a separate wasm kernel that the worker's init
-    // warmup does not tier up; warm it during spawn (before the pool hands
-    // the worker any tile) so deep multibrot tiles never render under
-    // Liftoff. Exponent-2 loads skip this entirely (see worker.js).
-    const warmGeneralKernel =
-      this.config?.exponent && this.config.exponent !== 2;
+    // Multibrot views run separate wasm kernels that the worker's init
+    // warmup does not tier up; warm the one matching the view's depth during
+    // spawn (before the pool hands the worker any tile) so multibrot tiles
+    // never render under Liftoff. Direct-depth multibrot views render every
+    // tile through the direct general stream kernel and deep ones through
+    // the general perturbation kernel, so the two warmups are exclusive.
+    // Exponent-2 loads skip both entirely (see worker.js).
+    const isMultibrot = Boolean(
+      this.config?.exponent && this.config.exponent !== 2,
+    );
+    const initialZoom = this.config?.zoom ?? 0;
+    const warmGeneralKernel = isMultibrot && initialZoom >= DEEP_ZOOM_THRESHOLD;
+    const warmGeneralDirectKernel =
+      isMultibrot && initialZoom < DEEP_ZOOM_THRESHOLD;
     // Likewise for the exponent-2 perturbation kernels: only views already
     // at depth need one warm, and shallow views that later zoom past a
     // threshold tier it up naturally over their first few tiles. Views at
     // float-exp depth render every tile through the hybrid float-exp kernel,
     // not the perturbation-f64 one, so the two warmups are exclusive.
-    const initialZoom = this.config?.zoom ?? 0;
     const warmFloatExpKernel =
-      !warmGeneralKernel && initialZoom >= FLOAT_EXP_THRESHOLD;
+      !isMultibrot && initialZoom >= FLOAT_EXP_THRESHOLD;
     const warmDeepKernel =
-      !warmGeneralKernel &&
+      !isMultibrot &&
       !warmFloatExpKernel &&
       initialZoom >= DEEP_ZOOM_THRESHOLD;
     this.pool = Pool(async () => {
       const worker = await spawn(new Worker("./worker.js"));
       if (warmGeneralKernel) {
         await worker({ type: "warmupGeneral" });
+      }
+      if (warmGeneralDirectKernel) {
+        await worker({ type: "warmupGeneralDirect" });
       }
       if (warmFloatExpKernel) {
         await worker({ type: "warmupFloatExp" });
