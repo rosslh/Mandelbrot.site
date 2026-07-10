@@ -15,7 +15,12 @@
 // --pixel-check renders each holdout view once per variant and byte-compares
 // the output instead of timing; run it whenever the change under test has
 // any accepted pixel diff (artifact classes can hide on view shapes the
-// fixed corpus lacks). Holdout tiles render at --tile-size (default 100):
+// fixed corpus lacks). With --tolerance it instead compares the CANDIDATE
+// (second variant) against the pinned output anchor (bench/anchor.json)
+// under the committed budgets - the anchor is a pinned build, so fresh
+// holdout views get their reference values generated on demand and drift
+// stays bounded on views the fixed corpus has never seen.
+// Holdout tiles render at --tile-size (default 100):
 // per-pixel cost is size-invariant, so relative deltas are preserved while
 // heavyweight real views stay inside the budget. Holdout results are
 // machine-local (bench/results/); never copy session ids or share URLs out
@@ -30,6 +35,11 @@ import { candidateKeyFor, extractCandidates, fnv1a, loadRows } from "./ingest.mj
 import { caseToWasmArgs, PATHWAYS } from "./normalize.mjs";
 import { readVariantMeta, startSession } from "./session.mjs";
 import { median, mad, geomean, isSignificant } from "./stats.mjs";
+import {
+  diffValues,
+  formatToleranceResult,
+  readAnchorConfig,
+} from "./tolerance.mjs";
 
 const benchDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -45,6 +55,7 @@ function parseArgs(argv) {
     budgetMs: 8000,
     tileSize: 100,
     pixelCheck: false,
+    tolerance: false,
     out: null,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -59,6 +70,7 @@ function parseArgs(argv) {
     else if (arg === "--budget-ms") opts.budgetMs = Number(argv[++i]);
     else if (arg === "--tile-size") opts.tileSize = Number(argv[++i]);
     else if (arg === "--pixel-check") opts.pixelCheck = true;
+    else if (arg === "--tolerance") opts.tolerance = true;
     else if (arg === "--out") opts.out = resolve(argv[++i]);
     else throw new Error(`Unexpected argument: ${arg}`);
   }
@@ -181,12 +193,75 @@ async function runPixelCheck(session, opts, cases, defaults) {
   console.log(`\nAll ${cases.length} holdout views byte-identical.`);
 }
 
+// Anchor-relative tolerance gate on the holdout sample: the candidate's
+// values vs references generated on demand by the pinned anchor build.
+async function runToleranceHoldout(session, opts, cases, defaults, anchor) {
+  const failing = [];
+  for (const benchCase of cases) {
+    const [payload, args] = caseToWasmArgs(benchCase, defaults);
+    const [valuesAnchor, valuesCandidate] = await Promise.all(
+      [0, 1].map((index) =>
+        session.page
+          .evaluate(
+            (variantIndex, wasmArgs) => window.getValues(variantIndex, wasmArgs),
+            index,
+            args,
+          )
+          .then((base64) => Buffer.from(base64, "base64")),
+      ),
+    );
+    const stats = diffValues(
+      valuesAnchor,
+      valuesCandidate,
+      payload.imageWidth,
+      anchor.budgets,
+    );
+    console.log(formatToleranceResult(benchCase.id, stats));
+    if (!stats.pass) failing.push(benchCase.id);
+  }
+  if (failing.length > 0) {
+    console.log(
+      `\n${failing.length}/${cases.length} holdout views exceed the anchor ` +
+        `tolerance budget: ${failing.join(", ")}\n` +
+        `This is an escalation, not an acceptance path: either the change is ` +
+        `wrong, or it needs an explicit re-anchor decision (LOG.md entry + ` +
+        `re-pin bench/anchor.json).`,
+    );
+    process.exit(1);
+  }
+  console.log(
+    `\nAll ${cases.length} holdout views within the anchor tolerance budget.`,
+  );
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const [baseline, candidate] = opts.variants;
   const variantMetas = Object.fromEntries(
     opts.variants.map((name) => [name, readVariantMeta(name)]),
   );
+
+  if (opts.tolerance && !opts.pixelCheck) {
+    throw new Error("--tolerance requires --pixel-check");
+  }
+  let anchor = null;
+  if (opts.tolerance) {
+    anchor = readAnchorConfig();
+    const anchorMeta = readVariantMeta(anchor.variant);
+    if (!anchorMeta.gitSha.startsWith(anchor.gitSha)) {
+      throw new Error(
+        `Anchor artifact "${anchor.variant}" was built from ${anchorMeta.gitSha}, ` +
+          `but anchor.json pins ${anchor.gitSha}; rebuild it: ` +
+          `node src/build.mjs ${anchor.variant} --ref ${anchor.gitSha}`,
+      );
+    }
+    console.log(
+      `Tolerance gate: ${candidate} vs anchor @${anchor.gitSha.slice(0, 7)} ` +
+        `(budgets: |Δ| ≤ ${anchor.budgets.maxAbsDelta}, ` +
+        `diff ≤ ${anchor.budgets.maxDiffFraction * 100}%, ` +
+        `blob ≤ ${anchor.budgets.maxBlobPx} px, flips ≤ ${anchor.budgets.maxFlips})`,
+    );
+  }
 
   const corpus = JSON.parse(readFileSync(opts.corpus, "utf8"));
   const rows = loadRows(opts.events);
@@ -206,11 +281,17 @@ async function main() {
       ` (${rows.length} rows, ${skipped} skipped, corpus views excluded)`,
   );
 
-  const session = await startSession(opts.variants);
+  const session = await startSession(
+    anchor ? [anchor.variant, candidate] : opts.variants,
+  );
   const results = [];
   try {
     if (opts.pixelCheck) {
-      await runPixelCheck(session, opts, cases, corpus.defaults);
+      if (anchor) {
+        await runToleranceHoldout(session, opts, cases, corpus.defaults, anchor);
+      } else {
+        await runPixelCheck(session, opts, cases, corpus.defaults);
+      }
       return;
     }
 

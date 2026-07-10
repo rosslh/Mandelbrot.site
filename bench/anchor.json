@@ -1,0 +1,25 @@
+{
+  "comment": [
+    "The pinned OUTPUT ANCHOR for the tolerance gate (see LOG.md 2026-07-10,",
+    "'anchor-relative output-tolerance policy'). Tolerance-mode pixel checks",
+    "always compare a candidate against THIS build's output - never against",
+    "the candidate's predecessor - so accepted deviation can never compound",
+    "across experiments. Regenerate the artifact on a new machine with:",
+    "  node src/build.mjs anchor --ref <gitSha below>",
+    "Moving the anchor (re-pinning gitSha) is a deliberate user-level",
+    "decision recorded in LOG.md, not a side effect of an experiment.",
+    "Budgets: maxAbsDelta is in smoothed escape iterations; flips",
+    "(escaper <-> interior) always fail; maxBlobPx bounds the largest",
+    "4-connected component of differing pixels; maxDiffFraction bounds the",
+    "share of differing pixels per tile."
+  ],
+  "variant": "anchor",
+  "gitSha": "3517e5678f5ec9238c970ef714f67d730af7d044",
+  "pinnedAt": "2026-07-10",
+  "budgets": {
+    "maxAbsDelta": 1.0,
+    "maxDiffFraction": 0.001,
+    "maxBlobPx": 2,
+    "maxFlips": 0
+  }
+}

@@ -181,6 +181,31 @@ window.benchReady = (async () => {
     };
   };
 
+  // Tolerance-gate primitive: renders through get_mandelbrot_tile_precise
+  // with include_values and returns the raw Float32Array values buffer
+  // (smoothed escape iterations; Infinity for interior pixels) as base64.
+  // The tolerance gate diffs these semantic values, not RGBA bytes, so a
+  // palette change can never mask or fake an output change.
+  window.getValues = (variantIndex, args) => {
+    const tile = variants[variantIndex].get_mandelbrot_tile_precise(
+      ...args,
+      true,
+    );
+    const values = tile.values;
+    tile.free();
+    const bytes = new Uint8Array(
+      values.buffer,
+      values.byteOffset,
+      values.byteLength,
+    );
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  };
+
   window.getTile = (variantIndex, args) => {
     const data = variants[variantIndex].get_mandelbrot_image_precise(...args);
     let binary = "";

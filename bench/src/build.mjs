@@ -7,14 +7,21 @@
 // Usage:
 //   node src/build.mjs <name> [--opt-level s|z|1|2|3] [--lto true|fat|thin|off|false]
 //     [--codegen-units N] [--rustflags "..."] [--wasm-opt "<flags>"] [--no-wasm-opt]
+//     [--ref <git-ref>]
 //
 // With no flags, the variant matches production exactly (opt-level=3,
 // lto=true, codegen-units=1, wasm-opt -O3 with simd; simd128 rustflags come
 // from .cargo/config.toml, which a RUSTFLAGS env var would replace - so
 // --rustflags experiments must re-include -C target-feature=+simd128).
+//
+// --ref builds the crate from a temporary git worktree of the given ref
+// instead of the current tree (that ref's own Cargo/.cargo config applies).
+// This is how the pinned output ANCHOR (bench/anchor.json) is regenerated
+// reproducibly on a new machine: node src/build.mjs anchor --ref <sha>.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -31,10 +38,13 @@ export const PRODUCTION_DEFAULTS = {
 };
 
 function parseArgs(argv) {
-  const opts = { ...PRODUCTION_DEFAULTS, name: null };
+  const opts = { ...PRODUCTION_DEFAULTS, name: null, ref: null };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     switch (arg) {
+      case "--ref":
+        opts.ref = argv[++i];
+        break;
       case "--opt-level":
         opts.optLevel = argv[++i];
         break;
@@ -81,6 +91,41 @@ export function buildVariant(opts) {
   const pkgDir = join(benchDir, "artifacts", opts.name, "pkg");
   mkdirSync(pkgDir, { recursive: true });
 
+  let sourceCrateDir = crateDir;
+  let sourceSha = null;
+  let worktree = null;
+  if (opts.ref) {
+    sourceSha = execFileSync(
+      "git",
+      ["-C", repoDir, "rev-parse", opts.ref],
+      { encoding: "utf8" },
+    ).trim();
+    worktree = mkdtempSync(join(tmpdir(), `bench-build-${opts.name}-`));
+    console.log(`[${opts.name}] building from ${sourceSha} in ${worktree}`);
+    execFileSync(
+      "git",
+      ["-C", repoDir, "worktree", "add", "--detach", worktree, sourceSha],
+      { stdio: "inherit" },
+    );
+    sourceCrateDir = join(worktree, "mandelbrot");
+  }
+
+  try {
+    return buildVariantFrom(opts, sourceCrateDir, sourceSha);
+  } finally {
+    if (worktree) {
+      execFileSync(
+        "git",
+        ["-C", repoDir, "worktree", "remove", "--force", worktree],
+        { stdio: "inherit" },
+      );
+    }
+  }
+}
+
+function buildVariantFrom(opts, sourceCrateDir, sourceSha) {
+  const pkgDir = join(benchDir, "artifacts", opts.name, "pkg");
+
   const env = {
     ...process.env,
     CARGO_PROFILE_RELEASE_OPT_LEVEL: opts.optLevel,
@@ -97,7 +142,7 @@ export function buildVariant(opts) {
   const build = spawnSync(
     "wasm-pack",
     ["build", "--profiling", "--target", "web", "--out-dir", pkgDir],
-    { cwd: crateDir, env, stdio: "inherit" },
+    { cwd: sourceCrateDir, env, stdio: "inherit" },
   );
   if (build.status !== 0) {
     throw new Error(`wasm-pack build failed for variant "${opts.name}"`);
@@ -127,7 +172,8 @@ export function buildVariant(opts) {
   const meta = {
     name: opts.name,
     builtAt: new Date().toISOString(),
-    gitSha: toolVersion("git", ["-C", repoDir, "rev-parse", "HEAD"]),
+    gitSha: sourceSha ?? toolVersion("git", ["-C", repoDir, "rev-parse", "HEAD"]),
+    ...(sourceSha && { builtFromRef: true }),
     flags: {
       optLevel: opts.optLevel,
       lto: opts.lto,

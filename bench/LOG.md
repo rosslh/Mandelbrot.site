@@ -1901,3 +1901,64 @@ Reproduce: node src/build-dist.mjs pre-onepool --ref 97180e8 && node
 src/build-dist.mjs post-onepool && node src/run-e2e.mjs --variants
 pre-onepool,post-onepool --rounds 3 --warmup 0 (and the same with
 --corpus corpus/grid-multibrot.json).
+
+## 2026-07-10 — POLICY (user decision): anchor-relative output-tolerance gate, opt-in; byte-exact stays the default
+
+Machine: Rosss-MacBook-Pro.local darwin/arm64 Apple M1 Pro, Chrome 136.
+Harness + policy change only; no production code touched.
+
+Context: with both direct-tier kernels at bare recurrences, the remaining
+compute lever the byte-exact bar blocks is the float-rounding class (FMA,
+reassociation). The user weighed relaxing byte-exactness against the risk
+of functional regressions and of slow drift (N "imperceptible" ships
+compounding), and approved this design:
+
+- **Byte-exact remains the default gate.** Nothing changes for ordinary
+  experiments.
+- **Opt-in tolerance gate, always anchor-relative.** A candidate's output
+  is compared against a PINNED ANCHOR build — never against the
+  candidate's predecessor — so accepted deviation can never exceed the one
+  fixed budget no matter how many tolerance ships land. A candidate that
+  would exceed it fails loudly and forces an explicit re-anchor decision
+  (LOG entry + re-pin), turning "the drift budget is spent" into a user
+  choice instead of a silent ratchet.
+- The anchor is pinned in committed bench/anchor.json:
+  variant "anchor", sha 3517e5678f5ec9238c970ef714f67d730af7d044
+  (2026-07-10, current production output). Artifacts are gitignored, so
+  the runners verify the local anchor artifact's meta sha against the pin
+  and refuse a stale one; regenerate with
+  `node src/build.mjs anchor --ref <sha>` (build.mjs gained --ref for
+  this — temp-worktree build like build-dist).
+- The diff runs on smoothed escape VALUES (get_mandelbrot_tile_precise
+  include_values; Infinity = interior), not RGBA, so palette settings can
+  neither mask nor fake an output change. Committed budgets: max |Δ| ≤ 1.0
+  smoothed iteration on escapers, ≤ 0.1% of pixels differing, largest
+  4-connected diff blob ≤ 2 px, zero escaper↔interior flips (a flip's
+  delta is unbounded by construction, so fill-class changes always
+  escalate — the multiplier-interior failure mode is contiguous regions,
+  which the blob bound also catches).
+- Tooling: `node src/pixel-check.mjs --b <variant> --tolerance` (fixed
+  corpus) and `node src/validate.mjs --variants a,b --pixel-check
+  --tolerance` (fresh holdout; the anchor being a *build* means reference
+  values for never-seen views are generated on demand, so drift is
+  bounded off-corpus too). New page primitive window.getValues; shared
+  gate logic in src/tolerance.mjs.
+
+Validation of the gate itself:
+- A/A: anchor vs itself and anchor vs baseline@397e111 (two shipped
+  changes apart, byte-identical era) — all 43 corpus cases identical,
+  exit 0.
+- Escalation, fixed corpus: a 633ad35 build (pre direct-multibrot
+  modernization, the re-blessed 16-px speck diff) vs anchor —
+  user-z30-f8a50601 flagged OVER BUDGET (16 flips, 0.160% > 0.1%, blob
+  3 px > 2), exit 1.
+- Escalation, holdout: same variant caught the *other* known historical
+  artifact (hold-z6-ee5b9472, exactly 1 flip px, matching the
+  modernization ship's holdout note), exit 1.
+
+Consequences: ffast-math-class experiments (RUSTFLAGS reassociation,
+wasm-opt --fast-math) are now runnable through a defined gate instead of
+being auto-rejected at pixel-check; flip-class diffs (Mariani-speck-like)
+still require explicit user acceptance via re-anchor. enrich --check
+re-blessing stays as-is for accepted ships. Moving the anchor is a
+deliberate, logged user decision — never an experiment side effect.

@@ -188,9 +188,9 @@ below).
 
 - **Flag-only change** (opt-level, lto, wasm-opt, codegen-units):
   `node src/pixel-check.mjs --a baseline --b <variant>` must report all cases
-  byte-identical. Float reassociation (e.g. ffast-math-style RUSTFLAGS) can
-  legitimately change pixels — treat any diff as a red flag and only accept it
-  deliberately with `--allow-diff` plus a written justification.
+  byte-identical. Float reassociation (e.g. ffast-math-style RUSTFLAGS,
+  wasm-opt --fast-math) legitimately changes pixels — such experiments go
+  through the anchor-relative tolerance gate below, not --allow-diff.
 - **Rust code change**: `cargo test` must pass (insta snapshot suite). Use
   `cargo insta test --accept` only when the visual diff is understood and
   intended. Then rebuild the variant and re-run the benchmark.
@@ -199,6 +199,39 @@ below).
   against the committed blessed hashes (`stats.valuesHash`) — catches output
   changes that snuck in across experiments. Intentional changes are
   re-blessed with `--check <variant> --bless` plus a LOG.md justification.
+
+### Output policy: byte-exact by default, anchor-relative tolerance by opt-in
+
+Decided by the user 2026-07-10 (LOG entry of the same date). Byte-exactness
+stays the default bar for everything above. An experiment whose output
+change is float-rounding-class (FMA, reassociation) may instead opt into
+the **tolerance gate**, which bounds deviation against a PINNED ANCHOR
+build — never against the experiment's own predecessor, so accepted
+deviation can never compound across ships (no drift ratchet):
+
+```sh
+node src/pixel-check.mjs --b <variant> --tolerance              # fixed corpus
+node src/validate.mjs --variants base,<variant> --pixel-check --tolerance  # holdout
+```
+
+The anchor is pinned in committed `bench/anchor.json` (variant name, git
+sha, budgets); the artifact itself is machine-local and regenerated with
+`node src/build.mjs anchor --ref <pinned-sha>` (the runners verify the
+artifact's meta sha against the pin and refuse a stale one). The diff runs
+on smoothed escape VALUES, not RGBA. Budgets (committed): max |Δ| ≤ 1.0
+iteration on escapers, ≤ 0.1% of pixels differing, largest 4-connected
+diff blob ≤ 2 px, and **zero escaper↔interior flips** — a flip's delta is
+unbounded, so flip-class changes (Mariani-speck-like fills) always
+escalate to the user rather than passing quietly. A failing tolerance run
+is an escalation, not an acceptance path: the change is either wrong or
+needs a deliberate re-anchor (LOG.md entry + re-pin anchor.json + rebuild
+the anchor artifact) — moving the anchor is a user-level decision, never
+an experiment side effect. Tolerance-accepted ships still re-bless
+enrich hashes as usual and must run the holdout tolerance check.
+Validated 2026-07-10: A/A identical on all 43 cases; the two known
+historical artifact classes (16-flip speck cluster on user-z30, 1-px flip
+on a holdout e3 view, both from the 633ad35→ modernization re-bless) are
+correctly caught and escalated.
 
 ## Applying a winner
 
