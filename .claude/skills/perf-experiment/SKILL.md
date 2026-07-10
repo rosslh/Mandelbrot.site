@@ -433,13 +433,32 @@ that commit's "negligible" claim, so it stays. Full numbers in the LOG
 entry; re-open only if the user re-weighs the UX tradeoff — the
 benchmark side is answered.
 
-1. **Trapped/border direct throughput views** (the z28-i50000 class):
-   escaper work at the structural norm — the direct analogue of
-   grid-z47's irreducible verdict. Periodicity/fill don't apply to
-   escapers and no byte-exact iteration-skipping exists at any f64 depth
-   (see the settled entry above). Only per-step micro-headroom; don't
-   burn sessions here without a genuinely new mechanism.
-2. z0 whole-set small-tile wave/gather overhead — micro (accepted
+Former item #1 (trapped/border direct throughput, the z28-i50000 class)
+**shipped 2026-07-10** as deferred escape detection in the quadratic
+stream kernel — see the LOG entry: grid-z28 e2e 11.1 → 6.2 s (−44.0%),
+direct geomean −24.3% wasm-level, outputs byte-identical, deep tiers
+flat. Mechanism notes that survive: exact-detection machinery in a SIMD
+escape loop (norm/lt/alive/freeze-selects/masked iter) can be amortized
+to stride boundaries — escaped lanes free-run safely (escape-radius
+growth is monotone; inf/NaN fail the boundary lt) and a ≤stride scalar
+replay from a boundary checkpoint recovers the exact escape step
+byte-exactly. After any step-cost change, re-sweep chains AND stride:
+both optima moved (4→6 chains, 16→32 stride; quadratic kernel only —
+the general kernel's fused-powu optima stayed 4/16). The tax lands on
+low-escape-count escapers (replay + free-run are fixed per-escaper
+costs) — watch syn-z10-seahorse-class cases when touching stride. The
+iteration counts themselves remain irreducible (settled).
+
+1. **General-kernel deferred escape detection**: the multibrot stream
+   kernel (`stream_escape_general`) still runs per-step escape machinery
+   (~25% of its step at e6, more at e3); the same deferral + scalar-powu
+   replay applies. Bounded upside: a fraction of the e6 view's ~150 ms
+   wasm-level / 4.35 s e2e grid. Re-sweep its chains/stride if taken.
+2. **Residual z28-class throughput**: after the deferral ship the step
+   is the bare z²+c recurrence at 6 chains — per-step op space is now
+   genuinely mined out; only a new algorithmic idea (not byte-exact
+   iteration-skipping — settled) reopens this.
+3. z0 whole-set small-tile wave/gather overhead — micro (accepted
    +0.6 ms/tile from the Mariani ship); only if whole-set loads ever
    matter in user data.
 
@@ -488,4 +507,10 @@ stream kernel + (dz, index) Brent periodicity (2026-07-08, grid-z47 e2e
 kernel (2026-07-08); per-orbit-index Horner coefficient table + fused-chain
 general step (2026-07-09, e52 e2e −73.3%, 74 → 19.8 s — mechanism note: a
 long *serial* recurrence inside a SIMD step is latency-bound; interleaving
-independent chains beat removing ops, −60% vs −33%).
+independent chains beat removing ops, −60% vs −33%); direct multibrot
+modernization (2026-07-10, grid-z30-e6 e2e −87.4%); deferred escape
+detection in the quadratic stream kernel + chains/stride re-sweep
+(2026-07-10, grid-z28 e2e −44.0%, direct geomean −24.3% wasm-level,
+byte-identical — mechanism note: exact escape detection can be amortized
+to stride boundaries with a ≤stride scalar replay; after any step-cost
+change, re-sweep chains and stride).

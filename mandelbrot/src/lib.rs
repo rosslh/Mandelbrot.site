@@ -33,16 +33,26 @@ const PERIODICITY_FIRST_SAVE: u32 = 8;
 // n = save + k*p is divisible by the stride and detection stays guaranteed.
 const PERIODICITY_CHECK_STRIDE: u32 = 4;
 
-// Number of f64x2 vectors the streaming escape kernel keeps in flight
+// Number of f64x2 vectors the streaming escape kernels keep in flight
 // (2 pixels per vector). Each vector is an independent FP dependency chain.
+// The quadratic kernel's deferred-check step is light enough that 6 chains
+// fit without spills (swept 4/6/8: 6 fastest); the general kernel's fused
+// powu step is register-hungrier and still peaks at 4.
 #[cfg(target_arch = "wasm32")]
 const STREAM_CHAINS: usize = 4;
+#[cfg(target_arch = "wasm32")]
+const QUADRATIC_STREAM_CHAINS: usize = 6;
 
-// Iterations between bookkeeping passes (retire/refill, budget, periodicity)
-// in the streaming kernel. Saves land at per-lane multiples of the stride, so
-// cycle detection stays guaranteed as with PERIODICITY_CHECK_STRIDE.
+// Iterations between bookkeeping passes (escape detection, retire/refill,
+// budget, periodicity) in the streaming kernels. Saves land at per-lane
+// multiples of the stride, so cycle detection stays guaranteed as with
+// PERIODICITY_CHECK_STRIDE. The quadratic kernel defers all checks to the
+// boundary, making its per-step loop cheap enough that stride 32 pays
+// (swept 16/32/64: 64 punishes low-iteration escapers via free-run waste).
 #[cfg(target_arch = "wasm32")]
 const STREAM_STRIDE: u32 = 16;
+#[cfg(target_arch = "wasm32")]
+const QUADRATIC_STREAM_STRIDE: u32 = 32;
 
 // Mariani–Silver subdivision: rects whose width or height is at or below
 // this compute all their pixels directly instead of testing their border.
@@ -658,9 +668,13 @@ fn next_streamable_point(
 /// vectors of pixels in flight and refills a lane as soon as its pixel
 /// escapes, is detected periodic, or exhausts the iteration budget — so no
 /// lane idles waiting for a slow neighbor, unlike the fixed-batch kernels.
-/// Retirement, budget, and periodicity bookkeeping run only every
-/// `PERIODICITY_CHECK_STRIDE` iterations; escaped lanes freeze their z and
-/// iteration count exactly at the escape step via the alive mask, so results
+/// All bookkeeping — escape detection, retirement, budget, periodicity —
+/// runs only every `QUADRATIC_STREAM_STRIDE` iterations, so the per-step loop is the
+/// bare z² + c recurrence. Escaped lanes free-run past the radius between
+/// boundaries (|z| grows monotonically once past it, and inf/NaN blow-ups
+/// fail the boundary `lt` the same way); the exact escape step and frozen z
+/// are recovered by replaying at most `QUADRATIC_STREAM_STRIDE` scalar steps from the
+/// previous boundary's checkpoint with the same IEEE op order, so results
 /// are bit-identical to the scalar loop.
 #[cfg(target_arch = "wasm32")]
 fn stream_escape_quadratic<const CHAINS: usize>(
@@ -692,41 +706,55 @@ fn stream_escape_quadratic<const CHAINS: usize>(
     let radius_squared = f64x2_splat(escape_radius_squared);
     let two = f64x2_splat(2.0);
     let max_iterations_minus_one = i64x2_splat(i64::from(max_iterations) - 1);
+    let stride_iters = i64x2_splat(i64::from(QUADRATIC_STREAM_STRIDE));
+
+    // z at the previous boundary, per lane: the replay start point for exact
+    // escape recovery. Fresh loads land exactly on boundaries, so a
+    // checkpoint is always a true orbit value with an exact `iters`.
+    let mut checkpoint_re = lanes.z_re;
+    let mut checkpoint_im = lanes.z_im;
 
     loop {
-        for _ in 0..STREAM_STRIDE {
+        for _ in 0..QUADRATIC_STREAM_STRIDE {
             for chain in 0..CHAINS {
                 let z_re = lanes.z_re[chain];
                 let z_im = lanes.z_im[chain];
-                let norm_sqr = f64x2_add(f64x2_mul(z_re, z_re), f64x2_mul(z_im, z_im));
-                let alive = v128_and(lanes.alive[chain], f64x2_lt(norm_sqr, radius_squared));
-                let next_re = f64x2_add(
+                lanes.z_re[chain] = f64x2_add(
                     f64x2_sub(f64x2_mul(z_re, z_re), f64x2_mul(z_im, z_im)),
                     lanes.c_re[chain],
                 );
-                let next_im = f64x2_add(f64x2_mul(two, f64x2_mul(z_re, z_im)), lanes.c_im[chain]);
-                lanes.z_re[chain] = v128_bitselect(next_re, z_re, alive);
-                lanes.z_im[chain] = v128_bitselect(next_im, z_im, alive);
-                lanes.iters[chain] = i64x2_sub(lanes.iters[chain], alive);
-                lanes.alive[chain] = alive;
+                lanes.z_im[chain] =
+                    f64x2_add(f64x2_mul(two, f64x2_mul(z_re, z_im)), lanes.c_im[chain]);
             }
         }
 
         for chain in 0..CHAINS {
-            // A lane is finished when it escaped (occupied but no longer
-            // alive), ran out its budget, or exactly revisited a saved z.
+            let z_re = lanes.z_re[chain];
+            let z_im = lanes.z_im[chain];
+            // Deferred escape detection: an occupied lane whose boundary z is
+            // at or past the radius (or NaN, which fails the lt) escaped at
+            // some step in the stride just run; the replay below finds which.
+            let norm_sqr = f64x2_add(f64x2_mul(z_re, z_re), f64x2_mul(z_im, z_im));
+            let within = f64x2_lt(norm_sqr, radius_squared);
+            let alive = v128_and(lanes.occupied[chain], within);
+            let escaped = v128_andnot(lanes.occupied[chain], within);
+            // Lanes still within the radius ran the full stride; escaped
+            // lanes keep their previous-boundary count, which is exactly the
+            // replay's starting iteration.
+            lanes.iters[chain] = i64x2_add(lanes.iters[chain], v128_and(stride_iters, alive));
+            lanes.alive[chain] = alive;
+
+            // A lane is finished when it escaped, ran out its budget, or
+            // exactly revisited a saved z.
             let out_of_budget = i64x2_gt(lanes.iters[chain], max_iterations_minus_one);
             let cycled = v128_and(
                 v128_and(
-                    f64x2_eq(lanes.z_re[chain], lanes.saved_re[chain]),
-                    f64x2_eq(lanes.z_im[chain], lanes.saved_im[chain]),
+                    f64x2_eq(z_re, lanes.saved_re[chain]),
+                    f64x2_eq(z_im, lanes.saved_im[chain]),
                 ),
-                lanes.alive[chain],
+                alive,
             );
-            let finished = v128_or(
-                v128_andnot(lanes.occupied[chain], lanes.alive[chain]),
-                v128_and(lanes.alive[chain], v128_or(out_of_budget, cycled)),
-            );
+            let finished = v128_or(escaped, v128_and(alive, v128_or(out_of_budget, cycled)));
 
             if v128_any_true(finished) {
                 for sub in 0..2 {
@@ -734,19 +762,44 @@ fn stream_escape_quadratic<const CHAINS: usize>(
                         continue;
                     }
                     let index = lanes.slots[chain][sub];
-                    let escaped = i64x2_lane(lanes.alive[chain], sub) == 0;
-                    // Alive-but-finished lanes are periodic or out of budget:
-                    // both report max_iterations (out-of-budget lanes may have
-                    // overshot by up to stride-1 masked steps, hence the min).
-                    let escape_iterations = if escaped {
-                        (i64x2_lane(lanes.iters[chain], sub) as u32).min(max_iterations)
+                    let (escape_iterations, z) = if i64x2_lane(escaped, sub) != 0 {
+                        // Replay from the previous boundary's checkpoint with
+                        // the kernel's exact op order to recover the escape
+                        // step and the frozen z. The boundary z failed the
+                        // radius check after QUADRATIC_STREAM_STRIDE steps, so the loop
+                        // bound is also the correctness bound: if every check
+                        // passes, the escape happened on the final step and
+                        // the loop exits holding exactly that z and count.
+                        let c_re = f64x2_lane(lanes.c_re[chain], sub);
+                        let c_im = f64x2_lane(lanes.c_im[chain], sub);
+                        let mut re = f64x2_lane(checkpoint_re[chain], sub);
+                        let mut im = f64x2_lane(checkpoint_im[chain], sub);
+                        let mut iterations = i64x2_lane(lanes.iters[chain], sub);
+                        for _ in 0..QUADRATIC_STREAM_STRIDE {
+                            // Not `>=`: a NaN norm must read as escaped, the
+                            // same way it fails the kernel's f64x2_lt.
+                            #[allow(clippy::neg_cmp_op_on_partial_ord)]
+                            if !(re * re + im * im < escape_radius_squared) {
+                                break;
+                            }
+                            let next_re = re * re - im * im + c_re;
+                            im = 2.0 * (re * im) + c_im;
+                            re = next_re;
+                            iterations += 1;
+                        }
+                        (
+                            (iterations as u32).min(max_iterations),
+                            Complex64::new(re, im),
+                        )
                     } else {
-                        max_iterations
+                        // Periodic or out of budget: both report
+                        // max_iterations (out-of-budget lanes may have
+                        // overshot by up to stride-1 steps, hence the min).
+                        (
+                            max_iterations,
+                            Complex64::new(f64x2_lane(z_re, sub), f64x2_lane(z_im, sub)),
+                        )
                     };
-                    let z = Complex64::new(
-                        f64x2_lane(lanes.z_re[chain], sub),
-                        f64x2_lane(lanes.z_im[chain], sub),
-                    );
                     results[index] = (escape_iterations, z);
 
                     match next_streamable_point(points, results, &mut next_point, max_iterations) {
@@ -775,6 +828,12 @@ fn stream_escape_quadratic<const CHAINS: usize>(
                 lanes.next_save[chain],
                 save_due,
             );
+
+            // Refilled lanes just loaded their z1 = c with iters 0, and
+            // continuing lanes sit on an exact boundary orbit value — either
+            // way this is a valid replay start for the next stride.
+            checkpoint_re[chain] = lanes.z_re[chain];
+            checkpoint_im[chain] = lanes.z_im[chain];
         }
 
         if live_lanes == 0 {
@@ -1039,7 +1098,7 @@ fn stream_tile_subdivided(
                     .map(|&pixel| (re_values[pixel % width], im_values[pixel / width])),
             );
             if exponent == 2 {
-                stream_escape_quadratic::<STREAM_CHAINS>(
+                stream_escape_quadratic::<QUADRATIC_STREAM_CHAINS>(
                     &points,
                     max_iterations,
                     ESCAPE_RADIUS.powi(2),

@@ -1599,3 +1599,82 @@ Reproduce: edit renderPoolSize() in client/js/MandelbrotMap.ts
 (cores−1 → cores), `node src/build-dist.mjs pool8`, revert, `node
 src/build-dist.mjs pool7`, `node src/run-e2e.mjs --variants pool7,pool8
 --rounds 5 --warmup 0`.
+
+## 2026-07-10 — SHIPPED: deferred escape detection in the quadratic stream kernel (+ chains 6 / stride 32 re-sweep)
+
+Backlog item #1 under the direct-tier focus — the class previously framed
+"only per-step micro-headroom; don't burn sessions without a genuinely new
+mechanism." The mechanism found: the per-step loop carried ~6 of ~13 vector
+ops per chain purely for exact escape detection (norm add, lt, alive and,
+two freeze bitselects, masked iter sub). Deferring all of it to the stride
+boundary leaves the bare z²+c recurrence (7 ops); escaped lanes free-run
+past the radius between boundaries (growth past R=3 is monotonic, and
+inf/NaN blow-ups fail the boundary `f64x2_lt` the same way), and the exact
+escape iteration + frozen z are recovered by replaying at most one stride
+of scalar steps from the previous boundary's checkpoint with the kernel's
+exact IEEE op order — byte-exact by construction. Every iteration is still
+computed: this is check amortization, not iteration-skipping; the settled
+iteration-skipping verdicts stand untouched.
+
+Re-sweep under the lighter step (the 2026-07-09 Horner-entry lesson applied:
+reduced per-step register pressure moves the ILP optimum): chains 4→6 gave
+another −10.5% on the heavies (8 sits between — the old "6/8 spill" verdict
+flipped); stride 16→32 another −13%; stride 64 is past the knee
+(low-iteration escapers pay free-run waste + replay: syn-z10-seahorse +33%).
+Shipped as `QUADRATIC_STREAM_CHAINS = 6`, `QUADRATIC_STREAM_STRIDE = 32`;
+the general kernel keeps `STREAM_CHAINS = 4` / `STREAM_STRIDE = 16` (its
+fused-powu step is register-hungrier; its measured optima are unchanged).
+
+Wasm-level (run.mjs, full 43-case corpus, 10 samples, baseline @17b1c59):
+- user-z28-543f9cfa (the export's heaviest real quadratic direct view, the
+  target): **1339 → 726 ms (−45.8%)**; ms/Miter 0.77 → 0.42 — a new
+  structural norm for the direct escaper tier.
+- Every heavy direct escaper view −44..−46% (user-z14 ×2, z20, z37, z38,
+  z44); syn-z30-seahorse −32.4%.
+- direct geomean **−24.3%**; pf64 +0.6% and float-exp +0.2% (untouched
+  code; noise). Size: bench artifact 324.2 → 324.5 KiB.
+- Accepted tax, stated explicitly: light tiles pay the boundary/replay
+  overhead — syn-z3-home +13.6% (+0.13 ms), syn-z10-seahorse +13.7%
+  (+1.0 ms), user-z2 +9.0% (+0.25 ms). Millisecond-scale against ~600 ms
+  saved per heavy tile-set; confirmed invisible at e2e (below).
+
+Correctness: cargo test 59/59 (the SIMD kernel is cfg(wasm32), so the real
+gates are:) pixel-check all 43 cases byte-identical vs baseline; enrich
+--check all blessed hashes match (no re-bless needed). Holdout (seed
+2026-07-10, 40/tier): heavy fresh movers −40..−43%, time-weighted −1.8%;
+direct geomean +0.7% — the fresh sample is dominated by sub-2 ms views each
+paying ≤ +0.5 ms absolute; judged acceptable under absolute-time weighting.
+
+E2E ship gate (complete builds pre=17b1c59 / post=this change,
+grid-regression 10 cases, 3 rounds, warmup 0, 1600x900):
+- grid-z28-i50000: **11143 → 6238 ms (−44.0%, cold −44.7%)**
+- grid-z36-i51200 −15.6% (cold −19.2%); grid-z46-i6400 −14.1%;
+  grid-z20-i1600 −6.9% — the light-tile tax never shows at page-load level.
+- Deep tiers + tax guards all within ±0.5% (z47 +0.4%, z48-i48k +0.2%,
+  z48-i20k +0.5%, z259 +0.2%, z48-i800 +0.1%, z85-i200 +0.2%).
+- Overall geomean **−9.1%**; colds track warm everywhere — the kernel is
+  the same wasm function the existing spawn warmup already renders through,
+  so the standing SIMD-warmup rule is satisfied with no new warmup.
+- Production module wasm 325.5 → 325.8 KiB (+0.3 KiB).
+
+Verdict: shipped. The z28 class's "irreducible" framing was about iteration
+counts and remains true; the per-step *op count* still had a ~45% seam.
+Mechanism notes that survive: (1) exact-detection machinery inside a SIMD
+escape loop can be amortized to any stride whose replay stays cheap — the
+free-run is safe because escape-radius growth is monotone and NaN fails lt;
+(2) after any step-cost change, re-sweep chains AND stride — both optima
+moved (4→6, 16→32) and the stride move alone was worth −13% on the heavies;
+(3) the tax lands on low-escape-count escapers (replay + free-run are a
+fixed cost per escaper, large relative to short orbits) — watch syn-z10-
+seahorse-class cases when touching stride.
+
+Follow-up (new backlog item): the general (multibrot) stream kernel still
+runs per-step escape machinery (~25% of its step at e6, more at e3); the
+same deferral applies, with the scalar powu loop as the replay. Bounded
+upside: a fraction of the e6 view's ~150 ms wasm-level / 4.35 s e2e.
+
+Reproduce: `node src/run.mjs --variants baseline,deferfinal`; sweep
+artifacts defer/defer6/defer8/defer6s32/defer6s64; `node src/validate.mjs
+--variants baseline,deferfinal`; `node src/build-dist.mjs pre-defer --ref
+17b1c59 && node src/build-dist.mjs post-defer && node src/run-e2e.mjs
+--variants pre-defer,post-defer --rounds 3 --warmup 0`.
