@@ -524,4 +524,17 @@ to stride boundaries with a ≤stride scalar replay; after any step-cost
 change, re-sweep chains and stride); deferred escape detection in the
 general (multibrot) stream kernel + its own 6/32 re-sweep (2026-07-10,
 grid-z30-e6 e2e −32.5%, e6 view −36.0% wasm-level, byte-identical —
-both direct-tier kernels now run bare recurrences between boundaries).
+both direct-tier kernels now run bare recurrences between boundaries);
+initial-batch dispatch at pool-ready + 100 ms grace (2026-07-10, overall
+e2e geomean −16.0% — mechanism note: spawn warmups only trigger tier-up,
+the TurboFan swap needs idle CPU; re-check z28 first-tile curves after
+any warmup/pool/dispatch-timing change); single-pool startup — URL config
+parsed before the pool spawns (2026-07-10, light/mid cases −3.5..−7.1%,
+overall geomean −3.6%, z30-e6 cold −4.3% — kills the double
+spawn+warmup cycle and the throwaway default-view tile burst on every
+shared-link load; harness rule: never use puppeteer request interception
+around this client — it intermittently stalls worker spawns; block
+off-localhost via --host-resolver-rules like run-e2e). Per-load floor
+after both ships: ~45 ms bundle+init, ~50 ms pool spawn+warmup, 100 ms
+tier-up grace, dispatch ≈ 190 ms; remaining levers are the grace itself
+(load-bearing) and spawn cost.

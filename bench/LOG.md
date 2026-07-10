@@ -1832,3 +1832,72 @@ Reproduce: node src/build-dist.mjs pre-flush --ref bb5e75e && node
 src/build-dist.mjs post-flush3 && node src/run-e2e.mjs --variants
 pre-flush,post-flush3 --rounds 3 --warmup 0 (and the same with --corpus
 corpus/grid-multibrot.json).
+
+## 2026-07-10 — SHIPPED: single-pool startup (URL config parsed before the pool spawns)
+
+Machine: Rosss-MacBook-Pro.local darwin/arm64 Apple M1 Pro, Chrome 136.
+Client-JS change only (MandelbrotMap.ts); wasm untouched and byte-identical
+(326.9 KiB both sides), so pixel-check/enrich/holdout do not apply — run-e2e
+on complete builds is the whole gate. Continuation of the per-load-floor
+audit the flush ship opened.
+
+Decomposition probe (temporary [probe] console timestamps on a built dist,
+grid-z20 URL): on every shared-link load, initializeMap spawned the pool
+*before* parsing the URL, so the whole startup ran twice — pool #1 spawns
+against the default view (t≈46→103 ms; no conditional warmups because
+this.config isn't set yet), setView(default z3, i=200 ≤ 500) dispatches a
+burst of throwaway default-view tiles through the immediate path onto that
+pool, then setConfigFromUrl → refresh() → createPool #2, whose
+`terminate(true)` *waits for pool #1's in-flight spawns to finish* before
+the second 7-worker spawn+warmup cycle even starts (ready ≈ 151 ms). Net:
+two full spawn cycles serialized plus wasted default-view tiles, and the
+initial-batch flush waited on pool #2 (~251 ms dispatch).
+
+Fix (initializeMap reorder): set config from the URL first (setConfigFromUrl
+no longer calls refresh(); it runs before the controls exist, whose
+constructor does the auto-adjust UI sync), then spawn the one pool — which
+now picks its conditional warmups from the real view depth/exponent — then
+add the layer and set the view once via goToCoordinates(config), so the
+first and only tile batch is the target view. refresh() keeps its
+createPool for genuine setting changes. Probe after: single 7/7 spawn ready
+≈ 90 ms, dispatch ≈ 190 ms (−60 ms), no throwaway tiles.
+
+Standing-rule check (dispatch timing changed → re-check z28-class first-tile
+curves for Liftoff staggering): 6/6 passes clean, first-8 tiles 906–1073 ms
+tight, no 1.6–2.4x stagger; last tile 5.31–5.47 s, tracking the shipped
+numbers.
+
+E2E ship gate (complete builds pre=97180e8 / post=this change, 3 rounds,
+warmup 0, 1600x900), grid-regression all 10 cases:
+- grid-z20-i1600 380 → 353 ms (−7.1%*, cold −7.9%); grid-z85-i200 −7.0%*;
+  grid-z36-i51200 −7.0%* (cold −9.7%); grid-z46-i6400 −6.0%* (cold −10.0%);
+  grid-z48-i800 −3.5%*; grid-z259 −2.9% — the floor cut shows on every
+  light/mid view, colds track or beat warm.
+- Heavies + guards flat: grid-z28 −1.0%, grid-z47 +0.1%, grid-z48-i48k
+  +0.1%, grid-z48-i20k −1.6%. Overall geomean **−3.6%**.
+- grid-multibrot: z30-e6 −0.9% warm, **cold −4.3%** (the general-direct
+  warmup now rides the first and only pool); z48-e52 −0.3%.
+- Smoke (post build): bare-origin load, interactive zoom, and a
+  palette-param share URL all render; input fields sync (the auto-adjust
+  UI sync moved from setConfigFromUrl to the controls constructor).
+
+Two harness lessons, recorded so they aren't relearned:
+- **Never use puppeteer request interception around this client.** The
+  decomposition probe's interception intermittently stalled one worker's
+  spawn forever (6/7 workers, poolSpawned unresolved, flush degraded to
+  the 350 ms debounce) — reproduced in 5/7 passes, vanished without
+  interception. run-e2e already knew: its off-localhost blocking uses
+  --host-resolver-rules for exactly this reason. Probes must copy that.
+- A "detached Frame" crash mid-run-e2e (z47 cold, pre variant) was a
+  one-off harness flake; full re-run was clean. Re-run before diagnosing.
+
+Mechanism note that survives: the per-load floor now decomposes as
+~45 ms bundle+init, ~45–55 ms single pool spawn+warmup, 100 ms tier-up
+grace, then dispatch (~190 ms total on this machine). The remaining
+floor levers are the grace itself (load-bearing per the flush ship) and
+spawn cost (wasm compile is already process-cached across workers).
+
+Reproduce: node src/build-dist.mjs pre-onepool --ref 97180e8 && node
+src/build-dist.mjs post-onepool && node src/run-e2e.mjs --variants
+pre-onepool,post-onepool --rounds 3 --warmup 0 (and the same with
+--corpus corpus/grid-multibrot.json).

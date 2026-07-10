@@ -210,21 +210,29 @@ class MandelbrotMap extends L.Map {
   }
 
   private async initializeMap(htmlId: string, initialConfig: MandelbrotConfig) {
-    await this.createPool();
     this.mapId = htmlId;
     this.origin = { re: initialConfig.re, im: initialConfig.im };
     this.zoomOffset = 0;
-    this.mandelbrotLayer = new MandelbrotLayer().addTo(this);
-    this.addLoadingSpinnerControl();
     this.initialConfig = { ...initialConfig };
     this.config = { ...initialConfig };
+    // Apply any share-URL parameters before the pool spawns or any tile is
+    // requested: the spawn warmups are chosen by the view's depth and
+    // exponent, and the first (and only) tile batch should be the target
+    // view. The previous order spawned a pool against the default view, let
+    // setView request throwaway default-view tiles, then terminated that
+    // pool and spawned a second one once the URL was parsed — two full
+    // spawn+warmup cycles serialized on every shared-link load.
+    this.setConfigFromUrl();
+    await this.createPool();
+    this.mandelbrotLayer = new MandelbrotLayer().addTo(this);
+    this.addLoadingSpinnerControl();
     this.controls = new MandelbrotControls(this);
     this.imageSaver = new ImageSaver(this, this.pool, this.mandelbrotLayer);
 
-    // The world origin corresponds to latLng (0, 0), the center of Leaflet's
-    // tile universe.
-    this.setView([0, 0], this.initialConfig.zoom);
-    this.setConfigFromUrl();
+    // Anchor the world origin at the target coordinates (latLng (0, 0), the
+    // center of Leaflet's tile universe) and set the initial view; for a
+    // plain load this.config still holds the defaults.
+    this.goToCoordinates(this.config.re, this.config.im, this.config.zoom);
     this.setupEventListeners();
   }
 
@@ -653,9 +661,7 @@ class MandelbrotMap extends L.Map {
     const warmFloatExpKernel =
       !isMultibrot && initialZoom >= FLOAT_EXP_THRESHOLD;
     const warmDeepKernel =
-      !isMultibrot &&
-      !warmFloatExpKernel &&
-      initialZoom >= DEEP_ZOOM_THRESHOLD;
+      !isMultibrot && !warmFloatExpKernel && initialZoom >= DEEP_ZOOM_THRESHOLD;
     const poolSize = renderPoolSize();
     let spawnedWorkers = 0;
     let signalPoolSpawned: () => void;
@@ -841,10 +847,11 @@ class MandelbrotMap extends L.Map {
       (
         document.getElementById("paletteAutoAdjust") as HTMLInputElement
       ).checked = this.config.paletteAutoAdjust;
-      this.controls.syncAutoAdjustUi();
+      // Runs before the controls exist (initializeMap creates them right
+      // after); their constructor syncs the auto-adjust UI from the config
+      // values written above.
 
       window.history.replaceState({}, document.title, window.location.pathname);
-      this.refresh();
     }
   }
 }
