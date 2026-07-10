@@ -443,22 +443,30 @@ to stride boundaries — escaped lanes free-run safely (escape-radius
 growth is monotone; inf/NaN fail the boundary lt) and a ≤stride scalar
 replay from a boundary checkpoint recovers the exact escape step
 byte-exactly. After any step-cost change, re-sweep chains AND stride:
-both optima moved (4→6 chains, 16→32 stride; quadratic kernel only —
-the general kernel's fused-powu optima stayed 4/16). The tax lands on
+both optima moved (4→6 chains, 16→32 stride). The tax lands on
 low-escape-count escapers (replay + free-run are fixed per-escaper
 costs) — watch syn-z10-seahorse-class cases when touching stride. The
 iteration counts themselves remain irreducible (settled).
 
-1. **General-kernel deferred escape detection**: the multibrot stream
-   kernel (`stream_escape_general`) still runs per-step escape machinery
-   (~25% of its step at e6, more at e3); the same deferral + scalar-powu
-   replay applies. Bounded upside: a fraction of the e6 view's ~150 ms
-   wasm-level / 4.35 s e2e grid. Re-sweep its chains/stride if taken.
-2. **Residual z28-class throughput**: after the deferral ship the step
+General-kernel deferred escape detection (former item #1) **shipped
+2026-07-10** — see the LOG entry: e6 view 152.6 → 97.6 ms wasm-level
+(−36.0%), grid-z30-e6 e2e 5.79 → 3.91 s (−32.5%, colds track — the
+existing warmupGeneralDirect covers it), e3 −19.9%, all else byte-
+identical noise. Re-sweep flipped the general kernel's optima to 6/32
+too — the "register-hungry powu caps it at 4 chains" verdict was stale
+the moment the step shed its escape machinery. Free-run safety
+generalizes to every exponent d ≥ 2 (growth past R=3 is monotone for
+all multibrot degrees). Accepted tax: fast-escaping high-exponent
+views (holdout e50 view +12.7% = +0.7 ms/100px tile) — the class is
+structurally millisecond-scale, but watch it in holdouts when touching
+stride.
+
+1. **Residual z28-class throughput**: after the deferral ship the step
    is the bare z²+c recurrence at 6 chains — per-step op space is now
    genuinely mined out; only a new algorithmic idea (not byte-exact
-   iteration-skipping — settled) reopens this.
-3. z0 whole-set small-tile wave/gather overhead — micro (accepted
+   iteration-skipping — settled) reopens this. Same now holds for the
+   general kernel: its per-step cost is the powu chain itself.
+2. z0 whole-set small-tile wave/gather overhead — micro (accepted
    +0.6 ms/tile from the Mariani ship); only if whole-set loads ever
    matter in user data.
 
@@ -513,4 +521,7 @@ detection in the quadratic stream kernel + chains/stride re-sweep
 (2026-07-10, grid-z28 e2e −44.0%, direct geomean −24.3% wasm-level,
 byte-identical — mechanism note: exact escape detection can be amortized
 to stride boundaries with a ≤stride scalar replay; after any step-cost
-change, re-sweep chains and stride).
+change, re-sweep chains and stride); deferred escape detection in the
+general (multibrot) stream kernel + its own 6/32 re-sweep (2026-07-10,
+grid-z30-e6 e2e −32.5%, e6 view −36.0% wasm-level, byte-identical —
+both direct-tier kernels now run bare recurrences between boundaries).

@@ -1678,3 +1678,88 @@ artifacts defer/defer6/defer8/defer6s32/defer6s64; `node src/validate.mjs
 --variants baseline,deferfinal`; `node src/build-dist.mjs pre-defer --ref
 17b1c59 && node src/build-dist.mjs post-defer && node src/run-e2e.mjs
 --variants pre-defer,post-defer --rounds 3 --warmup 0`.
+
+## 2026-07-10 — SHIPPED: deferred escape detection in the general (multibrot) stream kernel (+ chains 6 / stride 32 re-sweep)
+
+Direct-tier backlog item #1: the follow-up from the quadratic deferral ship,
+same mechanism applied to `stream_escape_general`. The per-step loop carried
+a norm/lt/alive-and plus two freeze bitselects and a masked iter sub around
+the fused powu step; all of it now defers to the `STREAM_STRIDE` boundary,
+leaving the bare fused powu + c. Free-run safety generalizes to every
+exponent d >= 2 (the client clamps exponent to >= 2): once |z| >= R = 3 and
+|z| >= |c| — both invariant from the first boundary crossing — |z^d + c| >=
+|z|^d − |z| >= 2|z|, so growth past the radius is monotone, and inf/NaN
+blow-ups fail the boundary lt as before. The replay is the scalar
+`z = z.powu(exponent) + c` loop: `fused_powu_lanes` replicates num-complex's
+square-and-multiply order, so replayed steps are bit-identical to the lane
+arithmetic and results are byte-exact by construction.
+
+Re-sweep (the standing rule paid again — both optima moved):
+- chains 4 → 6: e6 heavy view another −17.0%, e3 another −9.6% (8 sits
+  between at −11.5%). The old "general kernel's fused powu step is
+  register-hungrier and peaks at 4" verdict flipped: the binding register
+  pressure was the per-step escape machinery, not the powu itself.
+- stride 16 → 32: e6 another −5.0%, e3 −3.7%. Stride 64 is past the knee
+  (e6 only −2% more, e3 flips to +0.8%). Shipped `STREAM_CHAINS = 6`,
+  `STREAM_STRIDE = 32` — now equal to the quadratic kernel's constants,
+  kept as separate consts since they are independently swept optima.
+
+Wasm-level (run.mjs, full 43-case corpus, 10 samples, baseline @397e111):
+- user-z30-f8a50601 (e6 multibrot, the export's heaviest real direct view
+  post-modernization): **152.6 → 97.6 ms (−36.0%)**.
+- syn-direct-z5-multibrot3 (e3): 4.02 → 3.22 ms (−19.9%).
+- direct geomean −4.5% (all of it from the two multibrot cases; quadratic
+  cases untouched — QUADRATIC_* constants unchanged); pf64 +0.6% and
+  float-exp −0.2% (untouched code; the two flagged light pf64 cases washed
+  out to −1.9%/−1.5% at --samples 15). Size: bench artifact 324.5 →
+  325.6 KiB.
+
+Accepted tax, stated explicitly: fast-escaping high-exponent views pay
+doubled lane-occupancy waste per escaper (stride 16 → 32) plus the scalar
+powu replay, and both costs scale with exponent (~2·log2(e) muls per step).
+The holdout surfaced the class: hold-z20-1e197d5a (exponent 50, i200,
+escapes fast) +12.7% = +0.7 ms at 100px tiles (confirmed at --samples 15).
+At stride 16 that tax vanishes (−1.9%) but the e6 heavy loses ~5 ms/tile —
+absolute-time weighting keeps stride 32: the tax class is structurally
+millisecond-scale (views full of fast escapers are cheap by construction),
+the win class is the seconds-scale multibrot heavies.
+
+Correctness: cargo test 59/59; pixel-check all 43 cases byte-identical vs
+baseline; enrich --check all blessed hashes match (no re-bless).
+
+Holdout (seed 2026-07-10, 40/tier; float-exp tier empty as always):
+direct geomean −1.6%, pf64 −0.1%, time-weighted −0.0%. Real movers, both
+re-confirmed at --samples 15: hold-z25-22bbd802 (e3) −37.3%; hold-z20 e50
++12.7% (the accepted tax above). Everything else noise.
+
+E2E ship gate (complete builds pre=397e111 / post=this change, 3 rounds,
+warmup 0, 1600x900):
+- grid-multibrot.json: **grid-z30-e6-f8a50601 5792 → 3911 ms (−32.5%,
+  cold −32.6%)** — colds track warm; the kernel is the same wasm function
+  the existing `warmupGeneralDirect` spawn warmup renders through, so no
+  new warmup needed. grid-z48-e52 (pf64 general kernel, untouched) +0.3%.
+- grid-regression.json (all 10 cases): everything within ±2.6%, overall
+  geomean 0.1%; the z36 +2.6% warm is untouched quadratic traffic with its
+  cold at −3.4% — round-to-round jitter, not a regression.
+- Production module wasm 325.8 → 326.9 KiB (+1.1 KiB).
+
+Verdict: shipped. With this, both direct-tier stream kernels run bare
+recurrences between stride boundaries; the general kernel's remaining
+per-step cost is the powu chain itself, which is the mathematically
+required work per iteration. Mechanism notes that survive: (1) the deferral
+mechanism transfers across step functions — the free-run argument only
+needs monotone growth past the radius, which holds for every multibrot
+degree; (2) a "register-hungry step" verdict about chain count can be
+stale the moment the step sheds ops — the escape machinery, not the powu,
+was what capped the general kernel at 4 chains; (3) the deferral tax scales
+with exponent (replay step cost) and inversely with escape time (per-escaper
+fixed cost), so its worst case is a fast-escaping high-exponent view — a
+structurally light class, but watch it in holdouts when touching stride.
+
+Reproduce: `node src/run.mjs --variants baseline,gendeferfinal`; sweep
+artifacts gendefer/gendefer6/gendefer8/gendefer6s32/gendefer6s64;
+`node src/validate.mjs --variants baseline,gendeferfinal`;
+`node src/build-dist.mjs pre-gendefer --ref 397e111 && node
+src/build-dist.mjs post-gendefer && node src/run-e2e.mjs --variants
+pre-gendefer,post-gendefer --rounds 3 --warmup 0` (and the same with
+`--corpus corpus/grid-multibrot.json`).
