@@ -461,12 +461,34 @@ views (holdout e50 view +12.7% = +0.7 ms/100px tile) — the class is
 structurally millisecond-scale, but watch it in holdouts when touching
 stride.
 
-1. **Residual z28-class throughput**: after the deferral ship the step
+1. **Algorithmic survey of existing Mandelbrot renderers (user-approved
+   2026-07-10)** — the sanctioned path to the "new algorithmic idea"
+   items #2/#3 are gated on. Clone ~6–8 established projects into a
+   directory OUTSIDE this repo (never into this tree or its git
+   history), verify each LICENSE on arrival, and do a structured read
+   targeting our two open problem shapes: direct-tier heavy throughput
+   under byte-exactness, and anything that beats ring-fill on
+   border-heavy tiles (e.g. Fractint/XaoS-lineage boundary tracing /
+   edge following). Candidates: Kalles Fraktaler 2+ (GPL-3),
+   Fraktaler-3 (AGPL-3, has the rescaled-f64 epoch loop already on the
+   deep backlog), mandelbrot-perturbator (GPL-3), Fractint, XaoS
+   (GPL), rust-fractal, fractalshades, plus mathr.co.uk write-ups and
+   fractalforums theory posts (published method — cleanest source).
+   **Licensing rules (repo is MIT):** from GPL/AGPL sources take ideas
+   only — no copying and no line-by-line translation; write the
+   technique up in your own words first (design note = provenance
+   evidence), implement from the note, not the source. MIT/BSD: copy
+   with attribution is fine. Shadertoy default is CC BY-NC-SA: code
+   off-limits. Deliverable: a ranked idea list with license provenance
+   per idea, mapped against the settled-verdict list (BLA, multiplier
+   interior, series approx, symmetry are closed — don't re-import
+   them); survivors then go through the normal experiment pipeline.
+2. **Residual z28-class throughput**: after the deferral ship the step
    is the bare z²+c recurrence at 6 chains — per-step op space is now
    genuinely mined out; only a new algorithmic idea (not byte-exact
    iteration-skipping — settled) reopens this. Same now holds for the
    general kernel: its per-step cost is the powu chain itself.
-2. z0 whole-set small-tile wave/gather overhead — micro (accepted
+3. z0 whole-set small-tile wave/gather overhead — micro (accepted
    +0.6 ms/tile from the Mariani ship); only if whole-set loads ever
    matter in user data.
 
