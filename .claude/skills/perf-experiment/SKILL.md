@@ -415,25 +415,31 @@ tile-level rect_in_set) — any future fill-related diff must match that
 signature or it's a bug. grid-z30-e6-f8a50601 is committed to
 grid-multibrot.json as the direct-multibrot regression guard.
 
-1. **Heavy-direct e2e coverage gap (remaining half).** The export's
-   heaviest real *quadratic* direct view is absent from every e2e corpus:
-   user-z28-543f9cfa (i50000 border band, 177M probe iters, escaper mean
-   41k, ~1.3 s/tile at 200px → roughly a 9 s grid). Add it to
-   grid-regression.json — decide deliberately, it adds per-round runtime.
-   (The multibrot half shipped 2026-07-10 as grid-z30-e6-f8a50601.)
-2. **Pool-cap re-audit for throughput-bound direct grids.** The
-   hardwareConcurrency−1 cap (32a1c7d) cost mid-weight grids ~5.7% e2e
-   when measured 2026-07-04; its motivation — TurboFan compile contention
-   during first-load tier-up — is since mitigated by the spawn warmups.
-   Re-measure 7 vs 8 workers on current builds (client-JS-only change,
-   run-e2e decides; watch the heavy pf64 cases for the old contention).
-3. **Trapped/border direct throughput views** (the z28-i50000 class):
+Heavy-direct e2e coverage (former item #1) **DONE 2026-07-10**:
+grid-z28-i50000-543f9cfa committed to grid-regression.json (~11.0 s per
+grid pass on the production build; +11 s per round per variant — use
+--filter to skip it during iteration, like grid-z47).
+
+**SETTLED 2026-07-10 (measured, cap stays): pool-cap re-audit (7 vs 8
+workers).** The 2026-07-04 contention finding is overturned — the spawn
+warmups fixed it (z36-i51200 with 8 workers: −0.7% warm / −5.3% cold,
+vs +24% in 2026-07-04). On current builds the cap costs ~2–3% on
+throughput-bound heavy grids (grid-z47 −3.1%*, ~1.6 s of 50 s; z28
+−2.6%; z48-i48k −1.8%; z48-i20k −2.5%), noise on light cases, overall
+geomean −1.0% — far below the old confounded ~5.7% estimate. The cap
+is a deliberate UX decision (32a1c7d: leave a core for the OS; "video
+decode stutters, fans spin up"), and its measured latency cost fits
+that commit's "negligible" claim, so it stays. Full numbers in the LOG
+entry; re-open only if the user re-weighs the UX tradeoff — the
+benchmark side is answered.
+
+1. **Trapped/border direct throughput views** (the z28-i50000 class):
    escaper work at the structural norm — the direct analogue of
    grid-z47's irreducible verdict. Periodicity/fill don't apply to
    escapers and no byte-exact iteration-skipping exists at any f64 depth
    (see the settled entry above). Only per-step micro-headroom; don't
    burn sessions here without a genuinely new mechanism.
-4. z0 whole-set small-tile wave/gather overhead — micro (accepted
+2. z0 whole-set small-tile wave/gather overhead — micro (accepted
    +0.6 ms/tile from the Mariani ship); only if whole-set loads ever
    matter in user data.
 

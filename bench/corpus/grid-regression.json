@@ -69,6 +69,15 @@
       "note": "Interior-heavy pf64 regime (68% interior cusp channel, trapped escapers mean 32k/48k): representative of the composition class the pf64 Mariani–Silver ring-fill targets — grid-z47-i50000 covers the trapped-channel regime where fills rarely land (added 2026-07-08, pf64 Mariani entry)"
     },
     {
+      "id": "grid-z28-i50000-543f9cfa",
+      "source": "corpus:user-z28-543f9cfa",
+      "re": "-0.6977273122174665",
+      "im": "-0.2589795459061861",
+      "zoom": 28,
+      "iterations": 50000,
+      "note": "Heaviest real quadratic direct view in the export (177M probe iters, 77% near-max escapers, escaper mean 41k/50k border band): the direct-tier analogue of grid-z47 — throughput-bound escaper work with little interior for Mariani/periodicity to exploit; ~9 s per grid pass (added 2026-07-10, heavy-direct coverage entry)"
+    },
+    {
       "id": "grid-z259-i1600-3898a95f",
       "source": "corpus:user-z259-3898a95f",
       "re": "-1.7400623825793399052208441670658256382966417204361718668798613188202595326994356178513819",

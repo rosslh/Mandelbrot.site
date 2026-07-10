@@ -1530,3 +1530,72 @@ user-z30-f8a50601`; `node src/validate.mjs --variants baseline,genstream
 node src/build-dist.mjs post-genstream && node src/run-e2e.mjs --variants
 pre-genstream,post-genstream --rounds 2 --warmup 0` plus `--corpus
 corpus/grid-multibrot.json --viewport 800x600 --rounds 2 --warmup 0`.
+
+## 2026-07-10 — SETTLED: pool-cap re-audit (7 vs 8 workers) — cap stays; grid-z28 heavy-direct coverage committed
+
+Backlog items #1 (remaining half) and #2 under the direct-tier focus.
+Machine: 8-logical-core mac (as all prior entries), AC power.
+
+**Coverage:** grid-z28-i50000-543f9cfa added to grid-regression.json — the
+export's heaviest real quadratic direct view (177M probe iters, 77%
+near-max escapers, escaper mean 41k/50k border band), the direct-tier
+analogue of grid-z47. Measures ~11.0 s per grid pass on the production
+build (the "~9 s" backlog estimate was extrapolated from the 64px probe).
+Adds ~11 s per round per variant to a full-corpus e2e run; --filter past
+it during iteration, same as grid-z47.
+
+**Pool-cap re-audit:** dists pool7 (HEAD = production, cores−1) vs pool8
+(cores), built from the same tree path so the wasm is byte-identical and
+the bundles differ in exactly one expression (`Math.max(1,t-1)` →
+`Math.max(1,t)`). Build gotcha worth keeping: a dist built via
+`--ref` goes through a temp git worktree and the worktree *path* leaks
+into the wasm (+34 bytes, different contenthash) — for a client-JS-only
+A/B, build both variants from the same tree so the wasm hash matches.
+
+run-e2e, full grid-regression corpus (now 10 cases), 5 rounds, warmup 0,
+viewport 1600x900 (results/2026-07-10T13-34-13-272Z-e2e-pool7_pool8.json),
+pool8 vs pool7:
+
+| case | pool7 median | pool8 delta (warm) | cold |
+|---|---|---|---|
+| grid-z36-i51200 | 965 ms | −0.7% | −5.3% |
+| grid-z46-i6400 | 856 ms | +0.9% | +0.2% |
+| grid-z20-i1600 | 681 ms | −0.4% | −1.6% |
+| grid-z48-i20000 | 2063 ms | −2.5% | −1.3% |
+| grid-z47-i50000 | 50495 ms | **−3.1%*** | −3.5% |
+| grid-z48-i48000 | 17324 ms | −1.8% | −0.5% |
+| grid-z28-i50000 (new) | 11027 ms | −2.6% | −0.1% |
+| grid-z259-i1600 | 1371 ms | −1.7% | +1.1% |
+| grid-z48-i800 | 899 ms | +1.0% | −0.6% |
+| grid-z85-i200 | 501 ms | +1.2% | −0.8% |
+| overall geomean | | −1.0% | |
+
+Findings:
+- **The 2026-07-04 contention verdict is overturned.** Then, the 8th
+  worker made z36-i51200 *worse* (+24.1%) because 8 workers grinding
+  Liftoff code starved TurboFan's background compile threads. With the
+  spawn warmups tiering the kernels before real tiles arrive, 8 workers
+  is now −0.7% warm / −5.3% cold on that same case. The cap's
+  contention-mitigation role is gone.
+- **The cap's true latency cost is ~2–3% on throughput-bound heavy
+  grids** (z47 −3.1%*, ~1.6 s of 50 s; z28 −2.6%, ~285 ms of 11 s;
+  z48-i48k −1.8%; z48-i20k −2.5%), noise (±1.2%) on sub-second cases,
+  −1.0% overall. The old "~5.7% on mid-weight grids" figure came from a
+  confounded complete-build comparison (reverted-vs-old also carried
+  wasm differences); the isolated cost is roughly half that even on the
+  heaviest case. The 8th logical core buying only ~3% (not 14%) is
+  consistent with makespan being critical-path-bound on the longest
+  tiles plus the main thread needing cycles for compositing/callbacks.
+
+Verdict: **cap stays; no production change.** The cap is a deliberate
+UX decision (32a1c7d — leave a logical core free so the rest of the
+system stays responsive) whose commit claimed "negligible cost to render
+latency"; that claim now has numbers and holds (~1.6 s on a 50 s worst
+case, ~1% typical). Removing it is a UX-vs-latency call for the user,
+not a benchmark question — the benchmark side is answered and settled.
+Both dist artifacts kept (bench/artifacts/pool7, pool8).
+
+Reproduce: edit renderPoolSize() in client/js/MandelbrotMap.ts
+(cores−1 → cores), `node src/build-dist.mjs pool8`, revert, `node
+src/build-dist.mjs pool7`, `node src/run-e2e.mjs --variants pool7,pool8
+--rounds 5 --warmup 0`.
