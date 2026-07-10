@@ -536,23 +536,32 @@ import lanes are closed: direct-tier progress now requires a user
 decision (statistical output tier, or relaxed-SIMD dual-build), not
 an experiment.
 
-1. **Price the relaxed-SIMD hardware-FMA win (wasm-level only, no
-   ship path yet)**: stable Rust ≥1.82 has `f64x2_relaxed_madd`
-   (verified in the 1.86 sysroot), Chrome ≥114 lowers it to hardware
-   FMA on ARM64/x86. Build a variant with
-   `-C target-feature=+simd128,+relaxed-simd` + wasm-opt
-   `--enable-relaxed-simd`, hand-FMA the quadratic stream-kernel step,
-   measure on the direct heavies. Shipping would need a dual-build
-   (Safari 16.4 floor) AND an output-policy decision (FMA is
-   rounding-class; calibration predicts z28-class re-roll → tolerance
-   gate escalates) — the point is the datum: if the win is small, both
-   discussions die; if large, the user decides with numbers.
-2. **Residual z28-class throughput**: after the deferral ship the step
+Relaxed-SIMD hardware FMA (former item #1) **PRICED 2026-07-10
+(parked — awaiting two user decisions; do not re-measure)** — see the
+LOG entry. Feasible on stable Rust (relaxed intrinsics stable since
+1.82); the win is large and real: −29..−30% on every
+stream-kernel-dominated direct heavy (ms/Miter 0.40 → 0.28), direct
+geomean −17.7%, time-weighted −28.0%, **grid-z28 e2e 5365 → 3888 ms
+(−27.5% warm, −28.4% cold)**, size flat. Blocked by (1) output
+policy — the diff is the calibration's boundary re-roll class (z28:
+7,141 flips), escalated by the tolerance gate as designed; needs a
+statistical-equivalence tier or deliberate re-anchor, and (2) the
+browser floor — Safari has no relaxed-simd at any version, so
+shipping means a dual-build + runtime feature detection, now priced
+against a −27.5% e2e payoff on the heaviest real direct view. The
+tolerance gate itself ran clean on its first real rounding-class
+input (both fixed-corpus invocations, correct per-axis attribution).
+Ship path if ever unblocked (in the LOG entry): FMA-consistent scalar
+replay, chains/stride re-sweep, holdout + re-bless, cold-pass e2e,
+dual-build plumbing.
+
+1. **Residual z28-class throughput**: after the deferral ship the step
    is the bare z²+c recurrence at 6 chains — per-step op space is now
-   genuinely mined out; only a new algorithmic idea (not byte-exact
-   iteration-skipping — settled) reopens this. Same now holds for the
-   general kernel: its per-step cost is the powu chain itself.
-3. z0 whole-set small-tile wave/gather overhead — micro (accepted
+   genuinely mined out; the survey found no new algorithmic idea, so
+   the only known reopener is the parked FMA decision above (byte-exact
+   iteration-skipping stays settled). Same now holds for the general
+   kernel: its per-step cost is the powu chain itself.
+2. z0 whole-set small-tile wave/gather overhead — micro (accepted
    +0.6 ms/tile from the Mariani ship); only if whole-set loads ever
    matter in user data.
 

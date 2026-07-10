@@ -2140,3 +2140,79 @@ hardware FMA (Safari-floor/dual-build decision — wasm-level win priced
 in the next entry), (c) new traffic data. No tolerance-gate tooling
 was needed for the survey itself; the gate's next real exercise is the
 FMA pricing run below.
+
+## 2026-07-10 — Relaxed-SIMD hardware FMA priced: −30%/iter on the direct heavies, grid-z28 e2e −27.5% — real, large, and blocked on two user decisions (nothing ships)
+
+Machine: Rosss-MacBook-Pro.local darwin/arm64 Apple M1 Pro, Chrome 136.
+Probe code and config edits reverted after measurement; production
+untouched. Artifacts kept: fmaprice (wasm-level), fma-pre/fma-post
+(dists). This resolves the backlog's "relaxed-SIMD dual-build — price
+only if a real win is demonstrated" contingency: the win is demonstrated.
+
+Feasibility unblocked on the stable-toolchain policy: the wasm relaxed
+intrinsics are stable Rust since 1.82 (`f64x2_relaxed_madd`/`_nmadd`
+verified in the 1.86 sysroot), so this is NOT nightly-gated. Chrome
+lowers them to hardware FMA (FMLA/FMLS on ARM64); the blocker is only
+the browser floor (relaxed-simd: Chrome 114+/Firefox 125+, **no Safari
+support**) plus the output policy.
+
+Setup: quadratic stream kernel step only —
+`zr' = madd(zr, zr, nmadd(zi, zi, cr))`, `zi' = madd(2·zr, zi, ci)`
+(7 ops → 4, critical path 3 → 2). Scalar replay left in exact non-FMA
+order, so recovered escape steps are approximate — fine for a timing
+datum, never for production. Build: `--rustflags "-C
+target-feature=+simd128,+relaxed-simd"` + wasm-opt
+`--enable-relaxed-simd`; 18 relaxed-FMA instructions confirmed in the
+binary. Deep tiers and the general kernel untouched (their outputs came
+back byte-identical — isolation control).
+
+Wasm-level (run.mjs, direct filter, 16 cases, n=10): every
+stream-kernel-dominated heavy lands at −29..−30% with ms/Miter
+uniformly 0.40 → 0.28 — user-z28-543f9cfa 684 → 479 ms,
+z37 −29.9%, z38 −29.6%, z44 −29.2%, z20 −29.6%, both z14 views
+−29%. Direct geomean −17.7%; time-weighted −28.0%. Controls: z30-e6
+multibrot +0.4% (general kernel untouched), interior-only views ~+1%
+(never in the escape loop). Size −0.0%.
+
+E2E (run-e2e, grid-z28-i50000-543f9cfa, real dists, n=5): 5365 →
+3888 ms median, **−27.5% warm, −28.4% cold** (5504 → 3939 ms) — the
+kernel win survives bundle/spawn/tier-up intact; Liftoff executes
+relaxed SIMD fine and the existing quadratic warmup covers tier-up.
+For the temporary dist build, .cargo/config.toml and the Cargo.toml
+wasm-opt line carried the relaxed flags (reverted; a real ship would
+need the dual-build plumbing instead).
+
+Tolerance gate (first real rounding-class exercise; the new option ran
+clean on both invocations — no tooling issues): 9/43 OVER BUDGET,
+exit 1, exactly the calibration's predicted classes. z28 is a boundary
+re-roll (56.8% px, 7,141 flips, blob 1,401 px, max |Δ| 12,206); z44 is
+the distributional class (62.3% px, max |Δ| 0.104, ZERO flips, blob
+17,287 px — fails only fraction/blob); z37/z38 pass within budget
+(3 px, |Δ| ≤ 0.002). All pf64/float-exp cases identical to anchor.
+Escalated, not accepted: FMA cannot pass the current gate on the views
+where its time lives.
+
+### Verdict — the decision datum the backlog asked for
+
+Hardware FMA is the single largest direct-tier lever measured since
+the deferral ship (−1.5 s per z28 grid load), it is free in size, and
+it is implementable on stable Rust today. It stays unshipped because
+of exactly two user-level decisions, now priced:
+1. **Output policy**: the diff is chaos re-roll on long-orbit boundary
+   views — no budget tweak covers it; it needs either a deliberate
+   re-anchor or the statistical-equivalence tier sketched in the
+   calibration entry (§3). Note z28's re-roll is *statistically* the
+   same picture (band structure preserved, counts re-rolled within the
+   band) — the same tier that would accept z44 could plausibly be
+   designed to accept it, but that design is the user's call.
+2. **Browser floor**: no Safari support at any version → shipping
+   means a dual-build (relaxed + simd128 fallback) with runtime
+   feature detection, i.e. ~2x wasm artifacts in the service worker
+   and a selection shim. That cost was previously "unpriced"; the
+   payoff side is now −27.5% e2e on the heaviest real direct view and
+   −28% time-weighted across the direct corpus.
+If both decisions ever land, the ship path is: FMA-ize the scalar
+replay consistently (software fma in replay is fine — it runs ≤ stride
+steps per escaper... measure it), re-sweep chains/stride (the step got
+cheaper again — the deferral entry's rule), holdout + re-bless, e2e
+with cold passes, dual-build plumbing. Until then: parked, priced.
