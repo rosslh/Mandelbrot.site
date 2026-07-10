@@ -516,31 +516,37 @@ dependency structure is performance-load-bearing; don't reorder it
 without measuring. Hardware-FMA relaxed-SIMD stays blocked by the
 Safari floor; rounding-class hopes now ride on the renderer survey.
 
-1. **Algorithmic survey of existing Mandelbrot renderers (user-approved
-   2026-07-10)** — the sanctioned path to the "new algorithmic idea"
-   items #2/#3 are gated on. Clone ~6–8 established projects into a
-   directory OUTSIDE this repo (never into this tree or its git
-   history), verify each LICENSE on arrival, and do a structured read
-   targeting our two open problem shapes: direct-tier heavy throughput
-   under byte-exactness, and anything that beats ring-fill on
-   border-heavy tiles (e.g. Fractint/XaoS-lineage boundary tracing /
-   edge following). Candidates: Kalles Fraktaler 2+ (GPL-3),
-   Fraktaler-3 (AGPL-3, has the rescaled-f64 epoch loop already on the
-   deep backlog), mandelbrot-perturbator (GPL-3), Fractint, XaoS
-   (GPL), rust-fractal, fractalshades, plus mathr.co.uk write-ups and
-   fractalforums theory posts (published method — cleanest source).
-   **Licensing rules (repo is MIT):** from GPL/AGPL sources take ideas
-   only — no copying and no line-by-line translation; write the
-   technique up in your own words first (design note = provenance
-   evidence), implement from the note, not the source. MIT/BSD: copy
-   with attribution is fine. Shadertoy default is CC BY-NC-SA: code
-   off-limits. Deliverable: a ranked idea list with license provenance
-   per idea, mapped against the settled-verdict list (BLA, multiplier
-   interior, series approx, symmetry are closed — don't re-import
-   them); survivors then go through the normal experiment pipeline.
-   The tolerance gate adds a second acceptance lane for imported ideas,
-   but note its narrowness: classic approximation tricks (solid
-   guessing, interpolation) are flip/blob-class and still escalate.
+The renderer survey (former item #1, user-approved) **DONE 2026-07-10
+(settled — do not re-run)** — see the LOG entry (it is also the
+provenance design note). Seven projects read (XaoS, iterated-dynamics/
+Fractint, KF2+ [AGPL-3, not GPL], Fraktaler-3, mandelbrot-perturbator,
+rust-fractal-core, Fractalshades [MIT]); clones stayed outside the
+repo, no code copied. Outcome: **no importable idea survives.** The
+field's exact toolkit (periodicity, cardioid/bulb, deferred bailout
+with block replay — XaoS independently converged on our deferral
+design) is a subset of what already shipped here; everything else is
+either flip/blob-class fill (boundary tracing, solid guessing —
+escalation-only, and inapplicable to smoothed escaper bands anyway),
+settled-negative (SOI/series approx = BLA class; Fractalshades'
+dzndz stop = multiplier interior), or deep-tier/traffic-gated
+(rescaled-f64 epoch loop, reference tricks). Higher-period interior
+closed forms appear nowhere in the field and have no absolute time
+here. Together with the FMA calibration (same-day LOG entry), both
+import lanes are closed: direct-tier progress now requires a user
+decision (statistical output tier, or relaxed-SIMD dual-build), not
+an experiment.
+
+1. **Price the relaxed-SIMD hardware-FMA win (wasm-level only, no
+   ship path yet)**: stable Rust ≥1.82 has `f64x2_relaxed_madd`
+   (verified in the 1.86 sysroot), Chrome ≥114 lowers it to hardware
+   FMA on ARM64/x86. Build a variant with
+   `-C target-feature=+simd128,+relaxed-simd` + wasm-opt
+   `--enable-relaxed-simd`, hand-FMA the quadratic stream-kernel step,
+   measure on the direct heavies. Shipping would need a dual-build
+   (Safari 16.4 floor) AND an output-policy decision (FMA is
+   rounding-class; calibration predicts z28-class re-roll → tolerance
+   gate escalates) — the point is the datum: if the win is small, both
+   discussions die; if large, the user decides with numbers.
 2. **Residual z28-class throughput**: after the deferral ship the step
    is the bare z²+c recurrence at 6 chains — per-step op space is now
    genuinely mined out; only a new algorithmic idea (not byte-exact

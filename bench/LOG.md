@@ -2052,3 +2052,91 @@ only on the z44-style distributional class. The data a statistical-tier
 policy discussion needs is in §3. Hardware-FMA (relaxed-SIMD dual-build)
 remains blocked/unpriced; rounding-class hopes now ride on backlog #2
 (renderer survey). Artifacts kept: fastmath, unsafefp, preopt, fmaprobe.
+
+## 2026-07-10 — Backlog #1: Renderer survey — 7 projects read; no importable byte-exact idea for the direct tier; field's exact toolkit is a subset of ours
+
+Machine: n/a (reading, no benchmark). Clones made OUTSIDE the repo
+(session scratchpad, deleted with it); licenses verified on arrival;
+no code copied or translated from any GPL/AGPL source — findings below
+are technique names + our own analysis (this entry is the design
+note / provenance record the backlog required).
+
+Projects read: XaoS (GPL-2), Fractint lineage via iterated-dynamics
+(GPL-3), Kalles Fraktaler 2+ (AGPL-3 in the mathr lineage — note the
+backlog said GPL-3), Fraktaler-3 (AGPL-3), mandelbrot-perturbator
+(AGPL-3), rust-fractal-core (GPL-3), Fractalshades (MIT — the one
+copyable-with-attribution source).
+
+### Ranked idea list (deliverable), mapped against settled verdicts
+
+1. REJECTED (class): boundary tracing / edge following
+   (iterated-dynamics libid/engine/BoundaryTrace.cpp; XaoS
+   src/engine/btrace.cpp, edge*.cpp). Fills a region once its
+   same-iteration-count outline closes. Count-fill on escapers is
+   incompatible with smooth-coloring float values (our default output),
+   and XaoS's own algorithms.md concedes it misses small connected
+   lakes ("many claim that it does not introduce any errors, but this
+   is not true"). Flip/blob-class under our tolerance budgets —
+   escalation-only. This closes the backlog's "beats ring-fill on
+   border-heavy tiles" hope: on border-heavy escaper bands (z28-class)
+   no fill method applies at all (the cost is escapers, bands are thin,
+   smoothed values vary per pixel); on interior regions our
+   Mariani/rect_in_set already covers the same ground in the same
+   acceptance class.
+2. REJECTED (class): solid guessing / tesseral / half-res guessing
+   (iterated-dynamics SolidGuess.cpp, tesseral.cpp; XaoS interlaced
+   guessing; KF "guessing"). Same flip/blob class, looser error
+   control; XaoS's doc explicitly accepts visible-error risk. The
+   2026-07-10 calibration already demonstrated the gate escalates this
+   class.
+3. REJECTED (settled 2026-07-08): SOI / series approximation
+   (iterated-dynamics SynchronousOrbit.cpp, AlmondBread lineage —
+   Newton-polynomial interpolation of whole rectangles from key
+   orbits; rust-fractal-core probe-based SA; KF SA + NanoMB).
+   Count-changing iteration skipping — the BLA settled negative's
+   acceptance argument applies verbatim (skip-worthy tolerances
+   re-roll boundary counts).
+4. REJECTED (settled 2026-07-08): derivative/multiplier interior
+   detection (Fractalshades mandelbrot_M2.py dzndz attractivity stop +
+   Newton interior via mathr's interior-coordinates method; MIT, so
+   copyable — but the technique itself is our settled
+   multiplier-interior negative: false-retires escapers loose, never
+   fires near-parabolic tight).
+5. CONFIRMED (ours, independently): XaoS's Mandelbrot loop unrolls
+   blocks of 8 iterations with one bailout test, saving state and
+   re-running the last block exactly on escape — the same design as
+   our 2026-07-10 deferred-escape ship (we run stride 32, SIMD,
+   lane-refilled, with cardioid/bulb + exact Brent on top; Fractint's
+   periodicity is tolerance-based `g_close_enough`, weaker than our
+   exact compare). Nobody surveyed has a byte-exact escaper lever we
+   lack; our direct kernels are at or past the field's frontier.
+6. NOT FOUND anywhere: higher-period (3+) closed-form interior
+   membership tests — every surveyed renderer stops at cardioid +
+   period-2 bulb like us or uses the settled multiplier method.
+   Correctly so: Brent already resolves settled interior cycles
+   cheaply, Mariani fills interior regions, and the expensive interior
+   pixels are near-parabolic where algebraic tests straddle anyway.
+   No absolute time available — not backlogged.
+7. DEEP TIER (status unchanged, provenance noted): Fraktaler-3's
+   rescaled-f64 epoch loop (AGPL — reimplement from note if ever
+   unlocked), BLA (settled), reference reuse / period-locked reference
+   iterations (our orbits cost ~18 ms — no), Zhuoran rebasing (pf64
+   already rebases), KF glitch machinery (perturbation-correctness,
+   N/A). All stay traffic-gated at z400+ / closed.
+8. OUT OF SCOPE (product, not wasm): XaoS priority-ordered dynamic
+   resolution / progressive refinement — tile-scheduling UX idea, not
+   a tile-compute change. Parked here for the record only.
+
+### Consequence
+
+Combined with the same-day calibration entry (±1-ulp arithmetic change
+re-rolls z28-class boundary bands, 7k flips), the import lanes are now
+both closed: no byte-exact idea exists in the field that we lack, and
+no rounding-class idea can pass the tolerance gate on the views where
+time lives. Remaining routes to direct-tier wins are decisions, not
+experiments: (a) a statistical-equivalence output tier (user policy;
+required data is in the calibration entry §3), (b) relaxed-SIMD
+hardware FMA (Safari-floor/dual-build decision — wasm-level win priced
+in the next entry), (c) new traffic data. No tolerance-gate tooling
+was needed for the survey itself; the gate's next real exercise is the
+FMA pricing run below.
