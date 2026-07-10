@@ -124,6 +124,14 @@ A small regression on a millisecond-scale case is an acceptable price for
 seconds off a heavyweight case — say so explicitly in the log rather than
 letting a geomean average it away.
 
+**Focus directive (2026-07-09, user): prioritize the direct (plain-f64)
+pathway.** It serves ~91% of real views (16,644 of 18,370 deduped export
+views) and, after the 2026-07-07/09 deep-zoom ships, it is where the
+un-mined headroom is: pick direct-tier targets first, treat the deep tiers
+as regression guards. The deep-zoom settled verdicts (pf64 byte-exact space
+exhausted; iteration-skipping negative; z400+ traffic-gated) are unchanged
+by this — do not re-open them under the new focus.
+
 **Decompose before you optimize.** Attribute the slow case's time with a
 direct measurement (e.g. run.mjs's cold-vs-warm split separates
 reference-orbit computation from per-pixel loops) before choosing a fix.
@@ -267,9 +275,14 @@ explain (this is what would have caught the z259 ComplexExp misattribution
 immediately). compare.mjs prints composition columns (interior %, near-max
 %) plus time-weighted and user-frequency-weighted delta summaries alongside
 the geomeans.
-What the export says about real usage (probed 2026-07-07): the pf64 tier is
+What the export says about real usage (probed 2026-07-07/08): the direct
+(plain-f64) tier is ~91% of deduped views (16,644 of 18,370; 1,725 pf64,
+1 float-exp), and its real heavy views run 68–204M probe iterations — the
+top two are user-z28-543f9cfa (i50000 border band, escaper mean 41k,
+~1.3 s/tile at 200px) and user-z30-f8a50601 (e6 multibrot, 92% interior,
+~11.6 s/tile at 200px on the scalar general loop). The pf64 tier is
 effectively all z47–59 (one lone view past z60), there is exactly one
-float-exp view (z259), and the slowest real views are 25k–50k-iteration
+float-exp view (z259), and the slowest deep views are 25k–50k-iteration
 pf64 tiles — including an exponent-52 view whose O(exponent) Horner delta
 step, not the iteration count, was the cost (~60 s/tile at 200px when
 found; ~6 s/tile after the 2026-07-08/09 general-kernel + coefficient-table
@@ -387,30 +400,75 @@ requires an explicit output-policy decision (perceptual-equivalence gate
 instead of byte-exactness), taken deliberately by the user, not as a side
 effect of an experiment.
 
-1. Ultra-deep small-mode cost: at effective zoom ≳ 400 the hybrid's
-   ComplexExp phase dominates again (syn-fexp-z500-needle −58% not −85%;
-   syn-fexp-z500-cusp-hi +2.5% — near-parabolic pixels never promote).
-   Options: cheaper ComplexExp step, or a rescaled-f64 epoch loop
-   (Fraktaler-style). Only worth it if user data shows z400+ traffic.
-   (BLA is also viable at these depths — the headroom argument above
-   inverts — but same traffic gate applies.)
-2. ~~Orbit cache sharing across worker threads~~ **DEMOTED 2026-07-07**: the
-   "orbit-dominated deep-zoom loads" claim (LOG 2026-07-04) was a
-   misattribution — a cold/warm probe showed the z259 orbit costs ~18 ms per
-   worker vs ~1300 ms of per-pixel ComplexExp work (fixed by the hybrid
-   loop). Sharing would save ~18 ms × workers on first view; revisit only if
-   very high iteration counts (long orbits) at depth show up in user data.
-3. ~~Smooth-coloring cost~~ **CLOSED 2026-07-08**: ~2.2 ms flat per 200px
-   tile (~55 ns/px post-processing; the smooth/nosmooth pair differs by 9%
-   only on light tiles). Negligible on the heavy tiles that set page-load
-   times — below the action threshold under absolute-time weighting.
-4. dashu precision headroom (perturbation.rs: `(zoom + 64) -> 32-bit`
-   granularity): affects cold times only; correctness-sensitive.
-5. ~~`panic = "abort"` in release profile~~ **CLOSED 2026-07-08**: exactly
-   0 bytes size delta and speed within noise — wasm32 panics already lower
-   to abort, only the runtime shim changes. The real lever
-   (nightly -Zbuild-std + panic_immediate_abort) is out of scope on the
-   stable-toolchain policy.
+### Direct (f64) tier — the active focus (2026-07-09 directive)
+
+1. **Direct multibrot modernization.** Exponent ≠ 2 direct tiles run a
+   fully scalar loop (lib.rs `calculate_escape_iterations_general`):
+   `z.powu(e) + c` with a `z.norm()` **sqrt every iteration** (the
+   quadratic loops compare squared norms), scalar Brent periodicity, no
+   pairing/stream kernel, no Mariani fill, no closed-form interior test
+   (none exists for e ≠ 2). Evidence: user-z30-f8a50601 (e6, i25600, 92%
+   interior) is the slowest direct corpus case — 2.9 s at its 100px
+   override (~11.6 s/tile at production 200px) and 11.8 ms/Miter vs the
+   ~0.75 direct escaper norm, the same structural-slowness signature that
+   flagged the e52 pf64 view. Mechanisms, in expected order: drop the
+   sqrt (compare `norm_sqr` against radius², byte-exact iff radius² is
+   exact — verify), lane-parallel general stream kernel (mirror of the
+   pf64 general one; monomorphize per exponent-class), Mariani wave for
+   its 92% interior. Warmup caveat: a new kernel instantiation needs its
+   own tier-up volume; `warmupGeneral` fires on exponent ≠ 2 pools but
+   renders a *pf64-depth* tile — a direct-multibrot kernel is a separate
+   wasm function, check what the pool's initial view needs.
+2. **Heavy-direct e2e coverage gap.** grid-regression.json's direct cases
+   top out at grid-z36-i51200 (~1.6 s post-ships); the export's heaviest
+   real direct views are absent: user-z28-543f9cfa (i50000 border band,
+   177M probe iters, escaper mean 41k, ~1.3 s/tile at 200px → roughly a
+   9 s grid) and the z30 e6 multibrot above (~75 s grid at 200px). Add
+   the z28 view to grid-regression.json, and give item 1 a direct-
+   multibrot grid case beside corpus/grid-multibrot.json as its ship
+   gate — decide deliberately, both add per-round runtime.
+3. **Pool-cap re-audit for throughput-bound direct grids.** The
+   hardwareConcurrency−1 cap (32a1c7d) cost mid-weight grids ~5.7% e2e
+   when measured 2026-07-04; its motivation — TurboFan compile contention
+   during first-load tier-up — is since mitigated by the spawn warmups.
+   Re-measure 7 vs 8 workers on current builds (client-JS-only change,
+   run-e2e decides; watch the heavy pf64 cases for the old contention).
+4. **Trapped/border direct throughput views** (the z28-i50000 class):
+   escaper work at the structural norm — the direct analogue of
+   grid-z47's irreducible verdict. Periodicity/fill don't apply to
+   escapers and no byte-exact iteration-skipping exists at any f64 depth
+   (see the settled entry above). Only per-step micro-headroom; don't
+   burn sessions here without a genuinely new mechanism.
+5. z0 whole-set small-tile wave/gather overhead — micro (accepted
+   +0.6 ms/tile from the Mariani ship); only if whole-set loads ever
+   matter in user data.
+
+### Deep tiers — deprioritized under the f64 focus directive (status unchanged)
+
+- Ultra-deep small-mode cost: at effective zoom ≳ 400 the hybrid's
+  ComplexExp phase dominates again (syn-fexp-z500-needle −58% not −85%;
+  syn-fexp-z500-cusp-hi +2.5% — near-parabolic pixels never promote).
+  Options: cheaper ComplexExp step, or a rescaled-f64 epoch loop
+  (Fraktaler-style). Only worth it if user data shows z400+ traffic.
+  (BLA is also viable at these depths — the headroom argument above
+  inverts — but same traffic gate applies.)
+- ~~Orbit cache sharing across worker threads~~ **DEMOTED 2026-07-07**: the
+  "orbit-dominated deep-zoom loads" claim (LOG 2026-07-04) was a
+  misattribution — a cold/warm probe showed the z259 orbit costs ~18 ms per
+  worker vs ~1300 ms of per-pixel ComplexExp work (fixed by the hybrid
+  loop). Sharing would save ~18 ms × workers on first view; revisit only if
+  very high iteration counts (long orbits) at depth show up in user data.
+- ~~Smooth-coloring cost~~ **CLOSED 2026-07-08**: ~2.2 ms flat per 200px
+  tile (~55 ns/px post-processing; the smooth/nosmooth pair differs by 9%
+  only on light tiles). Negligible on the heavy tiles that set page-load
+  times — below the action threshold under absolute-time weighting.
+- dashu precision headroom (perturbation.rs: `(zoom + 64) -> 32-bit`
+  granularity): affects cold times only; correctness-sensitive.
+- ~~`panic = "abort"` in release profile~~ **CLOSED 2026-07-08**: exactly
+  0 bytes size delta and speed within noise — wasm32 panics already lower
+  to abort, only the runtime shim changes. The real lever
+  (nightly -Zbuild-std + panic_immediate_abort) is out of scope on the
+  stable-toolchain policy.
 
 **SETTLED 2026-07-09 (structural negative — do not revisit):
 conjugation-symmetry tile mirroring.** The 200/128 = 25/16 factor in the

@@ -1397,3 +1397,38 @@ Consequence: exact-mirror reuse would require re-anchoring the tile grid
 to the axis (a client architecture change that breaks for arbitrary
 origins) to save time on views that cost almost nothing. Do not revisit
 within the current tile addressing scheme.
+
+## 2026-07-09 — Focus shift (user directive): direct (plain-f64) tier; backlog re-ranked
+
+No production change — skill/docs update plus a structural finding read out
+of existing data (no new benchmark).
+
+User directive: prioritize f64 views. Encoded in the skill as a standing
+focus: pick direct-tier targets first, deep tiers become regression guards.
+Grounding from the 2026-07-08 ingest probe: the direct tier is ~91% of
+deduped export views (16,644 of 18,370), and after the 2026-07-07/09
+deep-zoom ships the un-mined headroom is concentrated there. The deep-tier
+settled verdicts (pf64 byte-exact space exhausted, iteration-skipping
+negative, z400+ traffic-gated) are unchanged and stay closed.
+
+**Structural finding (the new backlog #1):** user-z30-f8a50601 — the
+slowest direct corpus case (2.9 s at its 100px override, ~11.6 s/tile at
+production 200px) — is an e6 multibrot at 11.8 ms/Miter vs the ~0.75
+direct escaper norm. Attribution is code inspection, not conjecture:
+exponent ≠ 2 direct tiles still run the fully scalar
+`calculate_escape_iterations_general` (lib.rs) — `z.powu(e) + c` with a
+`z.norm()` sqrt every iteration, scalar Brent periodicity, no
+pairing/stream kernel, no Mariani fill — i.e. none of the machinery the
+quadratic direct path gained since 2026-07-02. Same signature that flagged
+the e52 pf64 view; the ms/Miter column earns its keep again.
+
+Re-ranked backlog (details in the skill): #1 direct multibrot
+modernization (sqrt drop + general stream kernel + Mariani; warmup caveat:
+`warmupGeneral` renders a pf64-depth tile, which does not tier a
+direct-tier kernel instantiation), #2 heavy-direct e2e coverage
+(user-z28-543f9cfa i50000 border ≈ 9 s grid and the z30 e6 multibrot
+≈ 75 s grid are absent from every e2e corpus), #3 pool-cap re-audit
+(~5.7% on throughput-bound grids, motivation since mitigated by spawn
+warmups), #4 trapped/border direct throughput (likely irreducible, per the
+iteration-skipping verdict), #5 z0 wave/gather micro. Deep items parked
+under "deprioritized" with their existing gates.
