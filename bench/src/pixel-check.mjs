@@ -13,6 +13,16 @@
 // ANCHOR (bench/anchor.json; --a is ignored) under the committed budgets -
 // anchor-relative so tolerance-accepted ships can never compound drift. See
 // src/tolerance.mjs for the policy and budget semantics.
+//
+// Statistical-equivalence mode (opt-in for changes claimed and LOG-justified
+// as float-rounding-class, e.g. hardware FMA; user decision 2026-07-10):
+//
+//   node src/pixel-check.mjs --b <variant> --statistical [--filter <s>]
+//
+// also anchor-relative, but judges the statistical axes (flip/sign balance,
+// flip blobs, calm-region stability, distribution/band-structure budgets in
+// anchor.json statisticalBudgets) instead of per-pixel strictness. A failure
+// is an escalation exactly like the strict gate.
 
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -21,6 +31,8 @@ import { caseToWasmArgs, pathwayFor } from "./normalize.mjs";
 import { readVariantMeta, startSession } from "./session.mjs";
 import {
   diffValues,
+  diffValuesStatistical,
+  formatStatisticalResult,
   formatToleranceResult,
   readAnchorConfig,
 } from "./tolerance.mjs";
@@ -34,6 +46,7 @@ function parseArgs(argv) {
     filter: null,
     allowDiff: false,
     tolerance: false,
+    statistical: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -42,19 +55,24 @@ function parseArgs(argv) {
     else if (arg === "--filter") opts.filter = argv[++i];
     else if (arg === "--allow-diff") opts.allowDiff = true;
     else if (arg === "--tolerance") opts.tolerance = true;
+    else if (arg === "--statistical") opts.statistical = true;
     else throw new Error(`Unexpected argument: ${arg}`);
   }
-  if (opts.tolerance ? !opts.b : !opts.a || !opts.b) {
+  if (opts.tolerance && opts.statistical) {
+    throw new Error("--tolerance and --statistical are mutually exclusive");
+  }
+  if (opts.tolerance || opts.statistical ? !opts.b : !opts.a || !opts.b) {
     throw new Error(
       "Usage: node src/pixel-check.mjs --a baseline --b <variant> [--filter <s>] [--allow-diff]\n" +
-        "       node src/pixel-check.mjs --b <variant> --tolerance [--filter <s>]",
+        "       node src/pixel-check.mjs --b <variant> --tolerance|--statistical [--filter <s>]",
     );
   }
   return opts;
 }
 
-// Anchor-relative tolerance gate: candidate values vs the pinned anchor's
-// values on every corpus case, judged against the committed budgets.
+// Anchor-relative gate: candidate values vs the pinned anchor's values on
+// every corpus case, judged against the committed strict-tolerance budgets
+// or (--statistical) the statistical-equivalence budgets.
 async function runToleranceCheck(opts, cases, corpusDefaults) {
   const anchor = readAnchorConfig();
   const anchorMeta = readVariantMeta(anchor.variant);
@@ -66,11 +84,18 @@ async function runToleranceCheck(opts, cases, corpusDefaults) {
     );
   }
   readVariantMeta(opts.b);
+  if (opts.statistical && !anchor.statisticalBudgets) {
+    throw new Error("anchor.json has no statisticalBudgets");
+  }
   console.log(
-    `Tolerance gate: ${opts.b} vs anchor @${anchor.gitSha.slice(0, 7)} ` +
-      `(budgets: |Δ| ≤ ${anchor.budgets.maxAbsDelta}, ` +
-      `diff ≤ ${anchor.budgets.maxDiffFraction * 100}%, ` +
-      `blob ≤ ${anchor.budgets.maxBlobPx} px, flips ≤ ${anchor.budgets.maxFlips})\n`,
+    opts.statistical
+      ? `Statistical-equivalence gate: ${opts.b} vs anchor ` +
+          `@${anchor.gitSha.slice(0, 7)} (budgets in anchor.json ` +
+          `statisticalBudgets; semantics in src/tolerance.mjs)\n`
+      : `Tolerance gate: ${opts.b} vs anchor @${anchor.gitSha.slice(0, 7)} ` +
+          `(budgets: |Δ| ≤ ${anchor.budgets.maxAbsDelta}, ` +
+          `diff ≤ ${anchor.budgets.maxDiffFraction * 100}%, ` +
+          `blob ≤ ${anchor.budgets.maxBlobPx} px, flips ≤ ${anchor.budgets.maxFlips})\n`,
   );
 
   const session = await startSession([anchor.variant, opts.b]);
@@ -89,13 +114,19 @@ async function runToleranceCheck(opts, cases, corpusDefaults) {
             .then((base64) => Buffer.from(base64, "base64")),
         ),
       );
-      const stats = diffValues(
-        valuesAnchor,
-        valuesCandidate,
-        payload.imageWidth,
-        anchor.budgets,
+      const stats = opts.statistical
+        ? diffValuesStatistical(
+            valuesAnchor,
+            valuesCandidate,
+            payload.imageWidth,
+            anchor.statisticalBudgets,
+          )
+        : diffValues(valuesAnchor, valuesCandidate, payload.imageWidth, anchor.budgets);
+      console.log(
+        opts.statistical
+          ? formatStatisticalResult(benchCase.id, stats)
+          : formatToleranceResult(benchCase.id, stats),
       );
-      console.log(formatToleranceResult(benchCase.id, stats));
       if (!stats.pass) failing.push(benchCase.id);
     }
   } finally {
@@ -104,7 +135,8 @@ async function runToleranceCheck(opts, cases, corpusDefaults) {
 
   if (failing.length > 0) {
     console.log(
-      `\n${failing.length}/${cases.length} cases exceed the anchor tolerance ` +
+      `\n${failing.length}/${cases.length} cases exceed the anchor ` +
+        `${opts.statistical ? "statistical-equivalence" : "tolerance"} ` +
         `budget: ${failing.join(", ")}\n` +
         `This is an escalation, not an acceptance path: either the change is ` +
         `wrong, or it needs an explicit re-anchor decision (LOG.md entry + ` +
@@ -113,7 +145,8 @@ async function runToleranceCheck(opts, cases, corpusDefaults) {
     process.exit(1);
   }
   console.log(
-    `\nAll ${cases.length} cases within the anchor tolerance budget.`,
+    `\nAll ${cases.length} cases within the anchor ` +
+      `${opts.statistical ? "statistical-equivalence" : "tolerance"} budget.`,
   );
 }
 
@@ -132,7 +165,7 @@ async function main() {
     );
   }
 
-  if (opts.tolerance) {
+  if (opts.tolerance || opts.statistical) {
     await runToleranceCheck(opts, cases, corpus.defaults);
     return;
   }

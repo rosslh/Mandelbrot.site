@@ -2216,3 +2216,167 @@ replay consistently (software fma in replay is fine — it runs ≤ stride
 steps per escaper... measure it), re-sweep chains/stride (the step got
 cheaper again — the deferral entry's rule), holdout + re-bless, e2e
 with cold passes, dual-build plumbing. Until then: parked, priced.
+
+## 2026-07-10 — SHIPPED: relaxed-SIMD hardware FMA dual-build (grid-z28 e2e −44.0%) + the statistical-equivalence output tier that gates it
+
+Machine: Rosss-MacBook-Pro.local darwin/arm64 Apple M1 Pro, Chrome 136.
+Both blocking user decisions from the pricing entry landed today: (1) build
+a statistical-equivalence output tier for the rounding class, and (2) accept
+the dual-build shipping cost. This entry ships both. Anchor unchanged
+(3517e56); byte-exact remains the default gate for everything else.
+
+### 1. Statistical-equivalence tier (harness; opt-in via --statistical)
+
+`node src/pixel-check.mjs --b <v> --statistical` (fixed corpus) and
+`node src/validate.mjs --variants a,b --pixel-check --statistical`
+(holdout). Anchor-relative like --tolerance — never candidate-vs-
+predecessor, so no drift ratchet. For changes claimed AND LOG-justified as
+float-rounding-class only; a failure is an escalation exactly like the
+strict gate. Axes (budgets committed in anchor.json `statisticalBudgets`,
+semantics in src/tolerance.mjs), calibrated on the kept fmaprice/fmaprobe
+artifacts (accept side) and speck-test@633ad35 + synthetic mutations
+(reject side):
+
+- flip direction balance |ΔftI−ftE| ≤ max(4, 3√flips): re-rolls are
+  symmetric coin flips (z28: 3602/3539 of 7,141), structural fills are
+  one-directional (speck-test 16/0 → rejected at 16 > 12).
+- delta sign balance ≤ max(16, 4√n) over common escapers: real FMA drift is
+  sign-symmetric (worst z28 imbalance 162/499 allowed); uniform shifts,
+  scales, and band shifts are 100% one-signed — this axis alone kills the
+  shift+2/scale1.01 mutations that hide from KS/quantiles on 40k-iteration
+  tiles.
+- largest 4-connected FLIP blob ≤ 24 px (FMA max 15; fills are hundreds).
+- calm violations ≤ max(8, 0.05%): a flip or |Δ|>1 where the anchor's 3×3
+  neighborhood has ≥6 finite values spanning <1.0 iteration. FMA scores 0
+  everywhere; interior-embedded pixels are exempt (legitimately chaotic —
+  an early roughness-only definition wrongly flagged them).
+- escaper-distribution stability: central quantiles p25/p50/p75 rel drift
+  ≤1.5%, tile KS ≤0.01, per-16×16-block KS ≤0.25 (band structure),
+  interior fraction Δ ≤0.5% global / ≤15% per block. Skipped under 100
+  escapers per tile / 64 per block.
+
+Two design bugs found and fixed during validation, both worth remembering:
+(a) two-sample KS must consume tied values on BOTH sides before measuring —
+nosmooth tiles have integer values with huge tie groups, and the naive walk
+scores identical arrays at tieGroup/n (a byte-identical pf64 case failed at
+KS 0.012); (b) tail quantiles (p5/p95) are rank-fragile under legitimate
+re-roll membership churn — a holdout z7 view (2,419 escapers) moved its p95
+by 5.02% from a net 7-escaper tail change while KS read 0.0045, so the
+quantile axis is central-only and tail integrity rides KS + sign + flips.
+
+Tier validation: A/A (baseline@c288faa vs anchor) 43/43 identical, exit 0.
+fmaprice + fmaprobe: all 43 within budget (the z28 re-roll and z44
+distributional signatures both accepted, per the decision). speck-test:
+rejected on flip imbalance, exit 1. All 30 synthetic mutations
+(shift±2/scale1.01/blobfill24/bandshift2% across 6 representative cases)
+rejected, most on several independent axes. Offline cross-check script and
+captured buffers in the session scratchpad; the numbers above are the
+committed record.
+
+### 2. The kernel change (mandelbrot/src/lib.rs)
+
+Quadratic stream kernel step under `#[cfg(target_feature = "relaxed-simd")]`:
+`zr' = relaxed_madd(zr, zr, relaxed_nmadd(zi, zi, cr))`,
+`zi' = relaxed_madd(zr+zr, zi, ci)` — 7 ops → 4, critical path 3 → 2. The
+not-relaxed branch is the exact step, unchanged. Pair/quad kernels and
+rect_in_set stay exact in BOTH builds (fills must stay byte-exact —
+FMA there would be flip-class).
+
+**Replay lesson (the pricing entry's "software fma is fine — measure it"
+resolved: it is NOT fine):** f64::mul_add lowers to a libm call on wasm32
+and cost +139..+223% on low-escape-count views (seahorse class, z2/z3 —
+replay is a fixed per-escaper cost). Fix: replay THROUGH the same relaxed
+SIMD instructions with the value in lane 0. That is faster than the exact
+replay ever was AND makes replay-vs-vector consistency exact by
+construction on every engine, fused or not (mul_add only matched "where
+relaxed madd is fused"). The former disasters became wins (syn-z10
+−11.7%, z3-home −9.8% at 6/32). Watch the loop-exit case: extract lanes
+AFTER the loop so a full-stride replay returns the post-step boundary z.
+
+Re-sweep (the deferral rule held again): 4/6/8/10 chains × stride
+16/32/64. The FMA step's shorter critical path moved the optimum from 6/32
+to **8/64** (chains 8: −12.2..−13.0% over 6; stride 64: another
+−9.8..−13.1%; chains 10: +10% — 8 chains × 4 v128 state vectors exactly
+fills the 32-register file). Stride-64 tax lands on low-escape-count views
+(syn-z10-seahorse +23% vs c8s32 = +1.6 ms on a 7 ms view; net vs baseline
++7.7%) — accepted on absolute-time grounds. The constants are cfg-gated:
+the simd128 fallback keeps its measured 6/32. Stride/chains never affect
+output (the replay recovers exact escape steps from any checkpoint on the
+same trajectory) — confirmed: z28's diff-vs-anchor stats are bit-stable
+across 6/32, 8/64, and both replay forms.
+
+### 3. Gates (all green)
+
+- cargo test 59/59 (kernel change is wasm-only; native untouched).
+- Fallback build (default flags, current source) **byte-identical to the
+  anchor on all 43 cases** — the Safari lane is provably unchanged, so the
+  committed enrich hashes and the anchor stay pinned to the byte-exact
+  lane and NO re-bless is needed. (Convention going forward: blessed
+  hashes track the fallback lane; the relaxed lane is judged by the
+  statistical tier.)
+- Fixed corpus statistical gate: 43/43 within budget.
+- Holdout statistical gate (seed 2026-07-10, 40 direct + 40 pf64): 80/80
+  within budget (after the tail-quantile fix above; the escalation that
+  prompted it was investigated to root cause first, not budget-tweaked
+  away).
+- Holdout timing: direct geomean −5.1%, pf64 +0.2% (control), heavies
+  −38..−42%; the tax class shows as predicted (two fast-escaping views
+  +25% = +0.4–0.5 ms each).
+
+### 4. Wasm-level result (run.mjs, full corpus, n=10, final 8/64 build)
+
+Direct geomean **−25.8%**; every stream-kernel-dominated heavy −44..−46.5%
+(user-z28 684 → 366 ms, ms/Miter 0.40 → 0.21; z37 −45.3%, z38 −45.0%,
+z44 −43.8%, z20 −46.1%, both z14 views −44%). pf64 −0.1%, float-exp +0.3%
+(untouched, as designed). Overall geomean −10.5%; time-weighted −8.8%;
+user-frequency-weighted −20.8%. Size +0.1%. Accepted regressions:
+syn-z10-seahorse +7.7% (+0.6 ms), z11 +3.4% (+0.02 ms, n.s.).
+
+### 5. Dual build (client) + e2e verdict
+
+- `client/build-relaxed-wasm.js` builds `mandelbrot/pkg-relaxed`
+  (wasm-pack --release, RUSTFLAGS +simd128,+relaxed-simd) before webpack;
+  WasmPackPlugin builds `pkg` (fallback) exactly as before. Cargo.toml's
+  wasm-opt metadata gained --enable-relaxed-simd — verified byte-neutral
+  on the fallback binary. bench PRODUCTION_DEFAULTS synced (no-flag build
+  = fallback lane).
+- worker.js picks the pkg via WebAssembly.validate on wasm-feature-detect's
+  relaxed-simd probe module; the two pkgs are separate lazy chunks, so each
+  visitor downloads one (~327 KiB either way; relaxed 335,227 B vs fallback
+  334,735 B raw). The service worker precaches both (dist total 2.51 MiB)
+  for offline; that background fetch is the priced ~2x-artifacts cost.
+- webpack gotcha: the worker config's `.wasm` asset rule excluded only
+  `pkg/`, so pkg-relaxed's wasm was emitted as a file asset (import returns
+  a URL, breaks at runtime) — exclude is now `pkg(-relaxed)?/`.
+- Both runtime branches verified rendering on the real dist (fallback
+  branch forced by negating the detection in a patched dist copy — Chrome
+  136's V8 no longer has a disable flag for shipped relaxed-simd; the
+  fallback fetches the simd128 chunk and renders, the default fetches the
+  relaxed chunk).
+- **E2E (run-e2e, fma-pre2@HEAD vs fma-post2, n=5):**
+  grid-z28-i50000 **5336 → 2987 ms, −44.0% warm, −44.0% cold** (the
+  priced estimate was −27.5% before the 8/64 re-sweep). z36-i51200 −14.7%
+  (cold −19.8%), z46-i6400 −13.8%, z20-i1600 −3.7%. Deep guards flat:
+  z47 +1.0% (n.s.), z48-i48000 −0.1%, z48-i20000 −0.3%, z259 +0.7%,
+  z48-i800 +0.7%, z85 −0.8%. **Overall e2e geomean −8.7%.** Cold tracks
+  warm everywhere — the existing quadratic spawn warmup tiers the relaxed
+  kernel, and feature detection adds nothing measurable.
+
+### Reproduce
+
+    node src/build.mjs baseline                      # fallback lane
+    node src/build.mjs fma-ship --rustflags "-C target-feature=+simd128,+relaxed-simd"
+    node src/run.mjs --variants baseline,fma-ship
+    node src/pixel-check.mjs --b fma-ship --statistical
+    node src/validate.mjs --variants baseline,fma-ship --pixel-check --statistical
+    node src/build-dist.mjs pre --ref <pre-sha> && node src/build-dist.mjs post
+    node src/run-e2e.mjs --variants pre,post
+
+Backlog consequences: "residual z28-class throughput" is resolved — the
+parked FMA lever shipped; the per-step op space on BOTH direct kernels is
+again the bare recurrence, now at hardware-FMA cost. The general
+(multibrot) kernel still runs the exact powu chain in both lanes — a
+relaxed-FMA complex-multiply for it is the natural next candidate in the
+sanctioned rounding lane, gated the same way (its heaviest real view is
+z30-e6 at ~3.9 s e2e). Safari stays on the byte-exact lane until
+relaxed-simd exists there at all.

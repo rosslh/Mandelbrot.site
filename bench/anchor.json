@@ -11,7 +11,15 @@
     "Budgets: maxAbsDelta is in smoothed escape iterations; flips",
     "(escaper <-> interior) always fail; maxBlobPx bounds the largest",
     "4-connected component of differing pixels; maxDiffFraction bounds the",
-    "share of differing pixels per tile."
+    "share of differing pixels per tile.",
+    "statisticalBudgets drive the opt-in statistical-equivalence tier",
+    "(--statistical; user decision 2026-07-10) for changes claimed and",
+    "LOG-justified as float-rounding-class. Axes and semantics are",
+    "documented in src/tolerance.mjs; values were calibrated 2026-07-10",
+    "against real hardware-FMA diffs (accept: worst case z28 = 7,141",
+    "direction-balanced flips, blob 15 px, KS 0.004, quantile drift 1.08%)",
+    "and against reject classes (one-directional speck fills, blob fills,",
+    "uniform shifts/scales, band shifts) - see the LOG entry."
   ],
   "variant": "anchor",
   "gitSha": "3517e5678f5ec9238c970ef714f67d730af7d044",
@@ -21,5 +29,19 @@
     "maxDiffFraction": 0.001,
     "maxBlobPx": 2,
     "maxFlips": 0
+  },
+  "statisticalBudgets": {
+    "flipImbalanceFloor": 4,
+    "flipImbalanceSigma": 3,
+    "signImbalanceFloor": 16,
+    "signImbalanceSigma": 4,
+    "maxFlipBlobPx": 24,
+    "calmViolationFloor": 8,
+    "calmViolationFraction": 0.0005,
+    "maxQuantileDrift": 0.015,
+    "maxTileKs": 0.01,
+    "maxBlockKs": 0.25,
+    "maxInteriorDelta": 0.005,
+    "maxBlockInteriorDelta": 0.15
   }
 }

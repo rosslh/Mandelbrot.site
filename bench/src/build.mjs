@@ -29,12 +29,19 @@ const benchDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoDir = resolve(benchDir, "..");
 const crateDir = join(repoDir, "mandelbrot");
 
+// Production is a DUAL build since 2026-07-10: the no-flag default here
+// matches the byte-exact simd128 fallback lane (what Safari gets, and what
+// the blessed enrich hashes and the pinned anchor track). The fast lane
+// (what relaxed-simd browsers get) is reproduced with:
+//   --rustflags "-C target-feature=+simd128,+relaxed-simd"
+// --enable-relaxed-simd in wasm-opt matches mandelbrot/Cargo.toml and is
+// byte-neutral on builds without relaxed instructions (verified 2026-07-10).
 export const PRODUCTION_DEFAULTS = {
   optLevel: "3",
   lto: "true",
   codegenUnits: "1",
   rustflags: "",
-  wasmOpt: "-O3 --enable-simd --enable-mutable-globals",
+  wasmOpt: "-O3 --enable-simd --enable-relaxed-simd --enable-mutable-globals",
 };
 
 function parseArgs(argv) {

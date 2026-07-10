@@ -40,7 +40,18 @@ const PERIODICITY_CHECK_STRIDE: u32 = 4;
 // ship: 6 fastest, 8 in between).
 #[cfg(target_arch = "wasm32")]
 const STREAM_CHAINS: usize = 6;
-#[cfg(target_arch = "wasm32")]
+// The relaxed-simd FMA step has a shorter critical path (2 vs 3), so the
+// quadratic kernel needs more chains in flight to fill the pipeline:
+// re-swept 4/6/8/10 x stride 16/32/64 after the FMA ship (2026-07-10).
+// 8 chains x 4 v128 state vectors exactly fills a 32-register file - 10
+// spills (+10%). Stride 64 gains another -10..-13% on the heavies, paid by
+// low-escape-count views (seahorse class +23%, +1.6 ms) - accepted on
+// absolute-time grounds. The simd128 fallback build keeps its own measured
+// optimum, 6/32; stride and chains never affect output (the boundary
+// replay recovers exact escape steps at any stride).
+#[cfg(all(target_arch = "wasm32", target_feature = "relaxed-simd"))]
+const QUADRATIC_STREAM_CHAINS: usize = 8;
+#[cfg(all(target_arch = "wasm32", not(target_feature = "relaxed-simd")))]
 const QUADRATIC_STREAM_CHAINS: usize = 6;
 
 // Iterations between bookkeeping passes (escape detection, retire/refill,
@@ -51,7 +62,9 @@ const QUADRATIC_STREAM_CHAINS: usize = 6;
 // 16/32/64: 64 punishes low-iteration escapers via free-run waste).
 #[cfg(target_arch = "wasm32")]
 const STREAM_STRIDE: u32 = 32;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_feature = "relaxed-simd"))]
+const QUADRATIC_STREAM_STRIDE: u32 = 64;
+#[cfg(all(target_arch = "wasm32", not(target_feature = "relaxed-simd")))]
 const QUADRATIC_STREAM_STRIDE: u32 = 32;
 
 // Mariani–Silver subdivision: rects whose width or height is at or below
@@ -676,6 +689,16 @@ fn next_streamable_point(
 /// are recovered by replaying at most `QUADRATIC_STREAM_STRIDE` scalar steps from the
 /// previous boundary's checkpoint with the same IEEE op order, so results
 /// are bit-identical to the scalar loop.
+///
+/// When compiled with `relaxed-simd` (the dual-build fast artifact; the
+/// simd128-only artifact keeps the exact step), the recurrence uses relaxed
+/// fused multiply-adds — hardware FMA on every relaxed-simd browser — and
+/// the scalar replay switches to `f64::mul_add` (correctly rounded fused
+/// fma) so replayed trajectories match the vector lanes wherever the
+/// engine's relaxed madd is fused (all known relaxed-simd implementations
+/// on FMA-capable hardware). The output is then rounding-class different
+/// from the exact kernel: gated by the statistical-equivalence tier, not
+/// byte-exactness (LOG.md 2026-07-10).
 #[cfg(target_arch = "wasm32")]
 fn stream_escape_quadratic<const CHAINS: usize>(
     points: &[(f64, f64)],
@@ -704,6 +727,7 @@ fn stream_escape_quadratic<const CHAINS: usize>(
     }
 
     let radius_squared = f64x2_splat(escape_radius_squared);
+    #[cfg(not(target_feature = "relaxed-simd"))]
     let two = f64x2_splat(2.0);
     let max_iterations_minus_one = i64x2_splat(i64::from(max_iterations) - 1);
     let stride_iters = i64x2_splat(i64::from(QUADRATIC_STREAM_STRIDE));
@@ -719,12 +743,27 @@ fn stream_escape_quadratic<const CHAINS: usize>(
             for chain in 0..CHAINS {
                 let z_re = lanes.z_re[chain];
                 let z_im = lanes.z_im[chain];
-                lanes.z_re[chain] = f64x2_add(
-                    f64x2_sub(f64x2_mul(z_re, z_re), f64x2_mul(z_im, z_im)),
-                    lanes.c_re[chain],
-                );
-                lanes.z_im[chain] =
-                    f64x2_add(f64x2_mul(two, f64x2_mul(z_re, z_im)), lanes.c_im[chain]);
+                // zr' = fma(zr, zr, cr - zi*zi), zi' = fma(2*zr, zi, ci):
+                // 7 ops -> 4, critical path 3 -> 2.
+                #[cfg(target_feature = "relaxed-simd")]
+                {
+                    lanes.z_re[chain] = f64x2_relaxed_madd(
+                        z_re,
+                        z_re,
+                        f64x2_relaxed_nmadd(z_im, z_im, lanes.c_re[chain]),
+                    );
+                    lanes.z_im[chain] =
+                        f64x2_relaxed_madd(f64x2_add(z_re, z_re), z_im, lanes.c_im[chain]);
+                }
+                #[cfg(not(target_feature = "relaxed-simd"))]
+                {
+                    lanes.z_re[chain] = f64x2_add(
+                        f64x2_sub(f64x2_mul(z_re, z_re), f64x2_mul(z_im, z_im)),
+                        lanes.c_re[chain],
+                    );
+                    lanes.z_im[chain] =
+                        f64x2_add(f64x2_mul(two, f64x2_mul(z_re, z_im)), lanes.c_im[chain]);
+                }
             }
         }
 
@@ -775,6 +814,51 @@ fn stream_escape_quadratic<const CHAINS: usize>(
                         let mut re = f64x2_lane(checkpoint_re[chain], sub);
                         let mut im = f64x2_lane(checkpoint_im[chain], sub);
                         let mut iterations = i64x2_lane(lanes.iters[chain], sub);
+                        // Replay arithmetic must match the kernel step. In
+                        // relaxed-simd builds that means replaying THROUGH
+                        // the same relaxed madd instructions (value in lane
+                        // 0), which reproduces the vector trajectory exactly
+                        // on any engine, fused or not - and costs hardware
+                        // FMA, not a libm fma call (~3x slowdown measured on
+                        // low-escape-count seahorse views with the scalar
+                        // f64::mul_add form).
+                        #[cfg(target_feature = "relaxed-simd")]
+                        {
+                            let c_re_v = f64x2_splat(c_re);
+                            let c_im_v = f64x2_splat(c_im);
+                            let mut z_re_v = f64x2_splat(re);
+                            let mut z_im_v = f64x2_splat(im);
+                            for _ in 0..QUADRATIC_STREAM_STRIDE {
+                                re = f64x2_extract_lane::<0>(z_re_v);
+                                im = f64x2_extract_lane::<0>(z_im_v);
+                                // Not `>=`: a NaN norm must read as escaped,
+                                // the same way it fails the kernel's
+                                // f64x2_lt.
+                                #[allow(clippy::neg_cmp_op_on_partial_ord)]
+                                if !(re * re + im * im < escape_radius_squared) {
+                                    break;
+                                }
+                                let next_re = f64x2_relaxed_madd(
+                                    z_re_v,
+                                    z_re_v,
+                                    f64x2_relaxed_nmadd(z_im_v, z_im_v, c_re_v),
+                                );
+                                z_im_v = f64x2_relaxed_madd(
+                                    f64x2_add(z_re_v, z_re_v),
+                                    z_im_v,
+                                    c_im_v,
+                                );
+                                z_re_v = next_re;
+                                iterations += 1;
+                            }
+                            // On break the vector is unchanged since the
+                            // extraction, so this is a no-op; on a full-
+                            // stride run it picks up the final step's z
+                            // (the boundary value that escaped).
+                            re = f64x2_extract_lane::<0>(z_re_v);
+                            im = f64x2_extract_lane::<0>(z_im_v);
+                        }
+                        #[cfg(not(target_feature = "relaxed-simd"))]
                         for _ in 0..QUADRATIC_STREAM_STRIDE {
                             // Not `>=`: a NaN norm must read as escaped, the
                             // same way it fails the kernel's f64x2_lt.

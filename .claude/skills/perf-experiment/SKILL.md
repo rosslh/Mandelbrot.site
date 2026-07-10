@@ -45,15 +45,26 @@ Rendering pathway is selected on `effective_zoom = tile_zoom + zoom_offset`
   precision). The runner reports the first call per case as **cold** (includes
   orbit computation) and warm samples separately. Cold times matter for
   first-tile latency when a user pans/zooms to a new region.
-- Production config (as of 2026-07): `opt-level = 3` (root Cargo.toml) +
-  `-C target-feature=+simd128` (.cargo/config.toml, wasm target only) +
-  `wasm-opt -O3 --enable-simd` (mandelbrot/Cargo.toml). This was measured at
-  -9.6% on float-exp tiles vs the previous size-tuned config
-  (opt-level=s/-Oz); the wasm is ~277 KiB and every visitor downloads it, so
+- Production is a DUAL build (2026-07-10): two wasm artifacts from the same
+  source. The **fallback lane** (`mandelbrot/pkg`, what Safari gets) is
+  `opt-level = 3` (root Cargo.toml) + `-C target-feature=+simd128`
+  (.cargo/config.toml, wasm target only) + `wasm-opt -O3 --enable-simd
+  --enable-relaxed-simd` (mandelbrot/Cargo.toml; the relaxed flag is
+  byte-neutral without relaxed instructions). The **fast lane**
+  (`mandelbrot/pkg-relaxed`, built by client/build-relaxed-wasm.js, what
+  relaxed-simd browsers get via WebAssembly.validate detection in
+  client/js/worker.js) adds `+relaxed-simd` to RUSTFLAGS: the quadratic
+  direct kernel uses hardware FMA there (rounding-class output, judged by
+  the statistical tier below; the fallback lane stays byte-exact and is
+  what the anchor and blessed enrich hashes track). A no-flag bench build
+  reproduces the fallback lane; add `--rustflags "-C
+  target-feature=+simd128,+relaxed-simd"` for the fast lane. Each visitor
+  downloads one ~327 KiB wasm; the service worker precaches both, so
   **every speed claim must also report the size delta** (compare output
-  includes it). simd128 sets the browser floor at Safari 16.4 / Chrome 91 /
-  Firefox 89 - do not add wasm features beyond simd128 without flagging the
-  compat change.
+  includes it). simd128 sets the hard browser floor at Safari 16.4 /
+  Chrome 91 / Firefox 89; relaxed-simd (Chrome 114+/Firefox 125+, no
+  Safari) only selects the faster artifact - do not add wasm features
+  beyond these without flagging the compat change.
 
 ## Workflow
 
@@ -232,6 +243,37 @@ Validated 2026-07-10: A/A identical on all 43 cases; the two known
 historical artifact classes (16-flip speck cluster on user-z30, 1-px flip
 on a holdout e3 view, both from the 633ad35→ modernization re-bless) are
 correctly caught and escalated.
+
+### Statistical-equivalence tier (rounding-class changes; opt-in via --statistical)
+
+Added 2026-07-10 (user decision; LOG entry of the same date) for changes
+claimed AND LOG-justified as float-rounding-class (hardware FMA,
+reassociation) — the class whose legitimate diff (chaos re-roll on
+long-orbit boundary views: tens of percent of pixels, unbounded per-pixel
+|Δ|, thousands of balanced escaper↔interior flips) can never fit the
+strict budgets:
+
+```sh
+node src/pixel-check.mjs --b <variant> --statistical            # fixed corpus
+node src/validate.mjs --variants a,b --pixel-check --statistical  # holdout
+```
+
+Still anchor-relative (no drift ratchet); a failure is an escalation
+exactly like the strict gate. Budgets committed in anchor.json
+`statisticalBudgets`, axis semantics in `bench/src/tolerance.mjs`:
+flip-direction balance and delta-sign balance (re-rolls are symmetric;
+fills/shifts/scales/band-shifts are one-directional — the sign axis is
+what catches uniform shifts that hide from KS on high-iteration tiles),
+flip-blob bound, calm-region stability (big change needs a chaotic anchor
+neighborhood), central-quantile (p25/50/75 — tails are rank-fragile under
+re-roll churn) + tile/block KS distribution stability, and global/block
+interior-fraction bounds. Calibrated against real FMA diffs (accept) and
+speck/fill/shift/scale/band-shift classes (reject); the FMA ship passed
+43/43 fixed + 80/80 holdout while speck-test and every synthetic
+structural mutation escalate. The production consequence of the first
+ship: the fallback (simd128) lane stays byte-exact — anchor and blessed
+hashes track it — while the relaxed lane's output is bounded by this tier
+against the same pinned anchor.
 
 ## Applying a winner
 
@@ -532,35 +574,38 @@ dzndz stop = multiplier interior), or deep-tier/traffic-gated
 (rescaled-f64 epoch loop, reference tricks). Higher-period interior
 closed forms appear nowhere in the field and have no absolute time
 here. Together with the FMA calibration (same-day LOG entry), both
-import lanes are closed: direct-tier progress now requires a user
-decision (statistical output tier, or relaxed-SIMD dual-build), not
-an experiment.
+import lanes were closed pending the two user decisions — which
+landed the same day (see below).
 
-Relaxed-SIMD hardware FMA (former item #1) **PRICED 2026-07-10
-(parked — awaiting two user decisions; do not re-measure)** — see the
-LOG entry. Feasible on stable Rust (relaxed intrinsics stable since
-1.82); the win is large and real: −29..−30% on every
-stream-kernel-dominated direct heavy (ms/Miter 0.40 → 0.28), direct
-geomean −17.7%, time-weighted −28.0%, **grid-z28 e2e 5365 → 3888 ms
-(−27.5% warm, −28.4% cold)**, size flat. Blocked by (1) output
-policy — the diff is the calibration's boundary re-roll class (z28:
-7,141 flips), escalated by the tolerance gate as designed; needs a
-statistical-equivalence tier or deliberate re-anchor, and (2) the
-browser floor — Safari has no relaxed-simd at any version, so
-shipping means a dual-build + runtime feature detection, now priced
-against a −27.5% e2e payoff on the heaviest real direct view. The
-tolerance gate itself ran clean on its first real rounding-class
-input (both fixed-corpus invocations, correct per-axis attribution).
-Ship path if ever unblocked (in the LOG entry): FMA-consistent scalar
-replay, chains/stride re-sweep, holdout + re-bless, cold-pass e2e,
-dual-build plumbing.
+Relaxed-SIMD hardware FMA **SHIPPED 2026-07-10** (both user decisions
+landed: statistical-equivalence tier built + dual-build cost accepted)
+— see the LOG entry. Quadratic direct kernel only, in the fast lane of
+the new dual build: **grid-z28 e2e 5336 → 2987 ms (−44.0% warm, −44.0%
+cold)**, z36-i51200 −14.7%, z46 −13.8%, overall e2e geomean −8.7%,
+deep tiers flat, size +0.1%; wasm-level direct geomean −25.8% with
+every stream-kernel heavy −44..−46.5% (ms/Miter 0.40 → 0.21). Gates:
+fixed corpus statistical 43/43, holdout 80/80, fallback lane
+byte-identical to anchor (no re-bless needed — blessed hashes track
+the fallback lane). Mechanism notes that survive: NEVER use
+f64::mul_add in the scalar replay (libm call on wasm32; +139..+223%
+on low-escape-count views) — replay THROUGH the same relaxed SIMD
+instructions in lane 0, which is faster and exactly consistent on any
+engine; the FMA step's shorter critical path (2 vs 3) moved the
+chains/stride optimum to 8/64 (cfg-gated; fallback keeps 6/32; 10
+chains spills — 8×4 v128 state vectors exactly fills the register
+file); stride/chains never affect output (replay recovers exact
+escapes on the same trajectory). Two harness lessons from the tier's
+first real use: two-sample KS must consume ties on both sides
+(nosmooth integer tie groups), and tail quantiles are rank-fragile
+under re-roll membership churn (central p25/50/75 only).
 
-1. **Residual z28-class throughput**: after the deferral ship the step
-   is the bare z²+c recurrence at 6 chains — per-step op space is now
-   genuinely mined out; the survey found no new algorithmic idea, so
-   the only known reopener is the parked FMA decision above (byte-exact
-   iteration-skipping stays settled). Same now holds for the general
-   kernel: its per-step cost is the powu chain itself.
+1. **General (multibrot) kernel relaxed-FMA**: the natural next
+   rounding-lane candidate — the powu chain's complex multiplies are
+   madd/nmadd-shaped, the dual-build and statistical gate
+   infrastructure now exist, and the heaviest real multibrot view
+   (z30-e6) is ~3.9 s e2e. Gate identically (--statistical + holdout
+   + fallback byte-check); re-sweep its 6/32 after any step-cost
+   change.
 2. z0 whole-set small-tile wave/gather overhead — micro (accepted
    +0.6 ms/tile from the Mariani ship); only if whole-set loads ever
    matter in user data.
@@ -643,4 +688,10 @@ around this client — it intermittently stalls worker spawns; block
 off-localhost via --host-resolver-rules like run-e2e). Per-load floor
 after both ships: ~45 ms bundle+init, ~50 ms pool spawn+warmup, 100 ms
 tier-up grace, dispatch ≈ 190 ms; remaining levers are the grace itself
-(load-bearing) and spawn cost.
+(load-bearing) and spawn cost. Relaxed-SIMD hardware FMA dual-build +
+statistical-equivalence output tier (2026-07-10, grid-z28 e2e −44.0%
+warm and cold, overall e2e geomean −8.7%, direct geomean −25.8%
+wasm-level — first ship through the statistical gate; mechanism notes:
+replay through the kernel's own relaxed SIMD instructions, never
+f64::mul_add on wasm32; the cheaper FMA step moved the quadratic
+optimum to 8 chains/stride 64 in the fast lane only).

@@ -5,8 +5,8 @@
   "license": "MIT",
   "scripts": {
     "postinstall": "cd .. && cargo build",
-    "build": "rm -rf dist && (webpack --mode production || webpack --mode production) && node generate-sw.js",
-    "dev": "webpack-dev-server --mode development --open --port 9090",
+    "build": "rm -rf dist && node build-relaxed-wasm.js && (webpack --mode production || webpack --mode production) && node generate-sw.js",
+    "dev": "node build-relaxed-wasm.js && webpack-dev-server --mode development --open --port 9090",
     "serve": "npx http-server dist -p 9090",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ignore-path ../.gitignore && cd ../mandelbrot && cargo clippy --all-targets",

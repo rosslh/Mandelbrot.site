@@ -88,6 +88,7 @@ npm-debug.log*
 out
 pids
 pkg
+pkg-relaxed
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 target
 target/

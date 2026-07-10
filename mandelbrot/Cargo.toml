@@ -31,8 +31,13 @@ rayon = "1.10.0"
 [features]
 default = ["console_error_panic_hook"]
 
+# --enable-relaxed-simd is needed by the dual-build fast artifact
+# (client/build-relaxed-wasm.js builds pkg-relaxed with
+# -C target-feature=+simd128,+relaxed-simd); on the simd128-only fallback
+# build wasm-opt's output is byte-identical with or without the flag
+# (verified 2026-07-10), so one flag list serves both builds.
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ["-O3", "--enable-simd", "--enable-mutable-globals"]
+wasm-opt = ["-O3", "--enable-simd", "--enable-relaxed-simd", "--enable-mutable-globals"]
 
 # Used by bench/ variant builds, which run their own wasm-opt pass with
 # per-variant flags. Does not affect production (webpack uses --release).

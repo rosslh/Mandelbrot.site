@@ -12,7 +12,27 @@ async function ensureOxipngInitialized() {
   }
 }
 
-import("../../mandelbrot/pkg")
+// Relaxed-SIMD feature probe (wasm-feature-detect's detection module: a
+// v128-returning function ending in i8x16.relaxed_swizzle). Engines with
+// relaxed SIMD (Chrome 114+/Firefox 125+) validate it and get the hardware-
+// FMA build (pkg-relaxed, ~30% faster quadratic escape loop); engines
+// without it (all Safari) fail validation and get the byte-exact simd128
+// build. The two pkgs are separate lazy chunks, so each visitor downloads
+// only the one their engine selected (the service worker precaches both in
+// the background for offline use). Output between the two builds differs by
+// float-rounding class only, gated by the statistical-equivalence tier
+// (bench/LOG.md 2026-07-10).
+const supportsRelaxedSimd = WebAssembly.validate(
+  new Uint8Array([
+    0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 15,
+    1, 13, 0, 65, 1, 253, 15, 65, 2, 253, 15, 253, 128, 2, 11,
+  ]),
+);
+
+(supportsRelaxedSimd
+  ? import("../../mandelbrot/pkg-relaxed")
+  : import("../../mandelbrot/pkg")
+)
   .then(async (wasm) => {
     wasm.init();
 

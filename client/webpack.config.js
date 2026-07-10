@@ -151,7 +151,9 @@ const workerConfig = {
       },
       {
         test: /\.wasm$/,
-        exclude: /pkg\/.*\.wasm$/,
+        // Both wasm-pack outputs (pkg/ and pkg-relaxed/) are wasm modules
+        // compiled by syncWebAssembly, not file assets.
+        exclude: /pkg(-relaxed)?\/.*\.wasm$/,
         type: "asset/resource",
         generator: {
           filename: "[name][ext]",

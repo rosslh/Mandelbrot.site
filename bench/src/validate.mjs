@@ -19,7 +19,9 @@
 // (second variant) against the pinned output anchor (bench/anchor.json)
 // under the committed budgets - the anchor is a pinned build, so fresh
 // holdout views get their reference values generated on demand and drift
-// stays bounded on views the fixed corpus has never seen.
+// stays bounded on views the fixed corpus has never seen. --statistical is
+// the same anchor-relative flow judged by the statistical-equivalence
+// budgets instead (rounding-class changes only; see src/tolerance.mjs).
 // Holdout tiles render at --tile-size (default 100):
 // per-pixel cost is size-invariant, so relative deltas are preserved while
 // heavyweight real views stay inside the budget. Holdout results are
@@ -37,6 +39,8 @@ import { readVariantMeta, startSession } from "./session.mjs";
 import { median, mad, geomean, isSignificant } from "./stats.mjs";
 import {
   diffValues,
+  diffValuesStatistical,
+  formatStatisticalResult,
   formatToleranceResult,
   readAnchorConfig,
 } from "./tolerance.mjs";
@@ -56,6 +60,7 @@ function parseArgs(argv) {
     tileSize: 100,
     pixelCheck: false,
     tolerance: false,
+    statistical: false,
     out: null,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -71,6 +76,7 @@ function parseArgs(argv) {
     else if (arg === "--tile-size") opts.tileSize = Number(argv[++i]);
     else if (arg === "--pixel-check") opts.pixelCheck = true;
     else if (arg === "--tolerance") opts.tolerance = true;
+    else if (arg === "--statistical") opts.statistical = true;
     else if (arg === "--out") opts.out = resolve(argv[++i]);
     else throw new Error(`Unexpected argument: ${arg}`);
   }
@@ -193,8 +199,10 @@ async function runPixelCheck(session, opts, cases, defaults) {
   console.log(`\nAll ${cases.length} holdout views byte-identical.`);
 }
 
-// Anchor-relative tolerance gate on the holdout sample: the candidate's
-// values vs references generated on demand by the pinned anchor build.
+// Anchor-relative gate on the holdout sample: the candidate's values vs
+// references generated on demand by the pinned anchor build, judged by the
+// strict tolerance budgets or (--statistical) the statistical-equivalence
+// budgets.
 async function runToleranceHoldout(session, opts, cases, defaults, anchor) {
   const failing = [];
   for (const benchCase of cases) {
@@ -210,19 +218,26 @@ async function runToleranceHoldout(session, opts, cases, defaults, anchor) {
           .then((base64) => Buffer.from(base64, "base64")),
       ),
     );
-    const stats = diffValues(
-      valuesAnchor,
-      valuesCandidate,
-      payload.imageWidth,
-      anchor.budgets,
+    const stats = opts.statistical
+      ? diffValuesStatistical(
+          valuesAnchor,
+          valuesCandidate,
+          payload.imageWidth,
+          anchor.statisticalBudgets,
+        )
+      : diffValues(valuesAnchor, valuesCandidate, payload.imageWidth, anchor.budgets);
+    console.log(
+      opts.statistical
+        ? formatStatisticalResult(benchCase.id, stats)
+        : formatToleranceResult(benchCase.id, stats),
     );
-    console.log(formatToleranceResult(benchCase.id, stats));
     if (!stats.pass) failing.push(benchCase.id);
   }
+  const gateName = opts.statistical ? "statistical-equivalence" : "tolerance";
   if (failing.length > 0) {
     console.log(
       `\n${failing.length}/${cases.length} holdout views exceed the anchor ` +
-        `tolerance budget: ${failing.join(", ")}\n` +
+        `${gateName} budget: ${failing.join(", ")}\n` +
         `This is an escalation, not an acceptance path: either the change is ` +
         `wrong, or it needs an explicit re-anchor decision (LOG.md entry + ` +
         `re-pin bench/anchor.json).`,
@@ -230,7 +245,7 @@ async function runToleranceHoldout(session, opts, cases, defaults, anchor) {
     process.exit(1);
   }
   console.log(
-    `\nAll ${cases.length} holdout views within the anchor tolerance budget.`,
+    `\nAll ${cases.length} holdout views within the anchor ${gateName} budget.`,
   );
 }
 
@@ -241,11 +256,14 @@ async function main() {
     opts.variants.map((name) => [name, readVariantMeta(name)]),
   );
 
-  if (opts.tolerance && !opts.pixelCheck) {
-    throw new Error("--tolerance requires --pixel-check");
+  if (opts.tolerance && opts.statistical) {
+    throw new Error("--tolerance and --statistical are mutually exclusive");
+  }
+  if ((opts.tolerance || opts.statistical) && !opts.pixelCheck) {
+    throw new Error("--tolerance/--statistical require --pixel-check");
   }
   let anchor = null;
-  if (opts.tolerance) {
+  if (opts.tolerance || opts.statistical) {
     anchor = readAnchorConfig();
     const anchorMeta = readVariantMeta(anchor.variant);
     if (!anchorMeta.gitSha.startsWith(anchor.gitSha)) {
@@ -255,11 +273,18 @@ async function main() {
           `node src/build.mjs ${anchor.variant} --ref ${anchor.gitSha}`,
       );
     }
+    if (opts.statistical && !anchor.statisticalBudgets) {
+      throw new Error("anchor.json has no statisticalBudgets");
+    }
     console.log(
-      `Tolerance gate: ${candidate} vs anchor @${anchor.gitSha.slice(0, 7)} ` +
-        `(budgets: |Δ| ≤ ${anchor.budgets.maxAbsDelta}, ` +
-        `diff ≤ ${anchor.budgets.maxDiffFraction * 100}%, ` +
-        `blob ≤ ${anchor.budgets.maxBlobPx} px, flips ≤ ${anchor.budgets.maxFlips})`,
+      opts.statistical
+        ? `Statistical-equivalence gate: ${candidate} vs anchor ` +
+            `@${anchor.gitSha.slice(0, 7)} (budgets in anchor.json ` +
+            `statisticalBudgets; semantics in src/tolerance.mjs)`
+        : `Tolerance gate: ${candidate} vs anchor @${anchor.gitSha.slice(0, 7)} ` +
+            `(budgets: |Δ| ≤ ${anchor.budgets.maxAbsDelta}, ` +
+            `diff ≤ ${anchor.budgets.maxDiffFraction * 100}%, ` +
+            `blob ≤ ${anchor.budgets.maxBlobPx} px, flips ≤ ${anchor.budgets.maxFlips})`,
     );
   }
 
