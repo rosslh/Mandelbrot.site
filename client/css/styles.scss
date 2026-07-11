@@ -162,6 +162,10 @@ html.fractal-root {
 #inputsWrapper {
   max-height: calc(100% - 60px);
   min-width: 256px;
+  // Pin the expanded width so long content (e.g. the zoom scale caption)
+  // wraps instead of widening the sidebar. The collapsed hide-overlays
+  // state only unsets min-width, so it still shrinks to its buttons.
+  max-width: 256px;
   overflow-y: auto;
   top: env(safe-area-inset-top);
   right: env(safe-area-inset-right);
