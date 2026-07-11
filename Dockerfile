@@ -19,6 +19,9 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 WORKDIR /app
 
 COPY Cargo.toml ./
+# .cargo/config.toml supplies -C target-feature=+simd128 to the fallback
+# wasm build; without it the shipped fallback artifact silently loses SIMD.
+COPY .cargo ./.cargo
 COPY mandelbrot ./mandelbrot
 COPY client ./client
 

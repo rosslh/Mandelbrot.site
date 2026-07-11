@@ -2473,3 +2473,40 @@ not step latency, binds it; only the stride moved (64, relaxed lane).
 Remaining rounding-lane candidates in the direct tier: none — the per-step
 op space on both kernels is now the fused bare recurrence. Next absolute-time
 targets stay as ranked (z0 whole-set micro is the only open direct item).
+
+## 2026-07-10 — Deploy fix: wasm-opt feature flags for modern-rustc default features (bulk-memory, nontrapping-fptoint)
+
+Not a perf experiment; recorded here because it moves the production wasm-opt
+flag list and the fallback lane's byte anchor.
+
+The Coolify deploy of fdf9220 failed in `npm run build` (relaxed artifact,
+then the fallback would hit it too): the Dockerfile installs latest stable
+rustc (1.97.0 on the server; local is 1.86.0), and since rustc 1.87 the
+wasm32-unknown-unknown default target features include bulk-memory and
+nontrapping-fptoint. The module therefore contains `memory.copy` etc., and an
+explicit wasm-opt flag list overrides binaryen's feature-section detection,
+so wasm-opt rejected its own input: `[wasm-validator error] Bulk memory
+operations require bulk memory`. Reproduced in the same Docker build locally;
+does not reproduce on rustc 1.86 (no bulk-memory ops emitted).
+
+Fix: Cargo.toml release wasm-opt list gains `--enable-bulk-memory
+--enable-nontrapping-float-to-int` (both below the Safari 16.4 floor —
+Safari 15+). Measured on local 1.86 artifacts, old vs new flags, same input:
+
+- `--enable-nontrapping-float-to-int`: byte-neutral, both lanes.
+- `--enable-bulk-memory`: NOT byte-neutral — binaryen -O3 may now emit bulk
+  ops; +3 B on both lanes (fallback 341835→341838, relaxed 343859→343862).
+  The rewrite is in integer/memory helper code — semantics-preserving, no
+  float-rounding change — so kernel output is unaffected; but byte-diff
+  comparisons against pre-flag anchors will show a codegen delta. Fallback
+  lane "byte-identical" claims from entries above are relative to the old
+  flag list.
+
+Also fixed in the same pass: the Dockerfile never copied `.cargo/config.toml`
+into the build context, so server fallback builds compiled WITHOUT +simd128
+(the relaxed artifact was unaffected — build-relaxed-wasm.js passes RUSTFLAGS
+explicitly). `COPY .cargo ./.cargo` added; the deployed fallback artifact now
+actually carries the simd128 win measured 2026-07-02. Note the server's
+rustc (latest stable) still differs from the locally benchmarked 1.86, so
+deployed bytes are not the benchmarked bytes; pinning via rust-toolchain.toml
+was considered and skipped to keep the track-stable policy.
