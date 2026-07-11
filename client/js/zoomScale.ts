@@ -11,9 +11,9 @@ const FULL_SET_ZOOM = 3;
 
 type ScaleObject = { name: string; meters: number };
 
-// Anchors, smallest first. An anchor is used until it is truly exhausted —
-// the view under it would be smaller than a Planck length — and only then
-// does the next one take over.
+// Anchors, smallest first. An anchor is used until the view under it drops
+// below an atom, then the next one takes over — so the everyday rungs repeat
+// under each anchor and only the final anchor descends into the subatomic.
 const ANCHORS: ScaleObject[] = [
   { name: "Earth", meters: 1.27e7 },
   { name: "the Milky Way", meters: 9.5e20 },
@@ -51,6 +51,7 @@ const TARGETS: ScaleObject[] = [
 ];
 
 const PLANCK_METERS = 1.6e-35;
+const ANCHOR_SWITCH_METERS = 1e-10; // an atom
 
 /** Returns the scale comparison for the given effective zoom, or null when
  * the whole set is in view and there is nothing to compare. */
@@ -63,7 +64,8 @@ export function describeZoomScale(effectiveZoom: number): string | null {
   const anchor =
     ANCHORS.find(
       (candidate) =>
-        Math.log2(candidate.meters) - doublings >= Math.log2(PLANCK_METERS),
+        Math.log2(candidate.meters) - doublings >=
+        Math.log2(ANCHOR_SWITCH_METERS),
     ) ?? ANCHORS[ANCHORS.length - 1];
   const viewLog2 = Math.log2(anchor.meters) - doublings;
 
