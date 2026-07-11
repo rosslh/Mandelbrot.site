@@ -185,10 +185,7 @@ class MandelbrotLayer extends L.GridLayer {
     if (!this.initialBatchFlushScheduled) {
       this.initialBatchFlushScheduled = true;
       void this._map.poolSpawned.then(() => {
-        setTimeout(
-          () => this.debounceTileGeneration.flush(),
-          TIER_UP_GRACE_MS,
-        );
+        setTimeout(() => this.debounceTileGeneration.flush(), TIER_UP_GRACE_MS);
       });
     }
   }

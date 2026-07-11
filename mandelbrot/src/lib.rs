@@ -853,11 +853,8 @@ fn stream_escape_quadratic<const CHAINS: usize>(
                                     z_re_v,
                                     f64x2_relaxed_nmadd(z_im_v, z_im_v, c_re_v),
                                 );
-                                z_im_v = f64x2_relaxed_madd(
-                                    f64x2_add(z_re_v, z_re_v),
-                                    z_im_v,
-                                    c_im_v,
-                                );
+                                z_im_v =
+                                    f64x2_relaxed_madd(f64x2_add(z_re_v, z_re_v), z_im_v, c_im_v);
                                 z_re_v = next_re;
                                 iterations += 1;
                             }
@@ -1303,10 +1300,8 @@ fn stream_escape_general<const CHAINS: usize>(
                         let z = {
                             let c_re_v = f64x2_splat(f64x2_lane(lanes.c_re[chain], sub));
                             let c_im_v = f64x2_splat(f64x2_lane(lanes.c_im[chain], sub));
-                            let mut z_re_v =
-                                [f64x2_splat(f64x2_lane(checkpoint_re[chain], sub))];
-                            let mut z_im_v =
-                                [f64x2_splat(f64x2_lane(checkpoint_im[chain], sub))];
+                            let mut z_re_v = [f64x2_splat(f64x2_lane(checkpoint_re[chain], sub))];
+                            let mut z_im_v = [f64x2_splat(f64x2_lane(checkpoint_im[chain], sub))];
                             for _ in 0..STREAM_STRIDE {
                                 let re = f64x2_extract_lane::<0>(z_re_v[0]);
                                 let im = f64x2_extract_lane::<0>(z_im_v[0]);
