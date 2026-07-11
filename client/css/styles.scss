@@ -322,6 +322,14 @@ datalist {
   font-size: var(--font-size-xs);
 }
 
+#zoomScaleCaption {
+  margin: 0;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
 .button-wrapper {
   display: flex;
   align-items: center;

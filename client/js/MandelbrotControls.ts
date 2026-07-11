@@ -4,6 +4,7 @@ import snakeCase from "lodash/snakeCase";
 import type MandelbrotMap from "./MandelbrotMap";
 import { MandelbrotConfig } from "./MandelbrotMap";
 import { isValidDecimalCoordinate } from "./highPrecision";
+import { describeZoomScale } from "./zoomScale";
 import * as api from "./api";
 
 type NumberInput = {
@@ -781,6 +782,13 @@ class MandelbrotControls {
     this.map.config.zoom = finalZoom;
     (document.getElementById("zoom") as HTMLInputElement).value =
       String(finalZoom);
+
+    const caption = document.getElementById("zoomScaleCaption");
+    if (caption) {
+      const description = describeZoomScale(finalZoom);
+      caption.hidden = description === null;
+      caption.textContent = description ?? "";
+    }
   }
 
   private resetConfigValues(keys: Array<keyof MandelbrotConfig>) {

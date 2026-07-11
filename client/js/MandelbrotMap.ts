@@ -234,6 +234,10 @@ class MandelbrotMap extends L.Map {
     // plain load this.config still holds the defaults.
     this.goToCoordinates(this.config.re, this.config.im, this.config.zoom);
     this.setupEventListeners();
+    // The initial setView fired before the listeners above existed, so sync
+    // the coordinate inputs (and the zoom scale caption) to the starting
+    // view once.
+    this.controls.throttleSetCoordinateInputValues();
   }
 
   /** Adds the spinner to the same corner as the zoom control (after it, so
