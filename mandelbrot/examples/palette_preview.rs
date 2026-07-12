@@ -18,8 +18,11 @@ const SCHEMES: &[&str] = &[
     "cividis",
     "cool",
     "cubehelix",
+    "gnuplot",
     "inferno",
+    "jet",
     "magma",
+    "nipySpectral",
     "plasma",
     "turbo",
     "viridis",
@@ -33,9 +36,13 @@ const SCHEMES: &[&str] = &[
     "orangeRed",
     "purpleRed",
     "yellowOrangeBrown",
-    // Cyclical
-    "rainbow",
-    "sinebow",
+    // Sequential (single-hue)
+    "blues",
+    "greens",
+    "greys",
+    "oranges",
+    "purples",
+    "reds",
     // Diverging
     "spectral",
     "brownGreen",
@@ -46,13 +53,9 @@ const SCHEMES: &[&str] = &[
     "redGrey",
     "redYellowBlue",
     "redYellowGreen",
-    // Sequential (single-hue)
-    "blues",
-    "greens",
-    "greys",
-    "oranges",
-    "purples",
-    "reds",
+    // Cyclical
+    "rainbow",
+    "sinebow",
 ];
 
 /// Samples a palette as the app applies it (default orientation, no

@@ -154,12 +154,19 @@ const PALETTE_LUT_SIZE: usize = 256;
 const STRETCHED_LIGHTNESS_MIN: f32 = 0.05;
 const STRETCHED_LIGHTNESS_MAX: f32 = 0.97;
 
+/// Gentler lightness bounds for the cyclical palettes. Their identity is a
+/// hue carousel at steady lightness, so the full stretch would make each
+/// cycle pulse through a near-black band that reads as a seam; these bounds
+/// add shading depth while keeping the carousel feel.
+const CYCLIC_LIGHTNESS_MIN: f32 = 0.2;
+const CYCLIC_LIGHTNESS_MAX: f32 = 0.9;
+
 /// A color palette the renderer can sample continuously: either a colorous
-/// gradient used as-is, or a lookup table derived from one by
-/// `stretch_palette_contrast`.
+/// gradient used as-is, or a lookup table built by `stretch_palette_contrast`
+/// or `palette_from_fn`.
 enum Palette {
     Original(colorous::Gradient),
-    Stretched(Vec<colorous::Color>),
+    Lut(Vec<colorous::Color>),
 }
 
 impl Palette {
@@ -168,7 +175,7 @@ impl Palette {
     fn eval_continuous(&self, t: f64) -> colorous::Color {
         match self {
             Palette::Original(gradient) => gradient.eval_continuous(t),
-            Palette::Stretched(lut) => {
+            Palette::Lut(lut) => {
                 let position = t.clamp(0.0, 1.0) * (lut.len() - 1) as f64;
                 let index = position as usize;
                 let next_index = (index + 1).min(lut.len() - 1);
@@ -195,9 +202,27 @@ impl Palette {
 /// narrow a lightness range for fractal shading — filigree detail gets lost
 /// as pale-on-pale — so this remap gives them the same near-black-to-near-
 /// white contrast as inferno or magma while preserving each palette's color
-/// identity. Because the remap is a pointwise function of color, palettes
-/// whose endpoints match (rainbow, sinebow) stay seamlessly cyclical.
+/// identity.
 fn stretch_palette_contrast(gradient: colorous::Gradient) -> Palette {
+    stretch_palette_lightness(gradient, STRETCHED_LIGHTNESS_MIN, STRETCHED_LIGHTNESS_MAX)
+}
+
+/// Like `stretch_palette_contrast`, but with the gentler
+/// [`CYCLIC_LIGHTNESS_MIN`, `CYCLIC_LIGHTNESS_MAX`] bounds for cyclical
+/// palettes.
+fn stretch_cyclic_palette_contrast(gradient: colorous::Gradient) -> Palette {
+    stretch_palette_lightness(gradient, CYCLIC_LIGHTNESS_MIN, CYCLIC_LIGHTNESS_MAX)
+}
+
+/// Linearly remaps a gradient's Okhsl lightness range onto
+/// [`target_min`, `target_max`]. Because the remap is a pointwise function
+/// of color, palettes whose endpoints match (rainbow, sinebow) stay
+/// seamlessly cyclical.
+fn stretch_palette_lightness(
+    gradient: colorous::Gradient,
+    target_min: f32,
+    target_max: f32,
+) -> Palette {
     let samples: Vec<Okhsl> = (0..PALETTE_LUT_SIZE)
         .map(|i| {
             let color = gradient.eval_continuous(i as f64 / (PALETTE_LUT_SIZE - 1) as f64);
@@ -215,13 +240,13 @@ fn stretch_palette_contrast(gradient: colorous::Gradient) -> Palette {
             (min.min(color.lightness), max.max(color.lightness))
         });
     let native_range = (max_lightness - min_lightness).max(f32::EPSILON);
-    let target_range = STRETCHED_LIGHTNESS_MAX - STRETCHED_LIGHTNESS_MIN;
+    let target_range = target_max - target_min;
 
     let lut = samples
         .into_iter()
         .map(|mut okhsl| {
-            okhsl.lightness = STRETCHED_LIGHTNESS_MIN
-                + (okhsl.lightness - min_lightness) / native_range * target_range;
+            okhsl.lightness =
+                target_min + (okhsl.lightness - min_lightness) / native_range * target_range;
             let rgb: Srgb = okhsl.into_color();
             colorous::Color {
                 r: (rgb.red * 255.0).round() as u8,
@@ -231,7 +256,88 @@ fn stretch_palette_contrast(gradient: colorous::Gradient) -> Palette {
         })
         .collect();
 
-    Palette::Stretched(lut)
+    Palette::Lut(lut)
+}
+
+/// Builds a palette lookup table by sampling an RGB function of `t` in
+/// [0, 1]. Channel values outside [0, 1] are clamped.
+fn palette_from_fn(rgb_at: impl Fn(f64) -> [f64; 3]) -> Palette {
+    let channel = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let lut = (0..PALETTE_LUT_SIZE)
+        .map(|i| {
+            let rgb = rgb_at(i as f64 / (PALETTE_LUT_SIZE - 1) as f64);
+            colorous::Color {
+                r: channel(rgb[0]),
+                g: channel(rgb[1]),
+                b: channel(rgb[2]),
+            }
+        })
+        .collect();
+    Palette::Lut(lut)
+}
+
+/// MATLAB's classic "jet" colormap: dark blue -> cyan -> yellow -> dark
+/// red. The palette turbo was designed to replace; kept here for its vivid,
+/// high-local-contrast fractal look.
+fn jet_color(t: f64) -> [f64; 3] {
+    [
+        1.5 - (4.0 * t - 3.0).abs(),
+        1.5 - (4.0 * t - 2.0).abs(),
+        1.5 - (4.0 * t - 1.0).abs(),
+    ]
+}
+
+/// gnuplot's default pm3d palette: black -> blue -> violet -> red ->
+/// yellow. True black at one end with a full rainbow-like sweep, unlike
+/// anything in colorous.
+fn gnuplot_color(t: f64) -> [f64; 3] {
+    [t.sqrt(), t * t * t, (2.0 * std::f64::consts::PI * t).sin()]
+}
+
+/// matplotlib's "nipy_spectral" colormap (BSD-licensed control points):
+/// black -> violet -> blue -> green -> yellow -> red -> grey. Spans nearly
+/// the full lightness range with the strongest local contrast of any
+/// palette here — filigree detail renders especially crisply.
+fn nipy_spectral_color(t: f64) -> [f64; 3] {
+    const POINTS: &[(f64, [f64; 3])] = &[
+        (0.00, [0.0, 0.0, 0.0]),
+        (0.05, [0.4667, 0.0, 0.5333]),
+        (0.10, [0.5333, 0.0, 0.6]),
+        (0.15, [0.0, 0.0, 0.6667]),
+        (0.20, [0.0, 0.0, 0.8667]),
+        (0.25, [0.0, 0.4667, 0.8667]),
+        (0.30, [0.0, 0.6, 0.8667]),
+        (0.35, [0.0, 0.6667, 0.6667]),
+        (0.40, [0.0, 0.6667, 0.5333]),
+        (0.45, [0.0, 0.6, 0.0]),
+        (0.50, [0.0, 0.7333, 0.0]),
+        (0.55, [0.0, 0.8667, 0.0]),
+        (0.60, [0.0, 1.0, 0.0]),
+        (0.65, [0.7333, 1.0, 0.0]),
+        (0.70, [0.9333, 0.9333, 0.0]),
+        (0.75, [1.0, 0.8, 0.0]),
+        (0.80, [1.0, 0.6, 0.0]),
+        (0.85, [1.0, 0.0, 0.0]),
+        (0.90, [0.8667, 0.0, 0.0]),
+        (0.95, [0.8, 0.0, 0.0]),
+        (1.00, [0.8, 0.8, 0.8]),
+    ];
+
+    let t = t.clamp(0.0, 1.0);
+    let next = POINTS
+        .partition_point(|&(x, _)| x <= t)
+        .min(POINTS.len() - 1);
+    if next == 0 {
+        return POINTS[0].1;
+    }
+    let (x0, from) = POINTS[next - 1];
+    let (x1, to) = POINTS[next];
+    let fraction = if x1 > x0 { (t - x0) / (x1 - x0) } else { 0.0 };
+    [
+        from[0] + (to[0] - from[0]) * fraction,
+        from[1] + (to[1] - from[1]) * fraction,
+        from[2] + (to[2] - from[2]) * fraction,
+    ]
 }
 
 // In both palette maps below, palettes that already span (nearly) the full
@@ -249,6 +355,13 @@ static COLOR_PALETTES: Lazy<HashMap<String, Palette>> = Lazy::new(|| {
     map.insert("turbo".to_string(), Original(colorous::TURBO));
     map.insert("viridis".to_string(), Original(colorous::VIRIDIS));
 
+    map.insert("jet".to_string(), palette_from_fn(jet_color));
+    map.insert("gnuplot".to_string(), palette_from_fn(gnuplot_color));
+    map.insert(
+        "nipySpectral".to_string(),
+        palette_from_fn(nipy_spectral_color),
+    );
+
     map.insert(
         "brownGreen".to_string(),
         stretch_palette_contrast(colorous::BROWN_GREEN),
@@ -264,7 +377,7 @@ static COLOR_PALETTES: Lazy<HashMap<String, Palette>> = Lazy::new(|| {
     );
     map.insert(
         "rainbow".to_string(),
-        stretch_palette_contrast(colorous::RAINBOW),
+        stretch_cyclic_palette_contrast(colorous::RAINBOW),
     );
     map.insert(
         "redBlue".to_string(),
@@ -284,7 +397,7 @@ static COLOR_PALETTES: Lazy<HashMap<String, Palette>> = Lazy::new(|| {
     );
     map.insert(
         "sinebow".to_string(),
-        stretch_palette_contrast(colorous::SINEBOW),
+        stretch_cyclic_palette_contrast(colorous::SINEBOW),
     );
     map.insert(
         "spectral".to_string(),
