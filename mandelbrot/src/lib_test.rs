@@ -569,7 +569,7 @@ mod lib_test {
 
     #[test]
     fn test_compute_pixel_color() {
-        let palette = &colorous::TURBO;
+        let palette = &super::Palette::Original(colorous::TURBO);
         let color_space = super::ValidColorSpace::Hsl;
 
         // Test point in set
@@ -622,7 +622,7 @@ mod lib_test {
         let exponent = 2;
         let image_width = 10;
         let image_height = 10;
-        let palette = &colorous::TURBO;
+        let palette = &super::Palette::Original(colorous::TURBO);
         let should_reverse_colors = false;
         let color_space = ValidColorSpace::Hsl;
         let shift_hue_amount = 0.0;
@@ -722,7 +722,7 @@ mod lib_test {
 
     #[test]
     fn test_palette_min_iter() {
-        let palette = &colorous::TURBO;
+        let palette = &super::Palette::Original(colorous::TURBO);
         let color_space = super::ValidColorSpace::Hsl;
         let max_iterations = 100;
         let exponent = 2;
@@ -781,7 +781,7 @@ mod lib_test {
 
     #[test]
     fn test_palette_max_iter() {
-        let palette = &colorous::TURBO;
+        let palette = &super::Palette::Original(colorous::TURBO);
         let color_space = super::ValidColorSpace::Hsl;
         let max_iterations = 100;
         let exponent = 2;
@@ -846,7 +846,7 @@ mod lib_test {
 
     #[test]
     fn test_equal_min_max_iter() {
-        let palette = &colorous::TURBO;
+        let palette = &super::Palette::Original(colorous::TURBO);
         let color_space = super::ValidColorSpace::Hsl;
         let max_iterations = 100;
         let exponent = 2;
@@ -905,7 +905,7 @@ mod lib_test {
 
     #[test]
     fn test_palette_range() {
-        let palette = &colorous::TURBO;
+        let palette = &super::Palette::Original(colorous::TURBO);
         let color_space = super::ValidColorSpace::Hsl;
         let max_iterations = 100;
         let exponent = 2;
@@ -1033,7 +1033,7 @@ mod lib_test {
 
     #[test]
     fn test_palette_range_ordering() {
-        let palette = &colorous::TURBO;
+        let palette = &super::Palette::Original(colorous::TURBO);
         let color_space = super::ValidColorSpace::Hsl;
         let max_iterations = 100;
         let exponent = 2;
@@ -1093,7 +1093,7 @@ mod lib_test {
 
     #[test]
     fn test_palette_min_max_with_smooth_coloring() {
-        let palette = &colorous::TURBO;
+        let palette = &super::Palette::Original(colorous::TURBO);
         let color_space = super::ValidColorSpace::Hsl;
         let max_iterations = 100;
         let exponent = 2;
@@ -1165,7 +1165,7 @@ mod lib_test {
 
     #[test]
     fn test_varying_palette_min_max() {
-        let palette = &colorous::TURBO;
+        let palette = &super::Palette::Original(colorous::TURBO);
         let color_space = super::ValidColorSpace::Hsl;
         let max_iterations = 100;
         let exponent = 2;
@@ -1291,6 +1291,51 @@ mod lib_test {
     }
 
     #[test]
+    fn test_palettes_span_wide_lightness_range() {
+        use palette::{FromColor, Okhsl, Srgb};
+
+        for name in super::COLOR_PALETTES
+            .keys()
+            .chain(super::REVERSE_COLOR_PALETTES.keys())
+        {
+            let (palette, _, _) = super::get_color_palette(name, false);
+            let (min, max) = (0..=255)
+                .map(|i| {
+                    let color = palette.eval_continuous(f64::from(i) / 255.0);
+                    Okhsl::from_color(Srgb::new(
+                        f32::from(color.r) / 255.0,
+                        f32::from(color.g) / 255.0,
+                        f32::from(color.b) / 255.0,
+                    ))
+                    .lightness
+                })
+                .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), l| {
+                    (min.min(l), max.max(l))
+                });
+
+            // Guards against palettes washing out fractal detail: before the
+            // contrast stretch (see `stretch_palette_contrast`) some palettes
+            // spanned barely half the lightness range.
+            assert!(
+                max - min >= 0.65,
+                "palette {name} spans too little lightness: {min} to {max}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_cyclical_palettes_wrap_seamlessly() {
+        for name in ["rainbow", "sinebow"] {
+            let (palette, _, _) = super::get_color_palette(name, false);
+            assert_eq!(
+                palette.eval_continuous(0.0).as_array(),
+                palette.eval_continuous(1.0).as_array(),
+                "cyclical palette {name} endpoints diverged"
+            );
+        }
+    }
+
+    #[test]
     fn test_apply_color_cycles() {
         // One cycle is the identity, cyclic or not
         assert_eq!(super::apply_color_cycles(0.75, 1, false), 0.75);
@@ -1407,7 +1452,7 @@ mod lib_test {
 
     #[test]
     fn test_compute_pixel_color_edge_cases() {
-        let palette = &colorous::TURBO;
+        let palette = &super::Palette::Original(colorous::TURBO);
         let color_space = super::ValidColorSpace::Hsl;
 
         // Test NaN/Infinity inputs (should not panic)
@@ -1657,7 +1702,7 @@ mod lib_test {
 
     #[test]
     fn test_negative_palette_min_iter() {
-        let palette = &colorous::TURBO;
+        let palette = &super::Palette::Original(colorous::TURBO);
         let color_space = super::ValidColorSpace::Hsl;
         let max_iterations = 100;
         let exponent = 2;
@@ -1725,7 +1770,7 @@ mod lib_test {
 
     #[test]
     fn test_negative_palette_max_iter() {
-        let palette = &colorous::TURBO;
+        let palette = &super::Palette::Original(colorous::TURBO);
         let color_space = super::ValidColorSpace::Hsl;
         let max_iterations = 100;
         let exponent = 2;
@@ -1769,7 +1814,7 @@ mod lib_test {
 
     #[test]
     fn test_zero_palette_values() {
-        let palette = &colorous::TURBO;
+        let palette = &super::Palette::Original(colorous::TURBO);
         let color_space = super::ValidColorSpace::Hsl;
         let max_iterations = 100;
         let exponent = 2;

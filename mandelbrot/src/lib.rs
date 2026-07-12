@@ -143,51 +143,218 @@ impl RenderedTile {
 
 const NUM_COLOR_CHANNELS: usize = 4;
 
-static COLOR_PALETTES: Lazy<HashMap<String, colorous::Gradient>> = Lazy::new(|| {
+/// Number of colors sampled into a contrast-stretched palette's lookup
+/// table. Matches the 256-sample resolution of colorous's own schemes, so
+/// linear interpolation between entries stays visually seamless.
+const PALETTE_LUT_SIZE: usize = 256;
+
+/// Okhsl lightness bounds for contrast-stretched palettes, chosen to
+/// approximate the palettes that render fractal detail well (inferno,
+/// magma): near-black at one end, near-white at the other.
+const STRETCHED_LIGHTNESS_MIN: f32 = 0.05;
+const STRETCHED_LIGHTNESS_MAX: f32 = 0.97;
+
+/// A color palette the renderer can sample continuously: either a colorous
+/// gradient used as-is, or a lookup table derived from one by
+/// `stretch_palette_contrast`.
+enum Palette {
+    Original(colorous::Gradient),
+    Stretched(Vec<colorous::Color>),
+}
+
+impl Palette {
+    /// Returns the color at position `t` in [0, 1], like
+    /// `colorous::Gradient::eval_continuous`.
+    fn eval_continuous(&self, t: f64) -> colorous::Color {
+        match self {
+            Palette::Original(gradient) => gradient.eval_continuous(t),
+            Palette::Stretched(lut) => {
+                let position = t.clamp(0.0, 1.0) * (lut.len() - 1) as f64;
+                let index = position as usize;
+                let next_index = (index + 1).min(lut.len() - 1);
+                let fraction = position - index as f64;
+                let lerp = |a: u8, b: u8| {
+                    (f64::from(a) + (f64::from(b) - f64::from(a)) * fraction).round() as u8
+                };
+                let (from, to) = (lut[index], lut[next_index]);
+                colorous::Color {
+                    r: lerp(from.r, to.r),
+                    g: lerp(from.g, to.g),
+                    b: lerp(from.b, to.b),
+                }
+            }
+        }
+    }
+}
+
+/// Rebuilds a colorous gradient with its Okhsl lightness range linearly
+/// stretched to [`STRETCHED_LIGHTNESS_MIN`, `STRETCHED_LIGHTNESS_MAX`],
+/// keeping hue and saturation.
+///
+/// Most of the d3 palettes were designed for choropleth maps and span too
+/// narrow a lightness range for fractal shading — filigree detail gets lost
+/// as pale-on-pale — so this remap gives them the same near-black-to-near-
+/// white contrast as inferno or magma while preserving each palette's color
+/// identity. Because the remap is a pointwise function of color, palettes
+/// whose endpoints match (rainbow, sinebow) stay seamlessly cyclical.
+fn stretch_palette_contrast(gradient: colorous::Gradient) -> Palette {
+    let samples: Vec<Okhsl> = (0..PALETTE_LUT_SIZE)
+        .map(|i| {
+            let color = gradient.eval_continuous(i as f64 / (PALETTE_LUT_SIZE - 1) as f64);
+            Okhsl::from_color(Srgb::new(
+                f32::from(color.r) / 255.0,
+                f32::from(color.g) / 255.0,
+                f32::from(color.b) / 255.0,
+            ))
+        })
+        .collect();
+
+    let (min_lightness, max_lightness) = samples
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), color| {
+            (min.min(color.lightness), max.max(color.lightness))
+        });
+    let native_range = (max_lightness - min_lightness).max(f32::EPSILON);
+    let target_range = STRETCHED_LIGHTNESS_MAX - STRETCHED_LIGHTNESS_MIN;
+
+    let lut = samples
+        .into_iter()
+        .map(|mut okhsl| {
+            okhsl.lightness = STRETCHED_LIGHTNESS_MIN
+                + (okhsl.lightness - min_lightness) / native_range * target_range;
+            let rgb: Srgb = okhsl.into_color();
+            colorous::Color {
+                r: (rgb.red * 255.0).round() as u8,
+                g: (rgb.green * 255.0).round() as u8,
+                b: (rgb.blue * 255.0).round() as u8,
+            }
+        })
+        .collect();
+
+    Palette::Stretched(lut)
+}
+
+// In both palette maps below, palettes that already span (nearly) the full
+// lightness range — the scientific colormaps plus greys — keep their
+// canonical colors; the rest are contrast-stretched (see
+// `stretch_palette_contrast`).
+static COLOR_PALETTES: Lazy<HashMap<String, Palette>> = Lazy::new(|| {
+    use Palette::Original;
     let mut map = HashMap::new();
-    map.insert("brownGreen".to_string(), colorous::BROWN_GREEN);
-    map.insert("cividis".to_string(), colorous::CIVIDIS);
-    map.insert("cool".to_string(), colorous::COOL);
-    map.insert("cubehelix".to_string(), colorous::CUBEHELIX);
-    map.insert("inferno".to_string(), colorous::INFERNO);
-    map.insert("magma".to_string(), colorous::MAGMA);
-    map.insert("plasma".to_string(), colorous::PLASMA);
-    map.insert("purpleGreen".to_string(), colorous::PURPLE_GREEN);
-    map.insert("purpleOrange".to_string(), colorous::PURPLE_ORANGE);
-    map.insert("rainbow".to_string(), colorous::RAINBOW);
-    map.insert("redBlue".to_string(), colorous::RED_BLUE);
-    map.insert("redGrey".to_string(), colorous::RED_GREY);
-    map.insert("redYellowBlue".to_string(), colorous::RED_YELLOW_BLUE);
-    map.insert("redYellowGreen".to_string(), colorous::RED_YELLOW_GREEN);
-    map.insert("sinebow".to_string(), colorous::SINEBOW);
-    map.insert("spectral".to_string(), colorous::SPECTRAL);
-    map.insert("turbo".to_string(), colorous::TURBO);
-    map.insert("viridis".to_string(), colorous::VIRIDIS);
-    map.insert("warm".to_string(), colorous::WARM);
+    map.insert("cividis".to_string(), Original(colorous::CIVIDIS));
+    map.insert("cubehelix".to_string(), Original(colorous::CUBEHELIX));
+    map.insert("inferno".to_string(), Original(colorous::INFERNO));
+    map.insert("magma".to_string(), Original(colorous::MAGMA));
+    map.insert("plasma".to_string(), Original(colorous::PLASMA));
+    map.insert("turbo".to_string(), Original(colorous::TURBO));
+    map.insert("viridis".to_string(), Original(colorous::VIRIDIS));
+
+    map.insert(
+        "brownGreen".to_string(),
+        stretch_palette_contrast(colorous::BROWN_GREEN),
+    );
+    map.insert("cool".to_string(), stretch_palette_contrast(colorous::COOL));
+    map.insert(
+        "purpleGreen".to_string(),
+        stretch_palette_contrast(colorous::PURPLE_GREEN),
+    );
+    map.insert(
+        "purpleOrange".to_string(),
+        stretch_palette_contrast(colorous::PURPLE_ORANGE),
+    );
+    map.insert(
+        "rainbow".to_string(),
+        stretch_palette_contrast(colorous::RAINBOW),
+    );
+    map.insert(
+        "redBlue".to_string(),
+        stretch_palette_contrast(colorous::RED_BLUE),
+    );
+    map.insert(
+        "redGrey".to_string(),
+        stretch_palette_contrast(colorous::RED_GREY),
+    );
+    map.insert(
+        "redYellowBlue".to_string(),
+        stretch_palette_contrast(colorous::RED_YELLOW_BLUE),
+    );
+    map.insert(
+        "redYellowGreen".to_string(),
+        stretch_palette_contrast(colorous::RED_YELLOW_GREEN),
+    );
+    map.insert(
+        "sinebow".to_string(),
+        stretch_palette_contrast(colorous::SINEBOW),
+    );
+    map.insert(
+        "spectral".to_string(),
+        stretch_palette_contrast(colorous::SPECTRAL),
+    );
+    map.insert("warm".to_string(), stretch_palette_contrast(colorous::WARM));
     map.insert(
         "yellowOrangeBrown".to_string(),
-        colorous::YELLOW_ORANGE_BROWN,
+        stretch_palette_contrast(colorous::YELLOW_ORANGE_BROWN),
     );
     map
 });
 
-static REVERSE_COLOR_PALETTES: Lazy<HashMap<String, colorous::Gradient>> = Lazy::new(|| {
+static REVERSE_COLOR_PALETTES: Lazy<HashMap<String, Palette>> = Lazy::new(|| {
     let mut map = HashMap::new();
-    map.insert("blues".to_string(), colorous::BLUES);
-    map.insert("greenBlue".to_string(), colorous::GREEN_BLUE);
-    map.insert("greens".to_string(), colorous::GREENS);
-    map.insert("greys".to_string(), colorous::GREYS);
-    map.insert("orangeRed".to_string(), colorous::ORANGE_RED);
-    map.insert("oranges".to_string(), colorous::ORANGES);
-    map.insert("pinkGreen".to_string(), colorous::PINK_GREEN);
-    map.insert("purpleBlueGreen".to_string(), colorous::PURPLE_BLUE_GREEN);
-    map.insert("purpleRed".to_string(), colorous::PURPLE_RED);
-    map.insert("purples".to_string(), colorous::PURPLES);
-    map.insert("redPurple".to_string(), colorous::RED_PURPLE);
-    map.insert("reds".to_string(), colorous::REDS);
-    map.insert("yellowGreen".to_string(), colorous::YELLOW_GREEN);
-    map.insert("yellowGreenBlue".to_string(), colorous::YELLOW_GREEN_BLUE);
-    map.insert("yellowOrangeRed".to_string(), colorous::YELLOW_ORANGE_RED);
+    map.insert("greys".to_string(), Palette::Original(colorous::GREYS));
+
+    map.insert(
+        "blues".to_string(),
+        stretch_palette_contrast(colorous::BLUES),
+    );
+    map.insert(
+        "greenBlue".to_string(),
+        stretch_palette_contrast(colorous::GREEN_BLUE),
+    );
+    map.insert(
+        "greens".to_string(),
+        stretch_palette_contrast(colorous::GREENS),
+    );
+    map.insert(
+        "orangeRed".to_string(),
+        stretch_palette_contrast(colorous::ORANGE_RED),
+    );
+    map.insert(
+        "oranges".to_string(),
+        stretch_palette_contrast(colorous::ORANGES),
+    );
+    map.insert(
+        "pinkGreen".to_string(),
+        stretch_palette_contrast(colorous::PINK_GREEN),
+    );
+    map.insert(
+        "purpleBlueGreen".to_string(),
+        stretch_palette_contrast(colorous::PURPLE_BLUE_GREEN),
+    );
+    map.insert(
+        "purpleRed".to_string(),
+        stretch_palette_contrast(colorous::PURPLE_RED),
+    );
+    map.insert(
+        "purples".to_string(),
+        stretch_palette_contrast(colorous::PURPLES),
+    );
+    map.insert(
+        "redPurple".to_string(),
+        stretch_palette_contrast(colorous::RED_PURPLE),
+    );
+    map.insert("reds".to_string(), stretch_palette_contrast(colorous::REDS));
+    map.insert(
+        "yellowGreen".to_string(),
+        stretch_palette_contrast(colorous::YELLOW_GREEN),
+    );
+    map.insert(
+        "yellowGreenBlue".to_string(),
+        stretch_palette_contrast(colorous::YELLOW_GREEN_BLUE),
+    );
+    map.insert(
+        "yellowOrangeRed".to_string(),
+        stretch_palette_contrast(colorous::YELLOW_ORANGE_RED),
+    );
 
     map
 });
@@ -1899,14 +2066,13 @@ pub fn transform_color(
 /// A tuple containing the selected color palette, whether the colors should
 /// be reversed, and whether the palette is cyclical (starts and ends on the
 /// same color, so repeats of it tile seamlessly).
-fn get_color_palette(
-    color_scheme: &str,
-    reverse_colors: bool,
-) -> (&'static colorous::Gradient, bool, bool) {
+fn get_color_palette(color_scheme: &str, reverse_colors: bool) -> (&'static Palette, bool, bool) {
+    static FALLBACK_PALETTE: Lazy<Palette> = Lazy::new(|| Palette::Original(colorous::TURBO));
+
     let palette = COLOR_PALETTES
         .get(color_scheme)
         .or_else(|| REVERSE_COLOR_PALETTES.get(color_scheme))
-        .unwrap_or(&colorous::TURBO);
+        .unwrap_or_else(|| &FALLBACK_PALETTE);
 
     let should_reverse_colors = if REVERSE_COLOR_PALETTES.contains_key(color_scheme) {
         !reverse_colors
@@ -1969,7 +2135,7 @@ fn compute_pixel_color(
     im: f64,
     max_iterations: u32,
     exponent: u32,
-    palette: &colorous::Gradient,
+    palette: &Palette,
     should_reverse_colors: bool,
     color_space: &ValidColorSpace,
     shift_hue_amount: f32,
@@ -2030,7 +2196,7 @@ fn smoothed_escape_value(
 /// Non-finite values mark interior pixels and map to black.
 fn color_from_smoothed_value(
     smoothed_value: f64,
-    palette: &colorous::Gradient,
+    palette: &Palette,
     should_reverse_colors: bool,
     palette_is_cyclic: bool,
     color_cycles: u32,
@@ -2082,7 +2248,7 @@ fn color_from_escape_result(
     z: Complex64,
     max_iterations: u32,
     exponent: u32,
-    palette: &colorous::Gradient,
+    palette: &Palette,
     should_reverse_colors: bool,
     color_space: &ValidColorSpace,
     shift_hue_amount: f32,
@@ -2144,7 +2310,7 @@ fn render_mandelbrot_set(
     exponent: u32,
     image_width: usize,
     image_height: usize,
-    palette: &colorous::Gradient,
+    palette: &Palette,
     should_reverse_colors: bool,
     palette_is_cyclic: bool,
     color_cycles: u32,
