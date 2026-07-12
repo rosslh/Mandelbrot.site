@@ -1896,11 +1896,13 @@ pub fn transform_color(
 /// - `reverse_colors`: Whether to reverse the colors of the color scheme.
 ///
 /// # Returns
-/// A tuple containing the selected color palette and whether the colors should be reversed.
+/// A tuple containing the selected color palette, whether the colors should
+/// be reversed, and whether the palette is cyclical (starts and ends on the
+/// same color, so repeats of it tile seamlessly).
 fn get_color_palette(
     color_scheme: &str,
     reverse_colors: bool,
-) -> (&'static colorous::Gradient, bool) {
+) -> (&'static colorous::Gradient, bool, bool) {
     let palette = COLOR_PALETTES
         .get(color_scheme)
         .or_else(|| REVERSE_COLOR_PALETTES.get(color_scheme))
@@ -1912,7 +1914,32 @@ fn get_color_palette(
         reverse_colors
     };
 
-    (palette, should_reverse_colors)
+    let is_cyclic = matches!(color_scheme, "rainbow" | "sinebow");
+
+    (palette, should_reverse_colors, is_cyclic)
+}
+
+/// Remaps a normalized gradient position so the palette repeats
+/// `color_cycles` times across the [0, 1] range. Cyclical palettes wrap
+/// (their endpoints already match); non-cyclical ones boomerang, alternating
+/// forward and backward passes so consecutive repetitions join without a
+/// seam.
+fn apply_color_cycles(norm: f64, color_cycles: u32, palette_is_cyclic: bool) -> f64 {
+    if color_cycles <= 1 {
+        return norm;
+    }
+
+    let scaled = norm * f64::from(color_cycles);
+    if palette_is_cyclic {
+        scaled.fract()
+    } else {
+        let phase = scaled % 2.0;
+        if phase <= 1.0 {
+            phase
+        } else {
+            2.0 - phase
+        }
+    }
 }
 
 /// Calculates the color for a given point in the Mandelbrot set.
@@ -2005,6 +2032,8 @@ fn color_from_smoothed_value(
     smoothed_value: f64,
     palette: &colorous::Gradient,
     should_reverse_colors: bool,
+    palette_is_cyclic: bool,
+    color_cycles: u32,
     color_space: &ValidColorSpace,
     shift_hue_amount: f32,
     saturate_amount: f32,
@@ -2025,6 +2054,8 @@ fn color_from_smoothed_value(
         (smoothed_value - min_iterations_threshold)
             / (max_iterations_threshold - min_iterations_threshold)
     };
+
+    norm = apply_color_cycles(norm, color_cycles, palette_is_cyclic);
 
     if should_reverse_colors {
         norm = 1.0 - norm;
@@ -2071,6 +2102,8 @@ fn color_from_escape_result(
         ),
         palette,
         should_reverse_colors,
+        false,
+        1,
         color_space,
         shift_hue_amount,
         saturate_amount,
@@ -2091,6 +2124,8 @@ fn color_from_escape_result(
 /// - `image_height`: The height of the image, in pixels.
 /// - `palette`: The color palette to use.
 /// - `should_reverse_colors`: Whether to reverse the colors of the color scheme.
+/// - `palette_is_cyclic`: Whether the palette's endpoints match (see `apply_color_cycles`).
+/// - `color_cycles`: How many times the palette repeats across the palette range.
 /// - `color_space`: The color space to use for color transformations.
 /// - `shift_hue_amount`: The amount to shift the hue by.
 /// - `saturate_amount`: The amount to saturate the color by.
@@ -2111,6 +2146,8 @@ fn render_mandelbrot_set(
     image_height: usize,
     palette: &colorous::Gradient,
     should_reverse_colors: bool,
+    palette_is_cyclic: bool,
+    color_cycles: u32,
     color_space: &ValidColorSpace,
     shift_hue_amount: f32,
     saturate_amount: f32,
@@ -2151,6 +2188,8 @@ fn render_mandelbrot_set(
             smoothed_value,
             palette,
             should_reverse_colors,
+            palette_is_cyclic,
+            color_cycles,
             color_space,
             shift_hue_amount,
             saturate_amount,
@@ -2265,8 +2304,10 @@ fn generate_mandelbrot_set_image(
     smooth_coloring: bool,
     palette_min_iter: i32,
     palette_max_iter: i32,
+    color_cycles: u32,
 ) -> RenderedTile {
-    let (palette, should_reverse_colors) = get_color_palette(color_scheme, reverse_colors);
+    let (palette, should_reverse_colors, palette_is_cyclic) =
+        get_color_palette(color_scheme, reverse_colors);
 
     let re_range = linspace(re_min, re_max, image_width);
     let im_range = linspace(im_max, im_min, image_height);
@@ -2284,6 +2325,8 @@ fn generate_mandelbrot_set_image(
         image_height,
         palette,
         should_reverse_colors,
+        palette_is_cyclic,
+        color_cycles,
         &color_space,
         shift_hue_amount,
         saturate_amount,
@@ -2332,6 +2375,9 @@ pub fn get_mandelbrot_set_image(
         smooth_coloring,
         palette_min_iter,
         palette_max_iter,
+        // Signature predates the color-cycles control; a single palette pass
+        // matches its historical output.
+        1,
     )
     .image
 }
@@ -2368,6 +2414,7 @@ fn render_tile_precise(
     smooth_coloring: bool,
     palette_min_iter: i32,
     palette_max_iter: i32,
+    color_cycles: u32,
 ) -> RenderedTile {
     let effective_zoom = tile_zoom as i64 + zoom_offset as i64;
 
@@ -2410,6 +2457,7 @@ fn render_tile_precise(
             smooth_coloring,
             palette_min_iter,
             palette_max_iter,
+            color_cycles,
         );
     }
 
@@ -2436,7 +2484,8 @@ fn render_tile_precise(
         return RenderedTile::solid_black(image_width, image_height);
     }
 
-    let (palette, should_reverse_colors) = get_color_palette(color_scheme, reverse_colors);
+    let (palette, should_reverse_colors, palette_is_cyclic) =
+        get_color_palette(color_scheme, reverse_colors);
 
     let min_iterations_threshold = f64::from(palette_min_iter);
     let max_iterations_threshold =
@@ -2464,6 +2513,8 @@ fn render_tile_precise(
             smoothed_value,
             palette,
             should_reverse_colors,
+            palette_is_cyclic,
+            color_cycles,
             &color_space,
             shift_hue_amount,
             saturate_amount,
@@ -2538,6 +2589,9 @@ pub fn get_mandelbrot_image_precise(
         smooth_coloring,
         palette_min_iter,
         palette_max_iter,
+        // Frozen signature (bench harness): predates the color-cycles
+        // control, so it renders a single palette pass.
+        1,
     )
     .image
 }
@@ -2591,6 +2645,10 @@ pub fn get_mandelbrot_tile_precise(
     palette_min_iter: i32,
     palette_max_iter: i32,
     include_values: bool,
+    // Trailing and optional so the bench harness, which spreads recorded
+    // positional args and appends `include_values`, keeps working against
+    // both this build and archived ones. Omitted or 0 means a single pass.
+    color_cycles: Option<u32>,
 ) -> MandelbrotTile {
     let rendered = render_tile_precise(
         &origin_re,
@@ -2614,6 +2672,7 @@ pub fn get_mandelbrot_tile_precise(
         smooth_coloring,
         palette_min_iter,
         palette_max_iter,
+        color_cycles.unwrap_or(1).max(1),
     );
 
     let (min_iter, max_iter) = match rendered.stats.range {
@@ -2650,8 +2709,11 @@ pub fn recolor_tile(
     color_space: ValidColorSpace,
     palette_min_iter: i32,
     palette_max_iter: i32,
+    color_cycles: u32,
 ) -> Vec<u8> {
-    let (palette, should_reverse_colors) = get_color_palette(&color_scheme, reverse_colors);
+    let (palette, should_reverse_colors, palette_is_cyclic) =
+        get_color_palette(&color_scheme, reverse_colors);
+    let color_cycles = color_cycles.max(1);
 
     let min_iterations_threshold = f64::from(palette_min_iter);
     let max_iterations_threshold =
@@ -2664,6 +2726,8 @@ pub fn recolor_tile(
             f64::from(value),
             palette,
             should_reverse_colors,
+            palette_is_cyclic,
+            color_cycles,
             &color_space,
             shift_hue_amount,
             saturate_amount,

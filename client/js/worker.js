@@ -62,6 +62,7 @@ const supportsRelaxedSimd = WebAssembly.validate(
         params.paletteMinIter,
         params.paletteMaxIter,
         params.includeValues,
+        params.colorCycles,
       );
 
     // Renders a throwaway view twice to consume V8's wasm tier-up budget;
@@ -72,6 +73,7 @@ const supportsRelaxedSimd = WebAssembly.validate(
         for (let i = 0; i < 2; i++) {
           computeTile({
             colorScheme: "turbo",
+            colorCycles: 1,
             reverseColors: false,
             shiftHueAmount: 0,
             saturateAmount: 0,
@@ -228,6 +230,7 @@ const supportsRelaxedSimd = WebAssembly.validate(
         params.colorSpace,
         params.paletteMinIter,
         params.paletteMaxIter,
+        params.colorCycles,
       );
 
     const optimiseImage = async (payload) => {

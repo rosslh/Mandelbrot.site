@@ -8,7 +8,13 @@ import { describeZoomScale } from "./zoomScale";
 import * as api from "./api";
 
 type NumberInput = {
-  id: "iterations" | "exponent" | "zoom" | "paletteMinIter" | "paletteMaxIter";
+  id:
+    | "iterations"
+    | "exponent"
+    | "zoom"
+    | "paletteMinIter"
+    | "paletteMaxIter"
+    | "colorCycles";
   minValue: number;
   maxValue: number;
   resetView?: boolean;
@@ -65,7 +71,12 @@ class MandelbrotControls {
       },
       {
         buttonId: "resetColorScheme",
-        configKeys: ["colorScheme", "reverseColors", "smoothColoring"],
+        configKeys: [
+          "colorScheme",
+          "colorCycles",
+          "reverseColors",
+          "smoothColoring",
+        ],
         apply: (changedKeys) => {
           // Smooth coloring is baked into the cached escape values, so
           // resetting it needs a re-render; the other keys only recolor.
@@ -238,6 +249,12 @@ class MandelbrotControls {
         maxValue: 10 ** 9,
         allowFraction: false,
       },
+      {
+        id: "colorCycles",
+        minValue: 1,
+        maxValue: 100,
+        allowFraction: false,
+      },
     ];
 
     numberInputs.forEach((input) => this.handleNumberInput(input));
@@ -335,9 +352,13 @@ class MandelbrotControls {
       }
 
       this.updateResetButtonsVisibility();
-      if (id === "paletteMinIter" || id === "paletteMaxIter") {
-        // The palette range only affects coloring, not escape values:
-        // repaint the tiles in place instead of re-rendering.
+      if (
+        id === "paletteMinIter" ||
+        id === "paletteMaxIter" ||
+        id === "colorCycles"
+      ) {
+        // The palette range and cycle count only affect coloring, not escape
+        // values: repaint the tiles in place instead of re-rendering.
         this.map.applyColorSettings();
       } else {
         this.map.refresh(resetView);
@@ -658,6 +679,7 @@ class MandelbrotControls {
       iterations: i,
       exponent: e,
       colorScheme: c,
+      colorCycles: cc,
       reverseColors: r,
       shiftHueAmount: h,
       saturateAmount: s,
@@ -677,6 +699,7 @@ class MandelbrotControls {
       i,
       e,
       c,
+      cc,
       r,
       h,
       s,

@@ -34,6 +34,7 @@ export type WasmRequestPayload = {
   imageWidth: number;
   imageHeight: number;
   colorScheme: string;
+  colorCycles: number;
   reverseColors: boolean;
   lightenAmount: number;
   saturateAmount: number;
@@ -83,6 +84,7 @@ class MandelbrotLayer extends L.GridLayer {
       imageWidth,
       imageHeight,
       colorScheme: this._map.config.colorScheme,
+      colorCycles: this._map.config.colorCycles,
       reverseColors: this._map.config.reverseColors,
       lightenAmount: this._map.config.lightenAmount,
       saturateAmount: this._map.config.saturateAmount,

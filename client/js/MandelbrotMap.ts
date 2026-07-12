@@ -15,6 +15,9 @@ export type MandelbrotConfig = {
   iterations: number;
   exponent: number;
   colorScheme: string;
+  // How many times the palette repeats across the palette range; cyclical
+  // palettes wrap, others boomerang (alternate direction) to stay seamless.
+  colorCycles: number;
   lightenAmount: number;
   saturateAmount: number;
   shiftHueAmount: number;
@@ -46,6 +49,7 @@ export type RecolorPayload = {
   // Per-pixel smoothed escape values captured when the tile was rendered.
   values: Float32Array;
   colorScheme: string;
+  colorCycles: number;
   reverseColors: boolean;
   shiftHueAmount: number;
   saturateAmount: number;
@@ -429,6 +433,7 @@ class MandelbrotMap extends L.Map {
           payload: {
             values: tile.values,
             colorScheme: this.config.colorScheme,
+            colorCycles: this.config.colorCycles,
             reverseColors: this.config.reverseColors,
             shiftHueAmount: this.config.shiftHueAmount,
             saturateAmount: this.config.saturateAmount,
@@ -722,6 +727,7 @@ class MandelbrotMap extends L.Map {
       iterations: i,
       exponent: e,
       colorScheme: c,
+      colorCycles: cc,
       reverseColors: r,
       shiftHueAmount: h,
       saturateAmount: s,
@@ -741,6 +747,7 @@ class MandelbrotMap extends L.Map {
       i,
       e,
       c,
+      cc,
       r,
       h,
       s,
@@ -764,6 +771,7 @@ class MandelbrotMap extends L.Map {
     const iterations = queryParams.get("i");
     const exponent = queryParams.get("e");
     const colorScheme = queryParams.get("c");
+    const colorCycles = queryParams.get("cc");
     const reverseColors = queryParams.get("r");
     const shiftHueAmount = queryParams.get("h");
     const saturateAmount = queryParams.get("s");
@@ -799,6 +807,11 @@ class MandelbrotMap extends L.Map {
         this.config.colorScheme = colorScheme;
         (document.getElementById("colorScheme") as HTMLSelectElement).value =
           colorScheme;
+      }
+      if (colorCycles) {
+        this.config.colorCycles = Math.max(1, Number(colorCycles));
+        (document.getElementById("colorCycles") as HTMLInputElement).value =
+          String(this.config.colorCycles);
       }
       if (reverseColors) {
         this.config.reverseColors = reverseColors === "true";

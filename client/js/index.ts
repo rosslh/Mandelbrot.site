@@ -136,6 +136,7 @@ window.addEventListener("load", () => {
         iterations: 200,
         exponent: 2,
         colorScheme: "turbo",
+        colorCycles: 1,
         lightenAmount: 0,
         saturateAmount: 0,
         shiftHueAmount: 0,

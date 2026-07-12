@@ -641,6 +641,8 @@ mod lib_test {
             image_height,
             palette,
             should_reverse_colors,
+            false,
+            1,
             &color_space,
             shift_hue_amount,
             saturate_amount,
@@ -1256,28 +1258,58 @@ mod lib_test {
     #[test]
     fn test_get_color_palette() {
         // Test standard palette
-        let (palette, should_reverse) = super::get_color_palette("turbo", false);
+        let (palette, should_reverse, is_cyclic) = super::get_color_palette("turbo", false);
         assert!(!should_reverse);
+        assert!(!is_cyclic);
         assert_eq!(palette.eval_continuous(0.0).as_array(), [34, 23, 27]);
 
         // Test reverse palette
-        let (_palette, should_reverse) = super::get_color_palette("turbo", true);
+        let (_palette, should_reverse, _) = super::get_color_palette("turbo", true);
         assert!(should_reverse);
 
         // Test palette from reverse set
-        let (_palette, should_reverse) = super::get_color_palette("blues", false);
+        let (_palette, should_reverse, _) = super::get_color_palette("blues", false);
         // This has different behavior than expected - blues is in REVERSE_PALETTE so should_reverse is true
         assert!(should_reverse);
 
         // Test reverse palette from reverse set
-        let (_palette, should_reverse) = super::get_color_palette("blues", true);
+        let (_palette, should_reverse, _) = super::get_color_palette("blues", true);
         // When reversing a reverse palette, it's !reverse_colors, so should be false
         assert!(!should_reverse);
 
+        // Test cyclical palettes
+        let (_palette, _, is_cyclic) = super::get_color_palette("rainbow", false);
+        assert!(is_cyclic);
+        let (_palette, _, is_cyclic) = super::get_color_palette("sinebow", false);
+        assert!(is_cyclic);
+
         // Test fallback to default palette
-        let (palette, should_reverse) = super::get_color_palette("nonexistent", false);
+        let (palette, should_reverse, is_cyclic) = super::get_color_palette("nonexistent", false);
         assert!(!should_reverse);
+        assert!(!is_cyclic);
         assert_eq!(palette.eval_continuous(0.0).as_array(), [34, 23, 27]); // turbo start color
+    }
+
+    #[test]
+    fn test_apply_color_cycles() {
+        // One cycle is the identity, cyclic or not
+        assert_eq!(super::apply_color_cycles(0.75, 1, false), 0.75);
+        assert_eq!(super::apply_color_cycles(0.75, 1, true), 0.75);
+
+        // Cyclic palettes wrap: 3 cycles tile [0,1) three times
+        assert_eq!(super::apply_color_cycles(0.0, 3, true), 0.0);
+        assert!((super::apply_color_cycles(0.5, 3, true) - 0.5).abs() < 1e-12);
+        assert!((super::apply_color_cycles(0.4, 3, true) - 0.2).abs() < 1e-12);
+        // The top of the range lands back on the (identical) start color
+        assert_eq!(super::apply_color_cycles(1.0, 3, true), 0.0);
+
+        // Non-cyclic palettes boomerang: the second pass runs backward
+        assert_eq!(super::apply_color_cycles(0.25, 2, false), 0.5);
+        assert_eq!(super::apply_color_cycles(0.5, 2, false), 1.0);
+        assert_eq!(super::apply_color_cycles(0.75, 2, false), 0.5);
+        assert_eq!(super::apply_color_cycles(1.0, 2, false), 0.0);
+        // Odd cycle counts end on the palette's far end
+        assert_eq!(super::apply_color_cycles(1.0, 3, false), 1.0);
     }
 
     #[test]
@@ -1462,7 +1494,7 @@ mod lib_test {
             "warm",
             "yellowOrangeBrown",
         ] {
-            let (palette, should_reverse) = super::get_color_palette(name, false);
+            let (palette, should_reverse, _) = super::get_color_palette(name, false);
             assert!(!should_reverse);
             assert!(palette.eval_continuous(0.0).as_array().len() == 3);
         }
@@ -1485,7 +1517,7 @@ mod lib_test {
             "yellowGreenBlue",
             "yellowOrangeRed",
         ] {
-            let (palette, should_reverse) = super::get_color_palette(name, false);
+            let (palette, should_reverse, _) = super::get_color_palette(name, false);
             assert!(should_reverse);
             assert!(palette.eval_continuous(0.0).as_array().len() == 3);
         }
@@ -1872,6 +1904,7 @@ mod lib_test {
             0,
             as_i32(max_iterations),
             true,
+            None,
         )
     }
 
@@ -1944,6 +1977,7 @@ mod lib_test {
             crate::ValidColorSpace::Hsl,
             0,
             as_i32(max_iterations),
+            1,
         );
         assert_eq!(recolored.len(), tile.image.len());
     }
@@ -1975,6 +2009,7 @@ mod lib_test {
             0,
             200,
             false,
+            None,
         );
 
         assert!(tile.values.is_empty());
@@ -2012,6 +2047,7 @@ mod lib_test {
                 palette_min,
                 palette_max,
                 true,
+                None,
             )
         };
 
@@ -2027,6 +2063,7 @@ mod lib_test {
             crate::ValidColorSpace::Hsl,
             0,
             as_i32(max_iterations),
+            1,
         );
         assert_eq!(
             recolored, tile.image,
@@ -2045,6 +2082,7 @@ mod lib_test {
             crate::ValidColorSpace::Hsl,
             tile.min_iter,
             tile.max_iter,
+            1,
         );
         let rerendered = render(tile.min_iter, tile.max_iter);
         assert_eq!(
@@ -2067,6 +2105,7 @@ mod lib_test {
             crate::ValidColorSpace::Hsl,
             0,
             200,
+            1,
         );
 
         assert_eq!(img, super::create_solid_black_image(4, 4));

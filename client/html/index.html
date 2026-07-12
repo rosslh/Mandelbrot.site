@@ -223,6 +223,22 @@
               </optgroup>
             </select>
           </div>
+          <div class="input-wrapper">
+            <label
+              for="colorCycles"
+              title="How many times the palette repeats across the palette range. Non-cyclical palettes alternate direction on each repeat so the colors stay seamless."
+              >Color cycles</label
+            >
+            <input
+              type="number"
+              id="colorCycles"
+              name="colorCycles"
+              min="1"
+              max="100"
+              step="1"
+              required
+            />
+          </div>
           <div class="checkbox-wrapper">
             <input type="checkbox" id="reverseColors" name="reverseColors" />
             <label for="reverseColors">Reverse colors</label>
