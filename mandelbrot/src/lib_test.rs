@@ -1956,6 +1956,26 @@ mod lib_test {
         )
     }
 
+    /// Default-orientation coloring settings (no transforms, Hsl space),
+    /// matching what the recolor tests previously passed positionally.
+    fn coloring_options(
+        scheme: &str,
+        palette_min: i32,
+        palette_max: i32,
+    ) -> super::ColoringOptions {
+        super::ColoringOptions {
+            color_scheme: scheme.to_string(),
+            reverse_colors: false,
+            shift_hue_amount: 0.0,
+            saturate_amount: 0.0,
+            lighten_amount: 0.0,
+            color_space: 0, // Hsl
+            palette_min_iter: palette_min,
+            palette_max_iter: palette_max,
+            color_cycles: 1,
+        }
+    }
+
     #[test]
     fn test_get_mandelbrot_tile_precise_mixed_view() {
         let max_iterations = 200;
@@ -2015,17 +2035,9 @@ mod lib_test {
 
         // Recoloring the deep-zoom tile's cached values with its own params
         // must reproduce a valid image of the same size
-        let recolored = super::recolor_tile(
+        let recolored = super::recolor_values(
             &tile.values,
-            "turbo".to_string(),
-            false,
-            0.0,
-            0.0,
-            0.0,
-            crate::ValidColorSpace::Hsl,
-            0,
-            as_i32(max_iterations),
-            1,
+            &coloring_options("turbo", 0, as_i32(max_iterations)),
         );
         assert_eq!(recolored.len(), tile.image.len());
     }
@@ -2101,17 +2113,9 @@ mod lib_test {
 
         let tile = render(0, as_i32(max_iterations));
 
-        let recolored = super::recolor_tile(
+        let recolored = super::recolor_values(
             &tile.values,
-            "inferno".to_string(),
-            false,
-            0.0,
-            0.0,
-            0.0,
-            crate::ValidColorSpace::Hsl,
-            0,
-            as_i32(max_iterations),
-            1,
+            &coloring_options("inferno", 0, as_i32(max_iterations)),
         );
         assert_eq!(
             recolored, tile.image,
@@ -2120,17 +2124,9 @@ mod lib_test {
 
         // Recoloring with the tile's own detected range must equal a fresh
         // render that used that range from the start
-        let refit = super::recolor_tile(
+        let refit = super::recolor_values(
             &tile.values,
-            "inferno".to_string(),
-            false,
-            0.0,
-            0.0,
-            0.0,
-            crate::ValidColorSpace::Hsl,
-            tile.min_iter,
-            tile.max_iter,
-            1,
+            &coloring_options("inferno", tile.min_iter, tile.max_iter),
         );
         let rerendered = render(tile.min_iter, tile.max_iter);
         assert_eq!(
@@ -2143,18 +2139,7 @@ mod lib_test {
     #[test]
     fn test_recolor_tile_interior_is_black() {
         let values = vec![f32::INFINITY; 16];
-        let img = super::recolor_tile(
-            &values,
-            "turbo".to_string(),
-            false,
-            0.0,
-            0.0,
-            0.0,
-            crate::ValidColorSpace::Hsl,
-            0,
-            200,
-            1,
-        );
+        let img = super::recolor_values(&values, &coloring_options("turbo", 0, 200));
 
         assert_eq!(img, super::create_solid_black_image(4, 4));
     }

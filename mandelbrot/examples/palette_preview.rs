@@ -3,7 +3,7 @@
 //!
 //! Usage: cargo run --release --example palette_preview -- <output_dir>
 
-use mandelbrot::{get_mandelbrot_tile_precise, recolor_tile, ValidColorSpace};
+use mandelbrot::{get_mandelbrot_tile_precise, recolor_values, ColoringOptions, ValidColorSpace};
 use rayon::prelude::*;
 
 const TILE: usize = 256;
@@ -62,17 +62,19 @@ const SCHEMES: &[&str] = &[
 /// transforms): 256 RGBA pixels across the full gradient.
 fn palette_colors(name: &str) -> Vec<u8> {
     let values: Vec<f32> = (0..256).map(|i| i as f32).collect();
-    recolor_tile(
+    recolor_values(
         &values,
-        name.to_string(),
-        false,
-        0.0,
-        0.0,
-        0.0,
-        ValidColorSpace::Hsl,
-        0,
-        255,
-        1,
+        &ColoringOptions {
+            color_scheme: name.to_string(),
+            reverse_colors: false,
+            shift_hue_amount: 0.0,
+            saturate_amount: 0.0,
+            lighten_amount: 0.0,
+            color_space: 0, // Hsl
+            palette_min_iter: 0,
+            palette_max_iter: 255,
+            color_cycles: 1,
+        },
     )
 }
 

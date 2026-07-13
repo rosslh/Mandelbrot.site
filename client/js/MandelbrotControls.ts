@@ -2,42 +2,23 @@ import debounce from "lodash/debounce";
 import throttle from "lodash/throttle";
 import snakeCase from "lodash/snakeCase";
 import type MandelbrotMap from "./MandelbrotMap";
-import { MandelbrotConfig } from "./MandelbrotMap";
+import {
+  CheckboxSpec,
+  CoordinateSpec,
+  MandelbrotConfig,
+  NumberSpec,
+  SelectNumberSpec,
+  SelectSpec,
+  SettingSpec,
+  SliderSpec,
+  settingsSchema,
+  syncAllInputsToConfig,
+  syncInputToConfig,
+} from "./config";
+import FormModal from "./FormModal";
 import { isValidDecimalCoordinate } from "./highPrecision";
 import { describeZoomScale } from "./zoomScale";
 import * as api from "./api";
-
-type NumberInput = {
-  id:
-    | "iterations"
-    | "exponent"
-    | "zoom"
-    | "paletteMinIter"
-    | "paletteMaxIter"
-    | "colorCycles";
-  minValue: number;
-  maxValue: number;
-  resetView?: boolean;
-  allowFraction?: boolean;
-};
-
-type CoordinateInput = {
-  id: "re" | "im";
-  minValue: number;
-  maxValue: number;
-};
-
-type SelectInput = {
-  id: "colorScheme" | "colorSpace";
-};
-
-type CheckboxInput = {
-  id: "reverseColors" | "highDpiTiles" | "smoothColoring" | "paletteAutoAdjust";
-};
-
-type SliderInput = {
-  id: "lightenAmount" | "saturateAmount" | "shiftHueAmount";
-};
 
 type ResetButtonConfig = {
   buttonId: string;
@@ -93,9 +74,7 @@ class MandelbrotControls {
         specialHandling: () => {
           // Reset paletteMaxIter based on current iterations
           this.map.config.paletteMaxIter = this.map.config.iterations;
-          (
-            document.getElementById("paletteMaxIter") as HTMLInputElement
-          ).value = String(this.map.config.iterations);
+          syncInputToConfig(this.map.config, "paletteMaxIter");
           this.syncAutoAdjustUi();
         },
         // The range only affects coloring: fit (auto) or apply the reset
@@ -147,6 +126,9 @@ class MandelbrotControls {
       },
     ];
 
+    // The config may already carry share-URL values (applied before the
+    // controls exist); this writes every setting into its input once.
+    syncAllInputsToConfig(this.map.config);
     this.handleInputs();
     this.syncAutoAdjustUi();
     this.updateResetButtonsVisibility();
@@ -167,12 +149,45 @@ class MandelbrotControls {
 
   private handleInputs() {
     this.handleShortcutHints();
-    this.setupNumberInputs();
-    this.setupSelectInputs();
-    this.setupCheckboxInputs();
-    this.setupSliderInputs();
+    this.wireSettingInputs();
     this.setupButtons();
     this.setupDetailsToggle();
+  }
+
+  /** Wires every schema-declared setting to its sidebar input. */
+  private wireSettingInputs() {
+    for (const spec of settingsSchema) {
+      switch (spec.control) {
+        case "number":
+          this.wireNumberInput(spec);
+          break;
+        case "coordinate":
+          this.wireCoordinateInput(spec);
+          break;
+        case "select":
+        case "selectNumber":
+          this.wireSelectInput(spec);
+          break;
+        case "checkbox":
+          this.wireCheckboxInput(spec);
+          break;
+        case "slider":
+          this.wireSliderInput(spec);
+          break;
+      }
+    }
+  }
+
+  /** Routes a settings change to the cheapest way of making it visible:
+   * color-only settings repaint the cached tiles in place, anything baked
+   * into the escape values re-renders. */
+  private applySettingEffect(spec: SettingSpec) {
+    if (spec.effect === "recolor") {
+      this.map.applyColorSettings();
+    } else if (spec.effect === "rerender") {
+      const resetView = spec.control === "number" && Boolean(spec.resetView);
+      this.map.refresh(resetView);
+    }
   }
 
   private setupDetailsToggle() {
@@ -232,71 +247,6 @@ class MandelbrotControls {
     this.handleSmallScreenExpansion();
   }
 
-  private setupNumberInputs() {
-    const numberInputs: NumberInput[] = [
-      { id: "iterations", minValue: 1, maxValue: 10 ** 9 },
-      { id: "exponent", minValue: 2, maxValue: 10 ** 9, resetView: true },
-      { id: "zoom", minValue: 0, maxValue: 10 ** 6 },
-      {
-        id: "paletteMinIter",
-        minValue: -(10 ** 9),
-        maxValue: 10 ** 9,
-        allowFraction: false,
-      },
-      {
-        id: "paletteMaxIter",
-        minValue: -(10 ** 9),
-        maxValue: 10 ** 9,
-        allowFraction: false,
-      },
-      {
-        id: "colorCycles",
-        minValue: 1,
-        maxValue: 100,
-        allowFraction: false,
-      },
-    ];
-
-    numberInputs.forEach((input) => this.handleNumberInput(input));
-
-    const coordinateInputs: CoordinateInput[] = [
-      { id: "re", minValue: -2, maxValue: 2 },
-      { id: "im", minValue: -2, maxValue: 2 },
-    ];
-
-    coordinateInputs.forEach((input) => this.handleCoordinateInput(input));
-  }
-
-  private setupSelectInputs() {
-    const selectInputs: SelectInput[] = [
-      { id: "colorScheme" },
-      { id: "colorSpace" },
-    ];
-
-    selectInputs.forEach((input) => this.handleSelectInput(input));
-  }
-
-  private setupCheckboxInputs() {
-    const checkboxInputs: CheckboxInput[] = [
-      { id: "reverseColors" },
-      { id: "highDpiTiles" },
-      { id: "smoothColoring" },
-      { id: "paletteAutoAdjust" },
-    ];
-
-    checkboxInputs.forEach((input) => this.handleCheckboxInput(input));
-  }
-
-  private setupSliderInputs() {
-    const sliderInputs: SliderInput[] = [
-      { id: "lightenAmount" },
-      { id: "saturateAmount" },
-      { id: "shiftHueAmount" },
-    ];
-
-    sliderInputs.forEach((input) => this.handleSliderInput(input));
-  }
-
   private setupButtons() {
     this.handleIterationButtons();
     this.handleFullScreen();
@@ -306,87 +256,112 @@ class MandelbrotControls {
     this.handleResetButtons();
   }
 
-  private handleNumberInput({
-    id,
-    minValue,
-    maxValue,
-    resetView,
-    allowFraction,
-  }: NumberInput) {
-    const input = document.getElementById(id) as HTMLInputElement;
-    input.value = String(this.map.config[id]);
-    input.oninput = debounce(({ target }) => {
-      let parsedValue = allowFraction
-        ? Number.parseFloat(target.value)
-        : Number.parseInt(target.value, 10);
+  private wireNumberInput(spec: NumberSpec) {
+    const input = document.getElementById(spec.key) as HTMLInputElement;
+    input.oninput = debounce(() => {
+      let parsedValue = spec.allowFraction
+        ? Number.parseFloat(input.value)
+        : Number.parseInt(input.value, 10);
       if (
         isNaN(parsedValue) ||
-        parsedValue < minValue ||
-        parsedValue > maxValue
+        parsedValue < spec.min ||
+        parsedValue > spec.max
       ) {
-        parsedValue = this.map.config[id];
+        parsedValue = this.map.config[spec.key];
       }
 
+      // The palette bounds must stay ordered; an inversion reverts to the
+      // previous value.
       if (
-        id === "paletteMinIter" &&
+        spec.key === "paletteMinIter" &&
         parsedValue > this.map.config.paletteMaxIter
       ) {
-        parsedValue = this.map.config[id]; // Reset to previous value
+        parsedValue = this.map.config[spec.key];
       } else if (
-        id === "paletteMaxIter" &&
+        spec.key === "paletteMaxIter" &&
         parsedValue < this.map.config.paletteMinIter
       ) {
-        parsedValue = this.map.config[id]; // Reset to previous value
+        parsedValue = this.map.config[spec.key];
       }
 
-      if (id === "iterations") {
+      if (spec.key === "iterations") {
         this.resetPaletteCeilingToIterations(parsedValue);
       }
 
       input.value = String(parsedValue);
-      this.map.config[id] = parsedValue;
-      if (resetView) {
+      this.map.config[spec.key] = parsedValue;
+      if (spec.resetView) {
+        // Changing the exponent picks a different fractal; iteration tuning
+        // for the old one doesn't carry over.
         this.map.config.iterations = this.map.initialConfig.iterations;
-        (document.getElementById("iterations") as HTMLInputElement).value =
-          String(this.map.initialConfig.iterations);
+        syncInputToConfig(this.map.config, "iterations");
       }
 
       this.updateResetButtonsVisibility();
-      if (
-        id === "paletteMinIter" ||
-        id === "paletteMaxIter" ||
-        id === "colorCycles"
-      ) {
-        // The palette range and cycle count only affect coloring, not escape
-        // values: repaint the tiles in place instead of re-rendering.
-        this.map.applyColorSettings();
-      } else {
-        this.map.refresh(resetView);
-      }
+      this.applySettingEffect(spec);
     }, 1000);
   }
 
-  private handleCoordinateInput({ id, minValue, maxValue }: CoordinateInput) {
-    const input = document.getElementById(id) as HTMLInputElement;
-    input.value = this.map.config[id];
-    input.oninput = debounce(({ target }) => {
-      const rawValue = String((target as HTMLInputElement).value).trim();
+  private wireCoordinateInput(spec: CoordinateSpec) {
+    const input = document.getElementById(spec.key) as HTMLInputElement;
+    input.oninput = debounce(() => {
+      const rawValue = input.value.trim();
       // Coordinates are kept as decimal strings so deep-zoom precision
       // survives; only their approximate magnitude is range checked.
       const approximateValue = Number.parseFloat(rawValue);
       const isValid =
         isValidDecimalCoordinate(rawValue) &&
-        approximateValue >= minValue &&
-        approximateValue <= maxValue;
+        approximateValue >= spec.min &&
+        approximateValue <= spec.max;
 
-      const newValue = isValid ? rawValue : this.map.config[id];
+      const newValue = isValid ? rawValue : this.map.config[spec.key];
 
       input.value = newValue;
-      this.map.config[id] = newValue;
+      this.map.config[spec.key] = newValue;
 
       this.updateResetButtonsVisibility();
       this.map.refresh();
     }, 1000);
+  }
+
+  private wireSelectInput(spec: SelectSpec | SelectNumberSpec) {
+    const select = document.getElementById(spec.key) as HTMLSelectElement;
+    select.onchange = () => {
+      if (spec.control === "select") {
+        this.map.config[spec.key] = select.value;
+      } else {
+        this.map.config[spec.key] = Number(select.value);
+      }
+      this.updateResetButtonsVisibility();
+      this.applySettingEffect(spec);
+    };
+  }
+
+  private wireCheckboxInput(spec: CheckboxSpec) {
+    const checkbox = document.getElementById(spec.key) as HTMLInputElement;
+    checkbox.onchange = () => {
+      this.map.config[spec.key] = checkbox.checked;
+      this.updateResetButtonsVisibility();
+      if (spec.key === "paletteAutoAdjust") {
+        this.syncAutoAdjustUi();
+        // Disabling keeps the current values for the user to edit; enabling
+        // fits to the visible tiles via an in-place recolor, no re-render.
+        if (this.map.config.paletteAutoAdjust) {
+          this.map.refitPaletteAndRecolor();
+        }
+        return;
+      }
+      this.applySettingEffect(spec);
+    };
+  }
+
+  private wireSliderInput(spec: SliderSpec) {
+    const slider = document.getElementById(spec.key) as HTMLInputElement;
+    slider.oninput = debounce(() => {
+      this.map.config[spec.key] = Number.parseFloat(slider.value);
+      this.updateResetButtonsVisibility();
+      this.applySettingEffect(spec);
+    }, 300);
   }
 
   /** In auto mode, changing the iteration cap resets the palette upper bound
@@ -412,10 +387,8 @@ class MandelbrotControls {
       newIterations,
     );
 
-    (document.getElementById("paletteMaxIter") as HTMLInputElement).value =
-      String(this.map.config.paletteMaxIter);
-    (document.getElementById("paletteMinIter") as HTMLInputElement).value =
-      String(this.map.config.paletteMinIter);
+    syncInputToConfig(this.map.config, "paletteMaxIter");
+    syncInputToConfig(this.map.config, "paletteMinIter");
   }
 
   private handleIterationButtons() {
@@ -425,9 +398,6 @@ class MandelbrotControls {
     const divideButton = document.getElementById(
       "iterationsDiv2",
     ) as HTMLButtonElement;
-    const iterationsInput = document.getElementById(
-      "iterations",
-    ) as HTMLInputElement;
 
     const debouncedRefresh = debounce(() => {
       this.updateResetButtonsVisibility();
@@ -437,7 +407,7 @@ class MandelbrotControls {
     multiplyButton.onclick = () => {
       this.map.config.iterations *= 2;
       this.resetPaletteCeilingToIterations(this.map.config.iterations);
-      iterationsInput.value = String(this.map.config.iterations);
+      syncInputToConfig(this.map.config, "iterations");
 
       debouncedRefresh();
     };
@@ -445,26 +415,9 @@ class MandelbrotControls {
     divideButton.onclick = () => {
       this.map.config.iterations = Math.ceil(this.map.config.iterations / 2);
       this.resetPaletteCeilingToIterations(this.map.config.iterations);
-      iterationsInput.value = String(this.map.config.iterations);
+      syncInputToConfig(this.map.config, "iterations");
 
       debouncedRefresh();
-    };
-  }
-
-  private handleSelectInput({ id }: SelectInput) {
-    const select = document.getElementById(id) as HTMLSelectElement;
-    select.value = String(this.map.config[id]);
-    select.onchange = ({ target }) => {
-      const value = (target as HTMLSelectElement).value;
-      if (id === "colorScheme") {
-        this.map.config[id] = value;
-      } else {
-        this.map.config[id] = Number(value);
-      }
-      this.updateResetButtonsVisibility();
-      // Color scheme and color space only affect coloring, not escape
-      // values: repaint the tiles in place instead of re-rendering.
-      this.map.applyColorSettings();
     };
   }
 
@@ -479,48 +432,11 @@ class MandelbrotControls {
       isAuto;
   }
 
-  private handleCheckboxInput({ id }: CheckboxInput) {
-    const checkbox = document.getElementById(id) as HTMLInputElement;
-    checkbox.checked = Boolean(this.map.config[id]);
-    checkbox.onchange = ({ target }) => {
-      this.map.config[id] = (target as HTMLInputElement).checked;
-      this.updateResetButtonsVisibility();
-      if (id === "paletteAutoAdjust") {
-        this.syncAutoAdjustUi();
-        // Disabling keeps the current values for the user to edit; enabling
-        // fits to the visible tiles via an in-place recolor, no re-render.
-        if (this.map.config.paletteAutoAdjust) {
-          this.map.refitPaletteAndRecolor();
-        }
-      } else if (id === "reverseColors") {
-        // Reversal only affects coloring, not escape values: repaint the
-        // tiles in place instead of re-rendering.
-        this.map.applyColorSettings();
-      } else {
-        this.map.refresh();
-      }
-    };
-  }
-
-  private handleSliderInput({ id }: SliderInput) {
-    const slider = document.getElementById(id) as HTMLInputElement;
-    slider.value = String(this.map.config[id]);
-    slider.oninput = debounce(({ target }) => {
-      const newValue = Number.parseFloat((target as HTMLInputElement).value);
-
-      this.map.config[id] = newValue;
-      this.updateResetButtonsVisibility();
-      // The hue/saturate/lighten sliders only affect coloring, not escape
-      // values: repaint the tiles in place instead of re-rendering.
-      this.map.applyColorSettings();
-    }, 300);
-  }
-
   private async logEvent(eventName: "imageSave" | "share") {
     await api.client?.from("events").insert([
       {
         event_name: snakeCase(eventName),
-        share_url: this.getShareUrl(),
+        share_url: this.map.getShareUrl(),
         re: String(this.map.config.re),
         im: String(this.map.config.im),
         zoom: this.map.config.zoom,
@@ -531,60 +447,24 @@ class MandelbrotControls {
   }
 
   private handleSaveImageButton() {
-    let isSavingImage = false;
-
     const saveImageButton = document.getElementById(
       "saveImage",
     ) as HTMLButtonElement;
-    const saveImageDialog = document.getElementById(
-      "saveImageModal",
-    ) as HTMLDialogElement;
-    const saveImageForm = document.getElementById(
-      "saveImageForm",
-    ) as HTMLFormElement;
+
+    if (typeof Blob === "undefined") {
+      saveImageButton.style.display = "none";
+      return;
+    }
+
     const widthInput = document.getElementById(
       "imageWidth",
     ) as HTMLInputElement;
     const heightInput = document.getElementById(
       "imageHeight",
     ) as HTMLInputElement;
-    const saveImageSubmitButton = document.getElementById("saveImageSubmit");
-    const closeModalButton = document.getElementById("saveImageCancel");
     const optimizeImageCheckbox = document.getElementById(
       "optimizeImage",
     ) as HTMLInputElement;
-
-    const ignoreSubmitListener: EventListener = (event) =>
-      event.preventDefault();
-
-    const ignoreCancelListener: EventListener = (event) =>
-      event.preventDefault();
-
-    const toggleSaveImageModalOpen = () => {
-      if (isSavingImage) {
-        return;
-      }
-      saveImageSubmitButton.innerText = "Save";
-      saveImageSubmitButton.removeAttribute("disabled");
-      saveImageForm.removeEventListener("submit", ignoreSubmitListener);
-      closeModalButton.removeAttribute("disabled");
-
-      const currentOptimizeState = optimizeImageCheckbox.checked;
-      saveImageForm.reset();
-      optimizeImageCheckbox.checked = currentOptimizeState;
-
-      if (saveImageDialog.open) {
-        saveImageDialog.close();
-      } else {
-        widthInput.value = String(
-          window.screen.width * 2 * (window.devicePixelRatio || 1),
-        );
-        heightInput.value = String(
-          window.screen.height * 2 * (window.devicePixelRatio || 1),
-        );
-        saveImageDialog.showModal();
-      }
-    };
 
     const savedOptimizeState = localStorage.getItem(OPTIMIZE_IMAGE_STORAGE_KEY);
     if (savedOptimizeState !== null) {
@@ -598,64 +478,64 @@ class MandelbrotControls {
       );
     };
 
-    if (typeof Blob !== "undefined") {
-      saveImageButton.onclick = (e) => {
-        e.stopPropagation();
-        toggleSaveImageModalOpen();
-      };
-    } else {
-      saveImageButton.style.display = "none";
-    }
+    const modal = new FormModal(
+      {
+        dialogId: "saveImageModal",
+        formId: "saveImageForm",
+        submitId: "saveImageSubmit",
+        cancelId: "saveImageCancel",
+      },
+      {
+        onOpen: () => {
+          // Reset the form but keep the persisted optimize preference.
+          const currentOptimizeState = optimizeImageCheckbox.checked;
+          modal.form.reset();
+          optimizeImageCheckbox.checked = currentOptimizeState;
+          widthInput.value = String(
+            window.screen.width * 2 * (window.devicePixelRatio || 1),
+          );
+          heightInput.value = String(
+            window.screen.height * 2 * (window.devicePixelRatio || 1),
+          );
+        },
+        onSubmit: () => {
+          const width = Number(widthInput.value);
+          const height = Number(heightInput.value);
 
-    saveImageForm.addEventListener("submit", (event) => {
-      event.preventDefault();
+          if (!width || Number.isNaN(width) || width <= 0) {
+            return;
+          }
+          if (!height || Number.isNaN(height) || height <= 0) {
+            return;
+          }
 
-      const width = Number(widthInput.value);
-      const height = Number(heightInput.value);
+          this.logEvent("imageSave");
+          modal.beginBusy("Generating...");
+          const shouldOptimize = optimizeImageCheckbox.checked;
 
-      if (!width || Number.isNaN(width) || width <= 0) {
-        return;
-      }
+          this.map.imageSaver
+            .saveVisibleImage(
+              width,
+              height,
+              shouldOptimize,
+              shouldOptimize
+                ? () => modal.setBusyLabel("Optimizing...")
+                : undefined,
+            )
+            .catch((error: unknown) => {
+              alert("Error saving image\n\n" + error);
+              console.error(error);
+            })
+            .finally(() => {
+              modal.finishBusy();
+            });
+        },
+      },
+    );
 
-      if (!height || Number.isNaN(height) || height <= 0) {
-        return;
-      }
-
-      isSavingImage = true;
-      saveImageForm.addEventListener("submit", ignoreSubmitListener);
-      saveImageDialog.addEventListener("cancel", ignoreCancelListener);
-      saveImageSubmitButton.innerText = "Working...";
-      saveImageSubmitButton.setAttribute("disabled", "true");
-      closeModalButton.setAttribute("disabled", "true");
-
-      this.logEvent("imageSave");
-
-      saveImageSubmitButton.innerText = "Generating...";
-      const shouldOptimize = optimizeImageCheckbox.checked;
-
-      this.map.imageSaver
-        .saveVisibleImage(
-          width,
-          height,
-          shouldOptimize,
-          shouldOptimize
-            ? () => {
-                saveImageSubmitButton.innerText = "Optimizing...";
-              }
-            : undefined,
-        )
-        .catch((error: unknown) => {
-          alert("Error saving image\n\n" + error);
-          console.error(error);
-        })
-        .finally(() => {
-          isSavingImage = false;
-          toggleSaveImageModalOpen();
-        });
-    });
-
-    closeModalButton.onclick = () => {
-      toggleSaveImageModalOpen();
+    saveImageButton.onclick = (e) => {
+      e.stopPropagation();
+      modal.toggle();
     };
   }
 
@@ -671,57 +551,13 @@ class MandelbrotControls {
     };
   }
 
-  getShareUrl() {
-    const {
-      re,
-      im,
-      zoom: z,
-      iterations: i,
-      exponent: e,
-      colorScheme: c,
-      colorCycles: cc,
-      reverseColors: r,
-      shiftHueAmount: h,
-      saturateAmount: s,
-      lightenAmount: l,
-      colorSpace: cs,
-      paletteMinIter: pmin,
-      paletteMaxIter: pmax,
-      paletteAutoAdjust,
-    } = this.map.config;
-
-    const url = new URL(window.location.origin);
-
-    Object.entries({
-      re,
-      im,
-      z,
-      i,
-      e,
-      c,
-      cc,
-      r,
-      h,
-      s,
-      l,
-      cs,
-      pmin,
-      pmax,
-      pm: paletteAutoAdjust ? "auto" : "manual",
-    }).forEach(([key, value]) => {
-      url.searchParams.set(key, String(value));
-    });
-
-    return url.toString();
-  }
-
   private handleShareButton() {
     const shareButton = document.getElementById(
       "shareButton",
     ) as HTMLButtonElement;
 
     shareButton.onclick = () => {
-      navigator.clipboard.writeText(this.getShareUrl()).then(() => {
+      navigator.clipboard.writeText(this.map.getShareUrl()).then(() => {
         alert("The URL for this view has been copied!");
       });
       this.logEvent("share");
@@ -797,14 +633,11 @@ class MandelbrotControls {
     }
 
     this.map.config.re = finalRe;
-    (document.getElementById("re") as HTMLInputElement).value = finalRe;
-
     this.map.config.im = finalIm;
-    (document.getElementById("im") as HTMLInputElement).value = finalIm;
-
     this.map.config.zoom = finalZoom;
-    (document.getElementById("zoom") as HTMLInputElement).value =
-      String(finalZoom);
+    syncInputToConfig(this.map.config, "re");
+    syncInputToConfig(this.map.config, "im");
+    syncInputToConfig(this.map.config, "zoom");
 
     const caption = document.getElementById("zoomScaleCaption");
     if (caption) {
@@ -820,23 +653,7 @@ class MandelbrotControls {
       // TypeScript cannot infer that initialValue matches the type of config[key] in this dynamic assignment pattern
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (this.map.config as any)[key] = initialValue;
-
-      const element = document.getElementById(String(key));
-      if (element) {
-        if (element instanceof HTMLInputElement) {
-          if (element.type === "checkbox") {
-            element.checked = Boolean(initialValue);
-          } else {
-            element.value = String(initialValue);
-          }
-        } else if (element instanceof HTMLSelectElement) {
-          element.value = String(initialValue);
-        }
-      } else {
-        console.warn(
-          `Could not find element with ID: ${String(key)} to reset.`,
-        );
-      }
+      syncInputToConfig(this.map.config, key);
     });
   }
 

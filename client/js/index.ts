@@ -1,6 +1,7 @@
 import "./static";
 import MandelbrotMap from "./MandelbrotMap";
 import { firstTileRenderedEvent } from "./MandelbrotLayer";
+import { defaultConfig } from "./config";
 import { initRegionalAttribution } from "./regionalAttribution";
 
 const mapHtmlId = "leaflet";
@@ -132,26 +133,7 @@ window.addEventListener("load", () => {
 
     new MandelbrotMap({
       htmlId: mapHtmlId,
-      initialConfig: {
-        iterations: 200,
-        exponent: 2,
-        colorScheme: "turbo",
-        colorCycles: 1,
-        lightenAmount: 0,
-        saturateAmount: 0,
-        shiftHueAmount: 0,
-        colorSpace: 2,
-        reverseColors: false,
-        highDpiTiles: false,
-        smoothColoring: true,
-        paletteMinIter: 0,
-        paletteMaxIter: 200,
-        paletteAutoAdjust: true,
-
-        re: "-0.5",
-        im: "0",
-        zoom: initialZoom,
-      },
+      initialConfig: { ...defaultConfig, zoom: initialZoom },
     });
   }
 });

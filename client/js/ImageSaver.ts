@@ -1,30 +1,12 @@
 import { saveAs } from "file-saver";
-import { FunctionThread, Pool } from "threads";
 import type MandelbrotMap from "./MandelbrotMap";
-import type MandelbrotLayer from "./MandelbrotLayer";
-import {
-  OptimiseRequest,
-  OptimiseResponse,
-  TileRect,
-  WorkerRequest,
-  WorkerResponse,
-} from "./MandelbrotMap";
-
-type TaskThread = FunctionThread<[WorkerRequest], WorkerResponse>;
+import { OptimiseRequest, OptimiseResponse, TileRect } from "./protocol";
 
 class ImageSaver {
   private map: MandelbrotMap;
-  private pool: Pool<TaskThread>;
-  private mandelbrotLayer: MandelbrotLayer;
 
-  constructor(
-    map: MandelbrotMap,
-    pool: Pool<TaskThread>,
-    mandelbrotLayer: MandelbrotLayer,
-  ) {
+  constructor(map: MandelbrotMap) {
     this.map = map;
-    this.pool = pool;
-    this.mandelbrotLayer = mandelbrotLayer;
   }
 
   async saveVisibleImage(
@@ -95,7 +77,11 @@ class ImageSaver {
         xMax: bounds.xMin + xDiffPerColumn * (i + 1),
       };
       imagePromises.push(
-        this.mandelbrotLayer.getImage(subBounds, columnWidth, totalHeight),
+        this.map.regionRenderer.renderToCanvas(
+          subBounds,
+          columnWidth,
+          totalHeight,
+        ),
       );
     }
 
@@ -147,7 +133,7 @@ class ImageSaver {
         type: "optimise",
         payload: { buffer: rawPngBuffer },
       };
-      finalBuffer = (await this.pool.queue((worker) =>
+      finalBuffer = (await this.map.pool.queue((worker) =>
         worker(optimiseRequest),
       )) as OptimiseResponse;
     }

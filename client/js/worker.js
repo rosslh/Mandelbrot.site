@@ -36,34 +36,10 @@ const supportsRelaxedSimd = WebAssembly.validate(
   .then(async (wasm) => {
     wasm.init();
 
-    // The single place that spells out get_mandelbrot_tile_precise's
-    // positional argument order; every caller passes named fields.
-    const computeTile = (params) =>
-      wasm.get_mandelbrot_tile_precise(
-        params.originRe,
-        params.originIm,
-        params.bounds.xMin,
-        params.bounds.xMax,
-        params.bounds.yMin,
-        params.bounds.yMax,
-        params.bounds.zoom,
-        params.zoomOffset,
-        params.iterations,
-        params.exponent,
-        params.imageWidth,
-        params.imageHeight,
-        params.colorScheme,
-        params.reverseColors,
-        params.shiftHueAmount,
-        params.saturateAmount,
-        params.lightenAmount,
-        params.colorSpace,
-        params.smoothColoring,
-        params.paletteMinIter,
-        params.paletteMaxIter,
-        params.includeValues,
-        params.colorCycles,
-      );
+    // The payload object passes straight through to the wasm entrypoint;
+    // its shape mirrors the serde `TileRenderOptions` struct (and the
+    // TileRenderPayload type in protocol.ts).
+    const computeTile = (params) => wasm.render_tile(params);
 
     // Renders a throwaway view twice to consume V8's wasm tier-up budget;
     // warmups differ only in view geometry, so appearance fields are fixed
@@ -72,17 +48,19 @@ const supportsRelaxedSimd = WebAssembly.validate(
       try {
         for (let i = 0; i < 2; i++) {
           computeTile({
-            colorScheme: "turbo",
-            colorCycles: 1,
-            reverseColors: false,
-            shiftHueAmount: 0,
-            saturateAmount: 0,
-            lightenAmount: 0,
-            colorSpace: 2,
             smoothColoring: true,
-            paletteMinIter: 0,
-            paletteMaxIter: view.iterations,
             includeValues: false,
+            coloring: {
+              colorScheme: "turbo",
+              colorCycles: 1,
+              reverseColors: false,
+              shiftHueAmount: 0,
+              saturateAmount: 0,
+              lightenAmount: 0,
+              colorSpace: 2,
+              paletteMinIter: 0,
+              paletteMaxIter: view.iterations,
+            },
             ...view,
           }).free();
         }
@@ -220,18 +198,7 @@ const supportsRelaxedSimd = WebAssembly.validate(
     };
 
     const recolorTile = (params) =>
-      wasm.recolor_tile(
-        params.values,
-        params.colorScheme,
-        params.reverseColors,
-        params.shiftHueAmount,
-        params.saturateAmount,
-        params.lightenAmount,
-        params.colorSpace,
-        params.paletteMinIter,
-        params.paletteMaxIter,
-        params.colorCycles,
-      );
+      wasm.recolor_tile(params.values, params.coloring);
 
     const optimiseImage = async (payload) => {
       await ensureOxipngInitialized();

@@ -1,107 +1,25 @@
 import * as L from "leaflet";
-import { FunctionThread, Pool } from "threads";
+import { Pool } from "threads";
 import MandelbrotLayer from "./MandelbrotLayer";
 import { QueuedTask } from "threads/dist/master/pool-types";
 import MandelbrotControls from "./MandelbrotControls";
 import ImageSaver from "./ImageSaver";
+import RegionRenderer from "./RegionRenderer";
 import TileCache, { CachedTile } from "./TileCache";
 import {
-  decimalDigitsForZoom,
-  isValidDecimalCoordinate,
-  offsetCoordinate,
-} from "./highPrecision";
-
-export type MandelbrotConfig = {
-  iterations: number;
-  exponent: number;
-  colorScheme: string;
-  // How many times the palette repeats across the palette range; cyclical
-  // palettes wrap, others boomerang (alternate direction) to stay seamless.
-  colorCycles: number;
-  lightenAmount: number;
-  saturateAmount: number;
-  shiftHueAmount: number;
-  colorSpace: number;
-  reverseColors: boolean;
-  highDpiTiles: boolean;
-  smoothColoring: boolean;
-  paletteMinIter: number;
-  paletteMaxIter: number;
-  // When enabled the palette range fits itself to the on-screen tiles and
-  // the min/max inputs become read-only displays; when disabled they are
-  // the user's to edit.
-  paletteAutoAdjust: boolean;
-
-  // Coordinates are decimal strings because deep zooms exceed f64 precision.
-  re: string;
-  im: string;
-  zoom: number;
-};
-
-// Worker Request/Response Types
-export type MandelbrotRequest = {
-  type: "calculate";
-  payload: import("./MandelbrotLayer").WasmRequestPayload; // Use import type for circular dependency
-};
-export type OptimisePayload = { buffer: ArrayBuffer };
-export type OptimiseRequest = { type: "optimise"; payload: OptimisePayload };
-export type RecolorPayload = {
-  // Per-pixel smoothed escape values captured when the tile was rendered.
-  values: Float32Array;
-  colorScheme: string;
-  colorCycles: number;
-  reverseColors: boolean;
-  shiftHueAmount: number;
-  saturateAmount: number;
-  lightenAmount: number;
-  colorSpace: number;
-  paletteMinIter: number;
-  paletteMaxIter: number;
-};
-export type RecolorRequest = { type: "recolor"; payload: RecolorPayload };
-// Tier-up warmup for the deep general-exponent (multibrot) perturbation
-// kernel; returns nothing. Sent once per worker at pool spawn when the
-// view's exponent != 2 and it is already at deep-zoom depth.
-export type WarmupGeneralRequest = { type: "warmupGeneral" };
-// Tier-up warmup for the direct-tier general-exponent stream kernel;
-// returns nothing. Sent once per worker at pool spawn when the view's
-// exponent != 2 at direct depth (effective zoom < DEEP_ZOOM_THRESHOLD).
-export type WarmupGeneralDirectRequest = { type: "warmupGeneralDirect" };
-// Tier-up warmup for the perturbation-f64 stream kernel; returns nothing.
-// Sent once per worker at pool spawn when the view is already at deep-zoom
-// depth (exponent 2, effective zoom >= DEEP_ZOOM_THRESHOLD).
-export type WarmupDeepRequest = { type: "warmupDeep" };
-// Tier-up warmup for the hybrid float-exp stream kernel; returns nothing.
-// Sent once per worker at pool spawn when the view is already at float-exp
-// depth (exponent 2, effective zoom >= FLOAT_EXP_THRESHOLD).
-export type WarmupFloatExpRequest = { type: "warmupFloatExp" };
-export type WorkerRequest =
-  | MandelbrotRequest
-  | OptimiseRequest
-  | RecolorRequest
-  | WarmupGeneralRequest
-  | WarmupGeneralDirectRequest
-  | WarmupDeepRequest
-  | WarmupFloatExpRequest;
-
-export type MandelbrotResponse = {
-  image: Uint8Array;
-  // Per-pixel smoothed escape values for recoloring; null when the request
-  // did not ask for them (offscreen image export).
-  values: Float32Array | null;
-  // Escaped-pixel iteration range of the tile; null when the tile is
-  // entirely inside the set.
-  minIter: number | null;
-  maxIter: number | null;
-};
-export type OptimiseResponse = ArrayBuffer;
-export type RecolorResponse = Uint8Array;
-export type WorkerResponse =
-  | MandelbrotResponse
-  | OptimiseResponse
-  | RecolorResponse;
-
-type TaskThread = FunctionThread<[WorkerRequest], WorkerResponse>;
+  buildShareUrl,
+  coloringOptions,
+  MandelbrotConfig,
+  parseShareParams,
+  syncInputToConfig,
+} from "./config";
+import {
+  RecolorResponse,
+  TaskThread,
+  TileRect,
+  WorkerRequest,
+} from "./protocol";
+import { decimalDigitsForZoom, offsetCoordinate } from "./highPrecision";
 
 type QueuedTileTask = {
   id: string;
@@ -111,17 +29,6 @@ type QueuedTileTask = {
 
 type MapWithResetView = L.Map & {
   _resetView: (center: L.LatLng | [number, number], zoom: number) => void;
-};
-
-// A rectangle in Leaflet tile coordinates. A tile coordinate `v` at `zoom`
-// maps to the complex offset ((v / 2^(zoom - 2)) * (tileSize / 128) - 4)
-// * 2^-zoomOffset from the world origin.
-export type TileRect = {
-  xMin: number;
-  xMax: number;
-  yMin: number;
-  yMax: number;
-  zoom: number;
 };
 
 type TilePosition = {
@@ -174,6 +81,7 @@ class MandelbrotMap extends L.Map {
   // its warmup renders; the tile layer holds the initial batch until then
   // (see queueTileGeneration).
   poolSpawned: Promise<void>;
+  regionRenderer: RegionRenderer;
   imageSaver: ImageSaver;
   queuedTileTasks: QueuedTileTask[] = [];
   origin: { re: string; im: string };
@@ -228,10 +136,11 @@ class MandelbrotMap extends L.Map {
     // spawn+warmup cycles serialized on every shared-link load.
     this.setConfigFromUrl();
     await this.createPool();
+    this.regionRenderer = new RegionRenderer(this);
     this.mandelbrotLayer = new MandelbrotLayer().addTo(this);
     this.addLoadingSpinnerControl();
     this.controls = new MandelbrotControls(this);
-    this.imageSaver = new ImageSaver(this, this.pool, this.mandelbrotLayer);
+    this.imageSaver = new ImageSaver(this);
 
     // Anchor the world origin at the target coordinates (latLng (0, 0), the
     // center of Leaflet's tile universe) and set the initial view; for a
@@ -394,10 +303,8 @@ class MandelbrotMap extends L.Map {
 
     this.config.paletteMinIter = range.min;
     this.config.paletteMaxIter = range.max;
-    (document.getElementById("paletteMinIter") as HTMLInputElement).value =
-      String(range.min);
-    (document.getElementById("paletteMaxIter") as HTMLInputElement).value =
-      String(range.max);
+    syncInputToConfig(this.config, "paletteMinIter");
+    syncInputToConfig(this.config, "paletteMaxIter");
 
     return changed;
   }
@@ -432,15 +339,7 @@ class MandelbrotMap extends L.Map {
           type: "recolor",
           payload: {
             values: tile.values,
-            colorScheme: this.config.colorScheme,
-            colorCycles: this.config.colorCycles,
-            reverseColors: this.config.reverseColors,
-            shiftHueAmount: this.config.shiftHueAmount,
-            saturateAmount: this.config.saturateAmount,
-            lightenAmount: this.config.lightenAmount,
-            colorSpace: this.config.colorSpace,
-            paletteMinIter: this.config.paletteMinIter,
-            paletteMaxIter: this.config.paletteMaxIter,
+            coloring: coloringOptions(this.config),
           },
         };
 
@@ -707,7 +606,6 @@ class MandelbrotMap extends L.Map {
     this.recolorGeneration += 1;
     this.recolorPendingOnLoad = false;
     await this.createPool();
-    this.imageSaver = new ImageSaver(this, this.pool, this.mandelbrotLayer);
     if (resetView) {
       this.goToCoordinates(
         this.initialConfig.re,
@@ -720,156 +618,21 @@ class MandelbrotMap extends L.Map {
   }
 
   getShareUrl() {
-    const {
-      re,
-      im,
-      zoom: z,
-      iterations: i,
-      exponent: e,
-      colorScheme: c,
-      colorCycles: cc,
-      reverseColors: r,
-      shiftHueAmount: h,
-      saturateAmount: s,
-      lightenAmount: l,
-      colorSpace: cs,
-      paletteMinIter: pmin,
-      paletteMaxIter: pmax,
-      paletteAutoAdjust,
-    } = this.config;
-
-    const url = new URL(window.location.origin);
-
-    Object.entries({
-      re,
-      im,
-      z,
-      i,
-      e,
-      c,
-      cc,
-      r,
-      h,
-      s,
-      l,
-      cs,
-      pmin,
-      pmax,
-      pm: paletteAutoAdjust ? "auto" : "manual",
-    }).forEach(([key, value]) => {
-      url.searchParams.set(key, String(value));
-    });
-
-    return url.toString();
+    return buildShareUrl(this.config);
   }
 
+  /** Applies share-URL parameters to the config, then strips them from the
+   * address bar. Runs before the controls exist (initializeMap creates them
+   * right after); their constructor syncs every input from the config values
+   * written here. */
   setConfigFromUrl() {
-    const queryParams = new URLSearchParams(window.location.search);
-    const re = queryParams.get("re");
-    const im = queryParams.get("im");
-    const zoom = queryParams.get("z");
-    const iterations = queryParams.get("i");
-    const exponent = queryParams.get("e");
-    const colorScheme = queryParams.get("c");
-    const colorCycles = queryParams.get("cc");
-    const reverseColors = queryParams.get("r");
-    const shiftHueAmount = queryParams.get("h");
-    const saturateAmount = queryParams.get("s");
-    const lightenAmount = queryParams.get("l");
-    const colorSpace = queryParams.get("cs");
-    const smoothColoring = queryParams.get("sc");
-    const paletteMinIter = queryParams.get("pmin");
-    const paletteMaxIter = queryParams.get("pmax");
-    const paletteMode = queryParams.get("pm");
-
-    if (
-      re &&
-      im &&
-      zoom &&
-      isValidDecimalCoordinate(re) &&
-      isValidDecimalCoordinate(im)
-    ) {
-      this.config.re = re;
-      this.config.im = im;
-      this.config.zoom = Number(zoom);
-
-      if (iterations) {
-        this.config.iterations = Number(iterations);
-        (document.getElementById("iterations") as HTMLInputElement).value =
-          iterations;
-      }
-      if (exponent) {
-        this.config.exponent = Number(exponent);
-        (document.getElementById("exponent") as HTMLInputElement).value =
-          exponent;
-      }
-      if (colorScheme) {
-        this.config.colorScheme = colorScheme;
-        (document.getElementById("colorScheme") as HTMLSelectElement).value =
-          colorScheme;
-      }
-      if (colorCycles) {
-        this.config.colorCycles = Math.max(1, Number(colorCycles));
-        (document.getElementById("colorCycles") as HTMLInputElement).value =
-          String(this.config.colorCycles);
-      }
-      if (reverseColors) {
-        this.config.reverseColors = reverseColors === "true";
-        (document.getElementById("reverseColors") as HTMLInputElement).checked =
-          this.config.reverseColors;
-      }
-      if (shiftHueAmount) {
-        this.config.shiftHueAmount = Number(shiftHueAmount);
-        (document.getElementById("shiftHueAmount") as HTMLInputElement).value =
-          shiftHueAmount;
-      }
-      if (saturateAmount) {
-        this.config.saturateAmount = Number(saturateAmount);
-        (document.getElementById("saturateAmount") as HTMLInputElement).value =
-          saturateAmount;
-      }
-      if (lightenAmount) {
-        this.config.lightenAmount = Number(lightenAmount);
-        (document.getElementById("lightenAmount") as HTMLInputElement).value =
-          lightenAmount;
-      }
-      if (colorSpace) {
-        this.config.colorSpace = Number(colorSpace);
-        (document.getElementById("colorSpace") as HTMLSelectElement).value =
-          String(colorSpace);
-      }
-      if (smoothColoring) {
-        this.config.smoothColoring = smoothColoring === "true";
-        (
-          document.getElementById("smoothColoring") as HTMLInputElement
-        ).checked = this.config.smoothColoring;
-      }
-      if (paletteMinIter) {
-        this.config.paletteMinIter = Number(paletteMinIter);
-        (document.getElementById("paletteMinIter") as HTMLInputElement).value =
-          paletteMinIter;
-      }
-      if (paletteMaxIter) {
-        this.config.paletteMaxIter = Number(paletteMaxIter);
-        (document.getElementById("paletteMaxIter") as HTMLInputElement).value =
-          paletteMaxIter;
-      }
-      if (paletteMode === "auto" || paletteMode === "manual") {
-        this.config.paletteAutoAdjust = paletteMode === "auto";
-      } else if (paletteMinIter || paletteMaxIter) {
-        // Legacy share URLs predate auto-adjust; explicit palette values
-        // imply the sender tuned them by hand, so preserve that appearance.
-        this.config.paletteAutoAdjust = false;
-      }
-      (
-        document.getElementById("paletteAutoAdjust") as HTMLInputElement
-      ).checked = this.config.paletteAutoAdjust;
-      // Runs before the controls exist (initializeMap creates them right
-      // after); their constructor syncs the auto-adjust UI from the config
-      // values written above.
-
-      window.history.replaceState({}, document.title, window.location.pathname);
+    const parsed = parseShareParams(window.location.search);
+    if (Object.keys(parsed).length === 0) {
+      return;
     }
+
+    Object.assign(this.config, parsed);
+    window.history.replaceState({}, document.title, window.location.pathname);
   }
 }
 

@@ -1,5 +1,5 @@
 import type * as L from "leaflet";
-import type { TileRect } from "./MandelbrotMap";
+import type { TileRect } from "./protocol";
 
 type TileIterationRange = { min: number; max: number };
 

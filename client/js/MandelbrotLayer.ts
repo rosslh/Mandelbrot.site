@@ -1,7 +1,7 @@
 import debounce from "lodash/debounce";
 import * as L from "leaflet";
 import type MandelbrotMap from "./MandelbrotMap";
-import { MandelbrotResponse, TileRect, WorkerRequest } from "./MandelbrotMap";
+import { MandelbrotResponse, TileRect, WorkerRequest } from "./protocol";
 
 type Done = (error: null, tile: HTMLCanvasElement) => void;
 
@@ -24,30 +24,6 @@ function announceFirstTileRendered() {
   window.dispatchEvent(new Event(firstTileRenderedEvent));
 }
 
-export type WasmRequestPayload = {
-  originRe: string;
-  originIm: string;
-  bounds: TileRect;
-  zoomOffset: number;
-  iterations: number;
-  exponent: number;
-  imageWidth: number;
-  imageHeight: number;
-  colorScheme: string;
-  colorCycles: number;
-  reverseColors: boolean;
-  lightenAmount: number;
-  saturateAmount: number;
-  shiftHueAmount: number;
-  colorSpace: number;
-  smoothColoring: boolean;
-  paletteMinIter: number;
-  paletteMaxIter: number;
-  // Whether to return the per-pixel escape values used for recoloring; the
-  // offscreen image-export path skips them to avoid the extra transfer.
-  includeValues: boolean;
-};
-
 type TileGenerationTask = {
   position: L.Coords;
   canvas: HTMLCanvasElement;
@@ -64,84 +40,6 @@ class MandelbrotLayer extends L.GridLayer {
     super({
       noWrap: true,
       tileSize: 200,
-    });
-  }
-
-  private buildRequestPayload(
-    bounds: TileRect,
-    imageWidth: number,
-    imageHeight: number,
-    includeValues: boolean,
-  ): WasmRequestPayload {
-    return {
-      includeValues,
-      originRe: this._map.origin.re,
-      originIm: this._map.origin.im,
-      bounds,
-      zoomOffset: this._map.zoomOffset,
-      iterations: this._map.config.iterations,
-      exponent: this._map.config.exponent,
-      imageWidth,
-      imageHeight,
-      colorScheme: this._map.config.colorScheme,
-      colorCycles: this._map.config.colorCycles,
-      reverseColors: this._map.config.reverseColors,
-      lightenAmount: this._map.config.lightenAmount,
-      saturateAmount: this._map.config.saturateAmount,
-      shiftHueAmount: this._map.config.shiftHueAmount,
-      colorSpace: this._map.config.colorSpace,
-      smoothColoring: this._map.config.smoothColoring,
-      paletteMinIter: this._map.config.paletteMinIter,
-      paletteMaxIter: this._map.config.paletteMaxIter,
-    };
-  }
-
-  getImage(
-    bounds: TileRect,
-    imageWidth: number,
-    imageHeight: number,
-  ): Promise<HTMLCanvasElement> {
-    return new Promise<HTMLCanvasElement>((resolve, reject) => {
-      const canvas = document.createElement("canvas");
-      const context = canvas.getContext("2d");
-
-      if (!context) {
-        reject(new Error("Failed to get canvas context"));
-        return;
-      }
-
-      canvas.width = imageWidth;
-      canvas.height = imageHeight;
-
-      // Snapshot the render parameters now rather than when the pool gets to
-      // this task: auto palette adjustment mutates the config as background
-      // tiles finish, and an export whose columns straddle such a refit comes
-      // out with two different color mappings.
-      const request: WorkerRequest = {
-        type: "calculate" as const,
-        payload: this.buildRequestPayload(
-          bounds,
-          imageWidth,
-          imageHeight,
-          false,
-        ),
-      };
-
-      this._map.pool.queue(async (workerTask) => {
-        try {
-          const response = (await workerTask(request)) as MandelbrotResponse;
-
-          const imageData = new ImageData(
-            Uint8ClampedArray.from(response.image),
-            imageWidth,
-            imageHeight,
-          );
-          context.putImageData(imageData, 0, 0);
-          resolve(canvas);
-        } catch (error) {
-          reject(error);
-        }
-      });
     });
   }
 
@@ -238,7 +136,7 @@ class MandelbrotLayer extends L.GridLayer {
       const generation = this._map.renderGeneration;
       const request: WorkerRequest = {
         type: "calculate" as const,
-        payload: this.buildRequestPayload(
+        payload: this._map.regionRenderer.buildPayload(
           bounds,
           scaledTileSize,
           scaledTileSize,

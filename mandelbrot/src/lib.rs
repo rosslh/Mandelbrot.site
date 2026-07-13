@@ -14,6 +14,7 @@ mod lib_test;
 use itertools_num::linspace;
 use num::complex::Complex64;
 use palette::{FromColor, Hsl, Hsluv, IntoColor, Lch, Lighten, Okhsl, Saturate, ShiftHue, Srgb};
+use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global allocator.
@@ -2894,12 +2895,140 @@ pub struct MandelbrotTile {
     pub max_iter: i32,
 }
 
+impl MandelbrotTile {
+    fn from_rendered(rendered: RenderedTile, include_values: bool) -> Self {
+        let (min_iter, max_iter) = match rendered.stats.range {
+            Some((min, max)) => (min as i32, max as i32),
+            None => (-1, -1),
+        };
+
+        MandelbrotTile {
+            image: rendered.image,
+            values: if include_values {
+                rendered.values
+            } else {
+                Vec::new()
+            },
+            min_iter,
+            max_iter,
+        }
+    }
+}
+
+/// A rectangle in Leaflet tile coordinates (see `render_tile_precise` for
+/// how it maps to the complex plane).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TileBounds {
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+    zoom: i32,
+}
+
+/// Color and palette settings shared by rendering (`render_tile`) and
+/// recoloring (`recolor_tile`). Field names mirror the client's camelCase
+/// payload.
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ColoringOptions {
+    pub color_scheme: String,
+    pub reverse_colors: bool,
+    pub shift_hue_amount: f32,
+    pub saturate_amount: f32,
+    pub lighten_amount: f32,
+    /// `ValidColorSpace` discriminant, as the client's `<select>` sends it.
+    pub color_space: u8,
+    pub palette_min_iter: i32,
+    pub palette_max_iter: i32,
+    pub color_cycles: u32,
+}
+
+impl ColoringOptions {
+    fn color_space(&self) -> ValidColorSpace {
+        match self.color_space {
+            0 => ValidColorSpace::Hsl,
+            1 => ValidColorSpace::Hsluv,
+            3 => ValidColorSpace::Okhsl,
+            // 2 is the client default; unknown values fall back to it.
+            _ => ValidColorSpace::Lch,
+        }
+    }
+}
+
+/// Everything a tile render needs, as one deserializable object so new
+/// settings are a field addition here and in the client payload — not a new
+/// positional argument threaded through every caller.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TileRenderOptions {
+    origin_re: String,
+    origin_im: String,
+    bounds: TileBounds,
+    zoom_offset: u32,
+    iterations: u32,
+    exponent: u32,
+    image_width: usize,
+    image_height: usize,
+    /// Baked into the returned escape values (unlike `coloring`, which only
+    /// affects the RGBA bytes), so changing it requires a re-render.
+    smooth_coloring: bool,
+    include_values: bool,
+    coloring: ColoringOptions,
+}
+
+/// Renders a Mandelbrot tile from a single options object (the production
+/// client's entrypoint; see `TileRenderOptions`). Behaves exactly like
+/// `get_mandelbrot_tile_precise`, which is kept positional only because the
+/// bench harness replays recorded positional argument lists against current
+/// and archived builds.
+#[wasm_bindgen]
+pub fn render_tile(options: JsValue) -> Result<MandelbrotTile, JsValue> {
+    let options: TileRenderOptions =
+        serde_wasm_bindgen::from_value(options).map_err(JsValue::from)?;
+
+    let rendered = render_tile_precise(
+        &options.origin_re,
+        &options.origin_im,
+        options.bounds.x_min,
+        options.bounds.x_max,
+        options.bounds.y_min,
+        options.bounds.y_max,
+        options.bounds.zoom,
+        options.zoom_offset,
+        options.iterations,
+        options.exponent,
+        options.image_width,
+        options.image_height,
+        &options.coloring.color_scheme,
+        options.coloring.reverse_colors,
+        options.coloring.shift_hue_amount,
+        options.coloring.saturate_amount,
+        options.coloring.lighten_amount,
+        options.coloring.color_space(),
+        options.smooth_coloring,
+        options.coloring.palette_min_iter,
+        options.coloring.palette_max_iter,
+        options.coloring.color_cycles.max(1),
+    );
+
+    Ok(MandelbrotTile::from_rendered(
+        rendered,
+        options.include_values,
+    ))
+}
+
 /// Renders a Mandelbrot tile at any zoom depth (see `render_tile_precise`
 /// for the view geometry) and reports the tile's escaped-pixel iteration
 /// range alongside the image. When `include_values` is set, the per-pixel
 /// smoothed escape values are returned too so the tile can later be
 /// recolored via `recolor_tile`; large offscreen renders (image export)
 /// skip them to avoid the extra transfer.
+///
+/// Frozen positional signature: the bench harness replays recorded
+/// positional argument lists against current and archived builds. The
+/// production client goes through `render_tile` instead.
 #[wasm_bindgen]
 pub fn get_mandelbrot_tile_precise(
     origin_re: String,
@@ -2954,49 +3083,34 @@ pub fn get_mandelbrot_tile_precise(
         color_cycles.unwrap_or(1).max(1),
     );
 
-    let (min_iter, max_iter) = match rendered.stats.range {
-        Some((min, max)) => (min as i32, max as i32),
-        None => (-1, -1),
-    };
-
-    MandelbrotTile {
-        image: rendered.image,
-        values: if include_values {
-            rendered.values
-        } else {
-            Vec::new()
-        },
-        min_iter,
-        max_iter,
-    }
+    MandelbrotTile::from_rendered(rendered, include_values)
 }
 
 /// Recolors a tile from its cached per-pixel smoothed escape values (as
-/// returned by `get_mandelbrot_tile_precise`), producing the RGBA bytes the
-/// full renderer would produce for the same color settings — without
-/// recomputing escape times. Anything that changes the escape values
-/// themselves (iterations, exponent, smooth coloring) still requires a
-/// re-render.
+/// returned by a tile render), producing the RGBA bytes the full renderer
+/// would produce for the same color settings — without recomputing escape
+/// times. Anything that changes the escape values themselves (iterations,
+/// exponent, smooth coloring) still requires a re-render. The values stay a
+/// positional typed-array argument (wasm-bindgen's zero-copy view); only the
+/// scalar settings ride in the options object.
 #[wasm_bindgen]
-pub fn recolor_tile(
-    values: &[f32],
-    color_scheme: String,
-    reverse_colors: bool,
-    shift_hue_amount: f32,
-    saturate_amount: f32,
-    lighten_amount: f32,
-    color_space: ValidColorSpace,
-    palette_min_iter: i32,
-    palette_max_iter: i32,
-    color_cycles: u32,
-) -> Vec<u8> {
-    let (palette, should_reverse_colors, palette_is_cyclic) =
-        get_color_palette(&color_scheme, reverse_colors);
-    let color_cycles = color_cycles.max(1);
+pub fn recolor_tile(values: &[f32], options: JsValue) -> Result<Vec<u8>, JsValue> {
+    let options: ColoringOptions =
+        serde_wasm_bindgen::from_value(options).map_err(JsValue::from)?;
+    Ok(recolor_values(values, &options))
+}
 
-    let min_iterations_threshold = f64::from(palette_min_iter);
+/// Typed core of `recolor_tile`, callable from native tests and examples
+/// (which cannot build a `JsValue`).
+pub fn recolor_values(values: &[f32], options: &ColoringOptions) -> Vec<u8> {
+    let (palette, should_reverse_colors, palette_is_cyclic) =
+        get_color_palette(&options.color_scheme, options.reverse_colors);
+    let color_cycles = options.color_cycles.max(1);
+    let color_space = options.color_space();
+
+    let min_iterations_threshold = f64::from(options.palette_min_iter);
     let max_iterations_threshold =
-        f64::from(palette_max_iter).max(min_iterations_threshold + f64::EPSILON);
+        f64::from(options.palette_max_iter).max(min_iterations_threshold + f64::EPSILON);
 
     let mut img: Vec<u8> = vec![0; values.len() * NUM_COLOR_CHANNELS];
 
@@ -3008,9 +3122,9 @@ pub fn recolor_tile(
             palette_is_cyclic,
             color_cycles,
             &color_space,
-            shift_hue_amount,
-            saturate_amount,
-            lighten_amount,
+            options.shift_hue_amount,
+            options.saturate_amount,
+            options.lighten_amount,
             min_iterations_threshold,
             max_iterations_threshold,
         );
