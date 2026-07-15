@@ -2697,20 +2697,15 @@ fn render_tile_precise(
     palette_max_iter: i32,
     color_cycles: u32,
 ) -> RenderedTile {
-    let pixel_spacing = perturbation::pixel_spacing(
-        tile_x_min,
-        tile_x_max,
-        tile_zoom,
-        zoom_offset,
-        image_width,
-    )
-    .min(perturbation::pixel_spacing(
-        tile_y_min,
-        tile_y_max,
-        tile_zoom,
-        zoom_offset,
-        image_height,
-    ));
+    let pixel_spacing =
+        perturbation::pixel_spacing(tile_x_min, tile_x_max, tile_zoom, zoom_offset, image_width)
+            .min(perturbation::pixel_spacing(
+                tile_y_min,
+                tile_y_max,
+                tile_zoom,
+                zoom_offset,
+                image_height,
+            ));
 
     let use_perturbation = pixel_spacing < perturbation::MIN_DIRECT_PIXEL_SPACING
         && (2..=perturbation::MAX_PERTURBED_EXPONENT).contains(&exponent);
