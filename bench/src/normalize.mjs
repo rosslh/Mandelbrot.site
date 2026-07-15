@@ -2,8 +2,11 @@
 // cases into the exact 21-argument call the production worker makes
 // (client/js/worker.js), replicating the client's zoom-rebase and tile math.
 
-// Effective zoom thresholds from mandelbrot/src/perturbation.rs.
-export const DEEP_ZOOM_THRESHOLD = 47;
+// Effective zoom thresholds from mandelbrot/src/perturbation.rs. The wasm
+// picks direct vs perturbation from the actual pixel spacing
+// (MIN_DIRECT_PIXEL_SPACING); at the corpus default tileSize of 200 that
+// lands at effective zoom 46.
+export const DEEP_ZOOM_THRESHOLD = 46;
 export const FLOAT_EXP_THRESHOLD = 250;
 
 // REBASED_LEAFLET_ZOOM in client/js/MandelbrotMap.ts: after a deep-zoom

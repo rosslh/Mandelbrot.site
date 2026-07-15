@@ -2019,8 +2019,8 @@ mod lib_test {
     fn test_get_mandelbrot_tile_precise_deep_zoom() {
         let max_iterations = 100_000;
 
-        // Effective zoom 12 + 40 = 52 is past DEEP_ZOOM_THRESHOLD, so this
-        // exercises the perturbation path. The origin sits on the set
+        // Effective zoom 12 + 40 = 52 is past the direct-rendering cutoff, so
+        // this exercises the perturbation path. The origin sits on the set
         // boundary, so the view contains escaping points
         let view = (2621.0, 2622.0, 2621.0, 2622.0);
         let origin = ("-0.7436438870371587", "0.1318259042053119");

@@ -340,9 +340,9 @@ fn shallow_path_matches_legacy_renderer() {
 
 #[test]
 fn shallow_path_handles_zoom_offset() {
-    // Below DEEP_ZOOM_THRESHOLD the direct f64 renderer is used even when the
-    // client has re-anchored (zoom_offset > 0); the offsets must then be
-    // scaled by 2^-zoom_offset.
+    // At shallow depths the direct f64 renderer is used even when the client
+    // has re-anchored (zoom_offset > 0); the offsets must then be scaled by
+    // 2^-zoom_offset.
     let tile_zoom = 12;
     let zoom_offset = 20_u32;
     let center = centered_tile_coordinate(tile_zoom).floor();
@@ -401,6 +401,28 @@ fn shallow_path_handles_zoom_offset() {
     );
 
     assert_eq!(precise, legacy);
+}
+
+#[test]
+fn direct_rendering_cutoff_accounts_for_tile_resolution() {
+    // One tile mapped onto `width` pixels at the client's rebased tile zoom.
+    let spacing = |effective_zoom: i64, width: usize| {
+        pixel_spacing(0.0, 1.0, 12, (effective_zoom - 12) as u32, width)
+    };
+
+    // Standard 200px tiles: direct through effective zoom 45 (2 ULP of
+    // coordinates near magnitude 4), perturbation from 46.
+    assert!(spacing(45, 200) >= MIN_DIRECT_PIXEL_SPACING);
+    assert!(spacing(46, 200) < MIN_DIRECT_PIXEL_SPACING);
+
+    // High-DPI tiles halve the pixel spacing, so the switch moves a level
+    // earlier; a fixed zoom threshold would leave a blocky zone here.
+    assert!(spacing(44, 400) >= MIN_DIRECT_PIXEL_SPACING);
+    assert!(spacing(45, 400) < MIN_DIRECT_PIXEL_SPACING);
+
+    // Extreme depths underflow to zero spacing, which still reads as deep.
+    assert_eq!(spacing(5000, 200), 0.0);
+    assert!(spacing(5000, 200) < MIN_DIRECT_PIXEL_SPACING);
 }
 
 #[test]

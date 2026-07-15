@@ -24,13 +24,13 @@
       "note": "Reported URL: mandelbrot.site/?re=...&z=36&i=51200; direct pathway, very high iterations"
     },
     {
-      "id": "grid-z46-i6400-25e95432",
+      "id": "grid-z45-i6400-25e95432",
       "source": "corpus:user-z46-25e95432",
       "re": "-0.6173597732160516",
       "im": "-0.4045964293189659",
-      "zoom": 46,
+      "zoom": 45,
       "iterations": 6400,
-      "note": "Closest corpus neighbor: direct/high-iter just under the perturbation threshold"
+      "note": "Direct/high-iter at the deepest direct level for 200px tiles; nudged one level shallower than the z46 source view when the cutoff moved to pixel spacing (MIN_DIRECT_PIXEL_SPACING), which put z46 on the perturbation path"
     },
     {
       "id": "grid-z20-i1600-d0989824",

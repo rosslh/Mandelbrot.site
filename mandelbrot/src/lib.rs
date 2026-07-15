@@ -2669,9 +2669,10 @@ pub fn get_mandelbrot_set_image(
 /// strings) plus a rectangle in Leaflet tile coordinates. A tile coordinate
 /// `v` at `tile_zoom` maps to the complex offset
 /// `((v / 2^(tile_zoom - 2)) * (200 / 128) - 4) * 2^-zoom_offset` from the
-/// origin. Shallow views use the direct f64 renderer; deep views use
-/// perturbation theory with an arbitrary-precision reference orbit, so zoom
-/// depth is not limited by f64 precision.
+/// origin. Views whose pixel spacing leaves f64 coordinates enough headroom
+/// use the direct f64 renderer; finer views use perturbation theory with an
+/// arbitrary-precision reference orbit, so zoom depth is not limited by f64
+/// precision.
 fn render_tile_precise(
     origin_re: &str,
     origin_im: &str,
@@ -2696,9 +2697,22 @@ fn render_tile_precise(
     palette_max_iter: i32,
     color_cycles: u32,
 ) -> RenderedTile {
-    let effective_zoom = tile_zoom as i64 + zoom_offset as i64;
+    let pixel_spacing = perturbation::pixel_spacing(
+        tile_x_min,
+        tile_x_max,
+        tile_zoom,
+        zoom_offset,
+        image_width,
+    )
+    .min(perturbation::pixel_spacing(
+        tile_y_min,
+        tile_y_max,
+        tile_zoom,
+        zoom_offset,
+        image_height,
+    ));
 
-    let use_perturbation = effective_zoom >= perturbation::DEEP_ZOOM_THRESHOLD
+    let use_perturbation = pixel_spacing < perturbation::MIN_DIRECT_PIXEL_SPACING
         && (2..=perturbation::MAX_PERTURBED_EXPONENT).contains(&exponent);
 
     if !use_perturbation {

@@ -1,7 +1,8 @@
 //! Deep-zoom rendering via perturbation theory.
 //!
-//! Past zoom level ~44 the f64 coordinates of adjacent pixels become
-//! identical, so the direct escape-time algorithm produces blocky garbage.
+//! Once the pixel spacing falls to within a couple of ULPs of the f64
+//! coordinates, adjacent pixels round to identical coordinates and the
+//! direct escape-time algorithm produces blocky garbage.
 //! Perturbation theory works around this: one *reference orbit* is iterated
 //! with arbitrary-precision arithmetic, and every pixel then iterates only its
 //! tiny delta from that orbit using fast hardware floats. Rebasing (Zhuoran's
@@ -31,11 +32,14 @@ mod perturbation_test;
 
 type BigFloat = FBig<Zero, 2>;
 
-/// Effective zoom level at which rendering switches to perturbation. One
-/// level below the zoom cap of the pre-perturbation renderer: at zoom 47 the
-/// pixel spacing (2^-52) drops below the f64 ULP of coordinates near
-/// magnitude 2, so the direct renderer starts quantizing pixels.
-pub const DEEP_ZOOM_THRESHOLD: i64 = 47;
+/// Minimum pixel spacing the direct f64 renderer is allowed to handle;
+/// anything finer switches to perturbation. Coordinates reach magnitude 4 at
+/// the edge of tile space, where the f64 ULP is 2^-51; two ULPs of headroom
+/// keep adjacent pixel coordinates distinct and monotone after rounding. At
+/// the standard 200-pixel tile size the switch lands at effective zoom 46;
+/// high-DPI tiles (2-3x the pixels per tile) switch one or two levels
+/// earlier.
+pub const MIN_DIRECT_PIXEL_SPACING: f64 = 1.0 / (1u64 << 50) as f64;
 
 /// Effective zoom level above which pixel deltas need an extended exponent
 /// range. Below it, deltas and their squares stay clear of f64 underflow.
@@ -58,6 +62,22 @@ const TILE_SPACE_SCALE: f64 = 200.0 / 128.0;
 /// world origin, before the additional `2^-zoom_offset` deep-zoom scaling.
 pub fn tile_coordinate_offset(tile_coordinate: f64, tile_zoom: i32) -> f64 {
     tile_coordinate * TILE_SPACE_SCALE * ldexp(1.0, -(tile_zoom as i64 - 2)) - 4.0
+}
+
+/// Complex-plane distance between adjacent pixels of a render request that
+/// maps `tile_max - tile_min` tile units onto `image_len` pixels. Underflows
+/// to zero at extreme depths, which callers should treat as "finer than f64".
+pub fn pixel_spacing(
+    tile_min: f64,
+    tile_max: f64,
+    tile_zoom: i32,
+    zoom_offset: u32,
+    image_len: usize,
+) -> f64 {
+    ldexp(
+        (tile_max - tile_min) * TILE_SPACE_SCALE / image_len as f64,
+        -(tile_zoom as i64 - 2) - zoom_offset as i64,
+    )
 }
 
 /// Parses an arbitrary-precision decimal string into a binary big float.

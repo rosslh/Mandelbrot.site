@@ -43,9 +43,11 @@ type TilePosition = {
 // The effective zoom is `leafletZoom + zoomOffset` and is unbounded.
 const MAX_LEAFLET_ZOOM = 26;
 // Effective zoom where the wasm switches from the direct f64 loop to
-// perturbation (DEEP_ZOOM_THRESHOLD in mandelbrot/src/perturbation.rs); used
-// only to decide whether pool spawn should warm the perturbation kernel.
-const DEEP_ZOOM_THRESHOLD = 47;
+// perturbation at the standard tile resolution (MIN_DIRECT_PIXEL_SPACING in
+// mandelbrot/src/perturbation.rs; high-DPI tiles switch a level or two
+// earlier); used only to decide whether pool spawn should warm the
+// perturbation kernel.
+const DEEP_ZOOM_THRESHOLD = 46;
 // Effective zoom where perturbation switches from f64 deltas to the hybrid
 // float-exp kernel (FLOAT_EXP_THRESHOLD in mandelbrot/src/perturbation.rs);
 // used only to pick the right spawn warmup.
