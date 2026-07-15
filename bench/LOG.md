@@ -2510,3 +2510,33 @@ actually carries the simd128 win measured 2026-07-02. Note the server's
 rustc (latest stable) still differs from the locally benchmarked 1.86, so
 deployed bytes are not the benchmarked bytes; pinning via rust-toolchain.toml
 was considered and skipped to keep the track-stable policy.
+
+## 2026-07-15 — Direct/perturbation cutoff moved from a zoom threshold to pixel spacing; corpus + anchor audit
+
+Machine: n/a (correctness/semantics change, not a perf experiment). Recorded
+because it changes which kernel renders near-boundary depths and touches the
+grid-regression corpus.
+
+The wasm now picks direct vs perturbation from the actual pixel spacing of
+the render request (`MIN_DIRECT_PIXEL_SPACING = 2^-50`, two ULPs of f64
+coordinate headroom at magnitude 4) instead of `effective_zoom >= 47`
+(commit c288d0b). At the corpus-default 200px tiles the switch lands at
+effective zoom 46, one level earlier than before; high-DPI tiles switch one
+or two levels earlier still — the motivating fix, since a fixed zoom
+threshold let 2-3x-denser tiles keep the direct kernel past the point where
+adjacent pixel coordinates quantize. `bench/src/normalize.mjs`
+DEEP_ZOOM_THRESHOLD follows (47 → 46; note it is spacing-based in the wasm,
+so `pathwayFor` labels assume the 200px default).
+
+Corpus impact: grid-z46-i6400-25e95432 existed as "deepest direct/high-iter"
+and would have silently become a perturbation case; renamed/nudged to
+grid-z45-i6400-25e95432 (same coordinates/iterations, source view was z46)
+so the grid keeps a deepest-direct cell. Old grid-run results JSONs don't
+line up for that case id; results are machine-local and per-session, so
+nothing durable invalidated.
+
+Anchor audit: scanned every corpus case (including tileSize overrides) for
+kernel flips between the old rule (zoom >= 47) and the new spacing rule —
+none remain after the z46 → z45 nudge, and the kernels themselves are
+untouched, so all gated outputs are bit-identical to the pinned anchor
+(3517e56, 2026-07-10). The anchor stays valid; no re-pin.
