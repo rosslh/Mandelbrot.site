@@ -6,8 +6,7 @@
 // Effective zoom is unbounded (up to 10^6 via the input), so all comparisons
 // are done in log space to avoid overflowing f64.
 
-// The whole set fits the viewport at the initial desktop zoom.
-const FULL_SET_ZOOM = 3;
+import { FULL_SET_ZOOM } from "./magnification";
 
 type ScaleObject = { name: string; meters: number };
 

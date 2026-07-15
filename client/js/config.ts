@@ -7,6 +7,7 @@
 
 import type { ColoringOptions } from "./protocol";
 import { isValidDecimalCoordinate } from "./highPrecision";
+import { formatMagnification } from "./magnification";
 
 export type MandelbrotConfig = {
   iterations: number;
@@ -114,6 +115,15 @@ export type CoordinateSpec = BaseSpec & {
   min: number;
   max: number;
 };
+// The zoom setting: stored (and shared via URL) as the effective zoom level,
+// but displayed and edited as a magnification factor (see magnification.ts).
+// min/max bound the underlying zoom level, not the magnification.
+export type MagnificationSpec = BaseSpec & {
+  key: "zoom";
+  control: "magnification";
+  min: number;
+  max: number;
+};
 
 export type SettingSpec =
   | NumberSpec
@@ -121,7 +131,8 @@ export type SettingSpec =
   | SelectSpec
   | SelectNumberSpec
   | CheckboxSpec
-  | CoordinateSpec;
+  | CoordinateSpec
+  | MagnificationSpec;
 
 export const settingsSchema: SettingSpec[] = [
   // View
@@ -143,7 +154,7 @@ export const settingsSchema: SettingSpec[] = [
   },
   {
     key: "zoom",
-    control: "number",
+    control: "magnification",
     urlParam: "z",
     effect: "rerender",
     min: 0,
@@ -373,7 +384,10 @@ export function syncInputToConfig(
     element instanceof HTMLInputElement ||
     element instanceof HTMLSelectElement
   ) {
-    element.value = String(config[key]);
+    // Zoom is stored as an effective zoom level but displayed as a
+    // magnification factor.
+    element.value =
+      key === "zoom" ? formatMagnification(config.zoom) : String(config[key]);
   }
 }
 

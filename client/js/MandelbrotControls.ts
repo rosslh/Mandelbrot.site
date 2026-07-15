@@ -5,6 +5,7 @@ import type MandelbrotMap from "./MandelbrotMap";
 import {
   CheckboxSpec,
   CoordinateSpec,
+  MagnificationSpec,
   MandelbrotConfig,
   NumberSpec,
   SelectNumberSpec,
@@ -17,6 +18,7 @@ import {
 } from "./config";
 import FormModal from "./FormModal";
 import { isValidDecimalCoordinate } from "./highPrecision";
+import { zoomFromMagnification } from "./magnification";
 import { describeZoomScale } from "./zoomScale";
 import * as api from "./api";
 
@@ -163,6 +165,9 @@ class MandelbrotControls {
           break;
         case "coordinate":
           this.wireCoordinateInput(spec);
+          break;
+        case "magnification":
+          this.wireMagnificationInput(spec);
           break;
         case "select":
         case "selectNumber":
@@ -321,6 +326,30 @@ class MandelbrotControls {
 
       this.updateResetButtonsVisibility();
       this.map.refresh();
+    }, 1000);
+  }
+
+  private wireMagnificationInput(spec: MagnificationSpec) {
+    const input = document.getElementById(spec.key) as HTMLInputElement;
+    input.oninput = debounce(() => {
+      // The input holds a magnification factor; the config stores the
+      // effective zoom level it snaps to (spec.min/max bound the zoom).
+      const zoom = zoomFromMagnification(input.value);
+      const isValid = zoom !== null && zoom >= spec.min && zoom <= spec.max;
+      // Entered magnifications snap to a zoom level, so an edit can resolve
+      // to the current view; re-rendering would be a no-op then.
+      const changed = isValid && zoom !== this.map.config.zoom;
+
+      if (changed) {
+        this.map.config.zoom = zoom;
+      }
+      // Redisplay the magnification of the zoom level actually applied.
+      syncInputToConfig(this.map.config, spec.key);
+
+      this.updateResetButtonsVisibility();
+      if (changed) {
+        this.applySettingEffect(spec);
+      }
     }, 1000);
   }
 
