@@ -19,6 +19,7 @@ import {
 import FormModal from "./FormModal";
 import ConfirmModal from "./ConfirmModal";
 import PinnedLocations from "./PinnedLocations";
+import PaletteHistogram from "./PaletteHistogram";
 import { isValidDecimalCoordinate } from "./highPrecision";
 import { zoomFromMagnification } from "./magnification";
 import { describeZoomScale } from "./zoomScale";
@@ -44,6 +45,7 @@ class MandelbrotControls {
   resetButtonConfigs: ResetButtonConfig[];
   private changeExponentModal: ConfirmModal;
   private pinnedLocations: PinnedLocations;
+  private paletteHistogram: PaletteHistogram;
 
   constructor(map: MandelbrotMap) {
     this.map = map;
@@ -147,6 +149,7 @@ class MandelbrotControls {
     this.syncAutoAdjustUi();
     this.updateResetButtonsVisibility();
     this.loadDetailsState();
+    this.paletteHistogram = new PaletteHistogram(this.map);
 
     window.addEventListener(
       "resize",
@@ -340,6 +343,16 @@ class MandelbrotControls {
 
     this.updateResetButtonsVisibility();
     this.applySettingEffect(spec);
+
+    // A manual palette bound (or an iteration-cap change, which resets the
+    // ceiling) moves the histogram markers.
+    if (
+      spec.key === "paletteMinIter" ||
+      spec.key === "paletteMaxIter" ||
+      spec.key === "iterations"
+    ) {
+      this.refreshPaletteHistogram();
+    }
   }
 
   private wireCoordinateInput(spec: CoordinateSpec) {
@@ -413,6 +426,7 @@ class MandelbrotControls {
         if (this.map.config.paletteAutoAdjust) {
           this.map.refitPaletteAndRecolor();
         }
+        this.refreshPaletteHistogram();
         return;
       }
       this.applySettingEffect(spec);
@@ -483,6 +497,19 @@ class MandelbrotControls {
 
       debouncedRefresh();
     };
+  }
+
+  /** Called after the palette bounds are set from outside the sidebar inputs
+   * (e.g. dragging the histogram markers) so the reset button reflects the
+   * divergence from the initial config. */
+  notifyPaletteBoundsChanged() {
+    this.updateResetButtonsVisibility();
+  }
+
+  /** Redraws the palette-range histogram — its bound markers track the config,
+   * so any palette min/max change (a manual edit, a refit) must repaint it. */
+  refreshPaletteHistogram() {
+    this.paletteHistogram?.update();
   }
 
   /** Reflects the auto-adjust state in the panel: while enabled the min/max

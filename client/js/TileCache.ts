@@ -3,6 +3,32 @@ import type { TileRect } from "./protocol";
 
 type TileIterationRange = { min: number; max: number };
 
+/** The center-weighted escape-value distribution of the visible pixels, plus
+ * the aggregates that fall out of the same pass. `buckets` spans [min, max]
+ * with the same 1024 buckets, neighbor-capping, and center weighting the
+ * palette auto-fit uses, so drawing it makes the fit's behavior visible.
+ * Weights are fractional (center weighting), so the counts are weighted
+ * masses rather than pixel counts; the interior/escaped split and the mean
+ * are computed over the same weighting. */
+export type ViewHistogram = {
+  // The histogram domain — the raw escaped-iteration range across visible
+  // tiles, before percentile clipping.
+  min: number;
+  max: number;
+  // Center-weighted mass per bucket over [min, max].
+  buckets: Float64Array;
+  // The tallest bucket's mass, so callers can normalize the bars.
+  peak: number;
+  // Weighted escaped mass (the sum over buckets) and weighted interior mass
+  // (+Infinity pixels, skipped by the buckets). Their sum is the total
+  // visible mass; interiorMass / (escapedMass + interiorMass) is the interior
+  // fraction.
+  escapedMass: number;
+  interiorMass: number;
+  // Weighted mean escape value across escaped pixels.
+  mean: number;
+};
+
 // Inclusive pixel-index bounds of a tile's on-screen portion.
 type PixelRect = { x0: number; x1: number; y0: number; y1: number };
 
@@ -73,6 +99,15 @@ class TileCache {
     version: number;
     bounds: TileRect;
     result: TileIterationRange | null;
+  } | null = null;
+  // viewStats runs the same full-pixel scan as detectedRange, so it is
+  // memoized against the same version/bounds key. It stays independent of
+  // lastDetection because the panel that consumes it may not be open on every
+  // fit, and a fit does not always compute stats.
+  private lastStats: {
+    version: number;
+    bounds: TileRect;
+    result: ViewHistogram | null;
   } | null = null;
 
   private key(position: L.Coords): string {
@@ -169,12 +204,101 @@ class TileCache {
    * outliers cannot hold the ceiling up (see CEILING_PERCENTILE). */
   private percentileClip(
     bounds: TileRect,
-    { min, max }: TileIterationRange,
+    range: TileIterationRange,
   ): TileIterationRange {
+    const { min, max } = range;
     if (max - min < 2) {
       return { min, max };
     }
 
+    const { buckets, escapedMass: total } = this.buildHistogram(bounds, range);
+
+    if (total === 0) {
+      return { min, max };
+    }
+
+    const floorThreshold = total * FLOOR_PERCENTILE;
+    const ceilingThreshold = total * CEILING_PERCENTILE;
+    let floor = min;
+    let ceiling = max;
+    let floorFound = false;
+    let cumulative = 0;
+
+    for (let bucket = 0; bucket < HISTOGRAM_BUCKETS; bucket++) {
+      cumulative += buckets[bucket];
+      if (!floorFound && cumulative >= floorThreshold) {
+        // The lower edge of the bucket, rounded down to a whole iteration.
+        floor = Math.floor(min + (bucket * (max - min)) / HISTOGRAM_BUCKETS);
+        floorFound = true;
+      }
+      if (cumulative >= ceilingThreshold) {
+        // The upper edge of the bucket, rounded up to a whole iteration.
+        ceiling = Math.ceil(
+          min + ((bucket + 1) * (max - min)) / HISTOGRAM_BUCKETS,
+        );
+        break;
+      }
+    }
+
+    return { min: floor, max: ceiling };
+  }
+
+  /** The center-weighted escape-value distribution of the visible pixels,
+   * for the palette-range panel's levels-style histogram. Runs the same scan
+   * as detectedRange (same domain, neighbor-capping, and center weighting),
+   * memoized against version/bounds so an open panel does not double the
+   * per-frame cost. Returns null when no visible tile has reported a range. */
+  viewStats(bounds: TileRect): ViewHistogram | null {
+    const last = this.lastStats;
+    if (
+      last &&
+      last.version === this.version &&
+      last.bounds.zoom === bounds.zoom &&
+      last.bounds.xMin === bounds.xMin &&
+      last.bounds.xMax === bounds.xMax &&
+      last.bounds.yMin === bounds.yMin &&
+      last.bounds.yMax === bounds.yMax
+    ) {
+      return last.result;
+    }
+
+    let range: TileIterationRange | null = null;
+    for (const tile of this.tiles.values()) {
+      if (
+        tile.zoom !== bounds.zoom ||
+        tile.range === null ||
+        this.visiblePixels(tile, bounds) === null
+      ) {
+        continue;
+      }
+      if (range === null) {
+        range = { min: tile.range.min, max: tile.range.max };
+      } else {
+        range.min = Math.min(range.min, tile.range.min);
+        range.max = Math.max(range.max, tile.range.max);
+      }
+    }
+
+    let result: ViewHistogram | null = null;
+    if (range !== null) {
+      // A single-value domain still yields useful aggregates (mean, interior
+      // fraction); widen it by one so the buckets have somewhere to land.
+      const max = Math.max(range.max, range.min + 1);
+      result = this.buildHistogram(bounds, { min: range.min, max });
+    }
+
+    this.lastStats = { version: this.version, bounds, result };
+    return result;
+  }
+
+  /** Scans the visible pixels once, filling a center-weighted, neighbor-capped
+   * histogram over [min, max] plus the aggregates that fall out of the same
+   * pass. Shared by percentileClip (which reads the buckets) and viewStats
+   * (which reads everything). */
+  private buildHistogram(
+    bounds: TileRect,
+    { min, max }: TileIterationRange,
+  ): ViewHistogram {
     // Center weighting makes the counts fractional.
     const buckets = new Float64Array(HISTOGRAM_BUCKETS);
     const scale = HISTOGRAM_BUCKETS / (max - min);
@@ -182,7 +306,10 @@ class TileCache {
     const centerY = (bounds.yMin + bounds.yMax) / 2;
     const halfWidth = (bounds.xMax - bounds.xMin) / 2 || 1;
     const halfHeight = (bounds.yMax - bounds.yMin) / 2 || 1;
-    let total = 0;
+    let escapedMass = 0;
+    let interiorMass = 0;
+    // Weighted sum of the raw (uncapped) escape values, for the mean.
+    let valueSum = 0;
 
     for (const tile of this.tiles.values()) {
       if (tile.zoom !== bounds.zoom || tile.range === null) {
@@ -242,10 +369,12 @@ class TileCache {
         const rowStart = y * width;
 
         for (let x = x0; x <= x1; x++) {
+          const weight = 1 / (rowWeightTerm + xDistSq[x - x0]);
           const value = values[rowStart + x];
           // Interior pixels are +Infinity; smoothing can also nudge a value
           // slightly outside the integer iteration bounds, so clamp.
           if (!Number.isFinite(value)) {
+            interiorMass += weight;
             continue;
           }
           // Only a strict local maximum gets capped, so bail out on the
@@ -272,41 +401,29 @@ class TileCache {
             HISTOGRAM_BUCKETS - 1,
             Math.max(0, Math.floor((capped - min) * scale)),
           );
-          const weight = 1 / (rowWeightTerm + xDistSq[x - x0]);
           buckets[bucket] += weight;
-          total += weight;
+          escapedMass += weight;
+          valueSum += weight * value;
         }
       }
     }
 
-    if (total === 0) {
-      return { min, max };
-    }
-
-    const floorThreshold = total * FLOOR_PERCENTILE;
-    const ceilingThreshold = total * CEILING_PERCENTILE;
-    let floor = min;
-    let ceiling = max;
-    let floorFound = false;
-    let cumulative = 0;
-
+    let peak = 0;
     for (let bucket = 0; bucket < HISTOGRAM_BUCKETS; bucket++) {
-      cumulative += buckets[bucket];
-      if (!floorFound && cumulative >= floorThreshold) {
-        // The lower edge of the bucket, rounded down to a whole iteration.
-        floor = Math.floor(min + (bucket * (max - min)) / HISTOGRAM_BUCKETS);
-        floorFound = true;
-      }
-      if (cumulative >= ceilingThreshold) {
-        // The upper edge of the bucket, rounded up to a whole iteration.
-        ceiling = Math.ceil(
-          min + ((bucket + 1) * (max - min)) / HISTOGRAM_BUCKETS,
-        );
-        break;
+      if (buckets[bucket] > peak) {
+        peak = buckets[bucket];
       }
     }
 
-    return { min: floor, max: ceiling };
+    return {
+      min,
+      max,
+      buckets,
+      peak,
+      escapedMass,
+      interiorMass,
+      mean: escapedMass > 0 ? valueSum / escapedMass : min,
+    };
   }
 
   /** The inclusive pixel-index rect of the tile's on-screen portion — a

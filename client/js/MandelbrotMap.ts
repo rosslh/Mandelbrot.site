@@ -531,6 +531,8 @@ class MandelbrotMap extends L.Map {
     }
     this.applyDetectedPaletteRange();
     this.recolorVisibleTiles();
+    // The refit moved the palette bounds; keep the histogram markers in step.
+    this.controls?.refreshPaletteHistogram();
   }
 
   /** Runs when every visible tile has finished rendering: fit the palette to

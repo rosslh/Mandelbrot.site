@@ -278,6 +278,36 @@
             />
             <label for="paletteAutoAdjust">Auto-adjust</label>
           </div>
+          <div id="paletteHistogram">
+            <p id="paletteHistogramEmpty" class="secondary">
+              Rendering the view…
+            </p>
+            <canvas
+              id="paletteHistogramCanvas"
+              title="Distribution of escape times in view. Drag the bright edges to set the palette range."
+              aria-label="Histogram of escape times in the current view"
+            ></canvas>
+            <dl id="paletteHistogramStats">
+              <div>
+                <dt>Min</dt>
+                <dd id="paletteStatMin">–</dd>
+              </div>
+              <div>
+                <dt>Max</dt>
+                <dd id="paletteStatMax">–</dd>
+              </div>
+              <div>
+                <dt>Mean</dt>
+                <dd id="paletteStatMean">–</dd>
+              </div>
+              <div>
+                <dt title="Fraction of visible pixels inside the set">
+                  Interior
+                </dt>
+                <dd id="paletteStatInterior">–</dd>
+              </div>
+            </dl>
+          </div>
           <div class="input-wrapper">
             <label for="paletteMinIter">Min iterations</label>
             <input
