@@ -18,6 +18,12 @@ import {
 } from "./config";
 import FormModal from "./FormModal";
 import ConfirmModal from "./ConfirmModal";
+import {
+  AnimationCancelledError,
+  AnimationProgress,
+  canRecordAnimation,
+} from "./ZoomAnimator";
+import type { AnimationKind, AnimationSpec } from "./animationFrames";
 import PinnedLocations from "./PinnedLocations";
 import PaletteHistogram from "./PaletteHistogram";
 import { isValidDecimalCoordinate } from "./highPrecision";
@@ -297,6 +303,7 @@ class MandelbrotControls {
     this.handleHideShowUiButton();
     this.handleShareButton();
     this.handleSaveImageButton();
+    this.handleAnimateButton();
     this.handleResetButtons();
   }
 
@@ -715,6 +722,136 @@ class MandelbrotControls {
       e.stopPropagation();
       modal.toggle();
     };
+  }
+
+  /** Wires the zoom-animation button and modal (issue #13). The current view
+   * is the animation's target; the user picks the direction (zoom in to / out
+   * of it), resolution, duration, and frame rate. Generation runs on the
+   * shared worker pool with per-frame progress on the submit button and
+   * mid-run cancellation via the (kept-live) cancel button. */
+  private handleAnimateButton() {
+    const animateButton = document.getElementById(
+      "animateZoom",
+    ) as HTMLButtonElement | null;
+    if (!animateButton) {
+      return;
+    }
+
+    // Hide the feature entirely on browsers that can't record video from a
+    // canvas (no MediaRecorder / captureStream / supported codec).
+    if (!canRecordAnimation()) {
+      animateButton.style.display = "none";
+      return;
+    }
+
+    const kindInput = document.getElementById(
+      "animateKind",
+    ) as HTMLSelectElement;
+    const widthInput = document.getElementById(
+      "animateWidth",
+    ) as HTMLInputElement;
+    const heightInput = document.getElementById(
+      "animateHeight",
+    ) as HTMLInputElement;
+    const durationInput = document.getElementById(
+      "animateDuration",
+    ) as HTMLInputElement;
+    const fpsInput = document.getElementById("animateFps") as HTMLInputElement;
+
+    const modal = new FormModal(
+      {
+        dialogId: "animateZoomModal",
+        formId: "animateZoomForm",
+        submitId: "animateZoomSubmit",
+        cancelId: "animateZoomCancel",
+      },
+      {
+        onOpen: () => {
+          modal.form.reset();
+          // Default to a modest 720p-ish preset: large enough to look good,
+          // small enough to render in reasonable time.
+          kindInput.value = "in";
+          widthInput.value = "1280";
+          heightInput.value = "720";
+          durationInput.value = "8";
+          fpsInput.value = "30";
+        },
+        onCancelBusy: () => {
+          modal.setBusyLabel("Cancelling...");
+          this.map.zoomAnimator.cancel();
+        },
+        onSubmit: () => {
+          const spec = this.readAnimationSpec(
+            kindInput,
+            widthInput,
+            heightInput,
+            durationInput,
+            fpsInput,
+          );
+          if (!spec) {
+            return;
+          }
+
+          modal.beginBusy("Preparing...");
+          this.map.zoomAnimator
+            .generate(spec, (progress: AnimationProgress) => {
+              modal.setBusyLabel(this.animationProgressLabel(progress));
+            })
+            .catch((error: unknown) => {
+              if (error instanceof AnimationCancelledError) {
+                return;
+              }
+              alert("Error generating animation\n\n" + error);
+              console.error(error);
+            })
+            .finally(() => {
+              modal.finishBusy();
+            });
+        },
+      },
+    );
+
+    animateButton.onclick = (e) => {
+      e.stopPropagation();
+      modal.toggle();
+    };
+  }
+
+  /** Validates the animation modal's inputs into an `AnimationSpec`, or null
+   * when any value is missing or out of range. */
+  private readAnimationSpec(
+    kindInput: HTMLSelectElement,
+    widthInput: HTMLInputElement,
+    heightInput: HTMLInputElement,
+    durationInput: HTMLInputElement,
+    fpsInput: HTMLInputElement,
+  ): AnimationSpec | null {
+    const width = Number(widthInput.value);
+    const height = Number(heightInput.value);
+    const durationSeconds = Number(durationInput.value);
+    const fps = Number(fpsInput.value);
+    const kind = kindInput.value as AnimationKind;
+
+    const positive = (value: number) => Number.isFinite(value) && value > 0;
+    if (
+      !positive(width) ||
+      !positive(height) ||
+      !positive(durationSeconds) ||
+      !positive(fps) ||
+      (kind !== "in" && kind !== "out")
+    ) {
+      return null;
+    }
+
+    return { kind, width, height, durationSeconds, fps };
+  }
+
+  private animationProgressLabel(progress: AnimationProgress): string {
+    const percent = Math.round(progress.fraction * 100);
+    if (progress.phase === "rendering") {
+      return `Rendering ${progress.frame}/${progress.totalFrames} (${percent}%)`;
+    }
+    return `Encoding (${percent}%)`;
   }
 
   private handleHideShowUiButton() {

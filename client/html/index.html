@@ -519,6 +519,18 @@
               d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06z"
             />
           </svg></button
+        ><button id="animateZoom" title="Generate zoom animation" type="button">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="1em"
+            height="1em"
+            viewBox="0 0 16 16"
+          >
+            <path
+              fill="currentColor"
+              d="M1.5 2A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h13a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 14.5 2Zm0 1.5h13v9h-13zM6.25 5.5a.75.75 0 0 0-1.25.56v3.88a.75.75 0 0 0 1.16.63l3-1.94a.75.75 0 0 0 0-1.26z"
+            />
+          </svg></button
         ><button id="shareButton" title="Share current view" type="button">
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -638,6 +650,73 @@
         <div class="submit-or-cancel">
           <button type="submit" id="saveImageSubmit">Save</button>
           <button type="button" id="saveImageCancel" class="underline-button">
+            Cancel
+          </button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="animateZoomModal" class="overlay form-modal">
+      <form id="animateZoomForm">
+        <strong>Generate zoom animation</strong>
+        <div class="input-wrapper">
+          <label for="animateKind">Kind</label>
+          <select id="animateKind" name="animateKind">
+            <option value="in">Zoom in to this location</option>
+            <option value="out">Zoom out from this location</option>
+          </select>
+        </div>
+        <div class="input-wrapper">
+          <label for="animateWidth">Width (px)</label>
+          <input
+            type="number"
+            required
+            id="animateWidth"
+            name="animateWidth"
+            min="16"
+            max="3840"
+          />
+        </div>
+        <div class="input-wrapper">
+          <label for="animateHeight">Height (px)</label>
+          <input
+            type="number"
+            required
+            id="animateHeight"
+            name="animateHeight"
+            min="16"
+            max="2160"
+          />
+        </div>
+        <div class="input-wrapper">
+          <label for="animateDuration">Duration (seconds)</label>
+          <input
+            type="number"
+            required
+            id="animateDuration"
+            name="animateDuration"
+            min="1"
+            max="60"
+            step="0.5"
+          />
+        </div>
+        <div class="input-wrapper">
+          <label for="animateFps">Frame rate (fps)</label>
+          <input
+            type="number"
+            required
+            id="animateFps"
+            name="animateFps"
+            min="1"
+            max="60"
+          />
+        </div>
+        <p class="secondary" id="animateHint">
+          Higher resolutions, longer durations, and deep zooms take much longer
+          to render.
+        </p>
+        <div class="submit-or-cancel">
+          <button type="submit" id="animateZoomSubmit">Generate</button>
+          <button type="button" id="animateZoomCancel" class="underline-button">
             Cancel
           </button>
         </div>

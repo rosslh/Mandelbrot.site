@@ -4,6 +4,7 @@ import MandelbrotLayer from "./MandelbrotLayer";
 import { QueuedTask } from "threads/dist/master/pool-types";
 import MandelbrotControls from "./MandelbrotControls";
 import ImageSaver from "./ImageSaver";
+import ZoomAnimator from "./ZoomAnimator";
 import PointTooltip from "./PointTooltip";
 import JuliaPanel from "./JuliaPanel";
 import RegionRenderer from "./RegionRenderer";
@@ -88,6 +89,7 @@ class MandelbrotMap extends L.Map {
   poolSpawned: Promise<void>;
   regionRenderer: RegionRenderer;
   imageSaver: ImageSaver;
+  zoomAnimator: ZoomAnimator;
   pointTooltip: PointTooltip;
   juliaPanel: JuliaPanel;
   queuedTileTasks: QueuedTileTask[] = [];
@@ -148,6 +150,7 @@ class MandelbrotMap extends L.Map {
     this.addLoadingSpinnerControl();
     this.controls = new MandelbrotControls(this);
     this.imageSaver = new ImageSaver(this);
+    this.zoomAnimator = new ZoomAnimator(this);
     this.pointTooltip = new PointTooltip(this);
     this.juliaPanel = new JuliaPanel(this);
 

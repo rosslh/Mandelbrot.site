@@ -17,6 +17,11 @@ type FormModalHandlers = {
   // Runs on a valid submit while idle. The handler is responsible for
   // calling beginBusy/finishBusy around any async work.
   onSubmit: () => void;
+  // When set, the submitted task is cancellable: the cancel button (and
+  // Escape) stay live while busy and invoke this instead of closing. The task
+  // is still responsible for calling finishBusy once it actually stops. Used
+  // by long-running work like zoom-animation generation (issue #13).
+  onCancelBusy?: () => void;
 };
 
 class FormModal {
@@ -27,6 +32,7 @@ class FormModal {
   private busy = false;
   private idleSubmitLabel: string;
   private onOpen?: () => void;
+  private onCancelBusy?: () => void;
 
   constructor(elements: FormModalElements, handlers: FormModalHandlers) {
     this.dialog = document.getElementById(
@@ -48,16 +54,26 @@ class FormModal {
       }
     });
 
-    // Escape while busy: the running task can't be cancelled, so neither
-    // can the dialog.
+    // Escape while busy: for a non-cancellable task the dialog can't close;
+    // for a cancellable one, Escape requests cancellation (the browser's
+    // default close is still prevented so the modal stays up showing progress
+    // until the task actually stops and calls finishBusy).
     this.dialog.addEventListener("cancel", (event) => {
       if (this.busy) {
         event.preventDefault();
+        this.onCancelBusy?.();
       }
     });
 
-    this.cancelButton.onclick = () => this.close();
+    this.cancelButton.onclick = () => {
+      if (this.busy) {
+        this.onCancelBusy?.();
+      } else {
+        this.close();
+      }
+    };
     this.onOpen = handlers.onOpen;
+    this.onCancelBusy = handlers.onCancelBusy;
   }
 
   get isBusy(): boolean {
@@ -93,7 +109,11 @@ class FormModal {
     this.busy = true;
     this.submitButton.innerText = label;
     this.submitButton.setAttribute("disabled", "true");
-    this.cancelButton.setAttribute("disabled", "true");
+    // A cancellable task keeps its cancel button live so the run can be
+    // aborted mid-flight; a non-cancellable one locks it until the task ends.
+    if (!this.onCancelBusy) {
+      this.cancelButton.setAttribute("disabled", "true");
+    }
   }
 
   /** Updates the progress label mid-task (e.g. "Generating…" →
