@@ -299,6 +299,32 @@ class MandelbrotMap extends L.Map {
     return this.coordinatesAtLatLng(this.getCenter());
   }
 
+  /** The complex-plane offset of a map location from the view center, as
+   * ordinary floats. `tileCoordinateOffset` is affine, so the difference of
+   * two offsets is exact in f64 even where the absolute coordinates need
+   * arbitrary precision; the shared `2^-zoomOffset` deep-zoom scale is
+   * returned separately (as `zoomOffset`) so a caller can render the tiny
+   * value in scientific notation without underflowing f64. */
+  offsetFromCenterAtLatLng(latLng: L.LatLng): {
+    re: number;
+    im: number;
+    zoomOffset: number;
+  } {
+    const zoom = this.getZoom();
+    const cursor = this.latLngToTilePosition(latLng, zoom);
+    const center = this.latLngToTilePosition(this.getCenter(), zoom);
+
+    return {
+      re:
+        this.tileCoordinateOffset(cursor.x, zoom) -
+        this.tileCoordinateOffset(center.x, zoom),
+      im:
+        this.tileCoordinateOffset(center.y, zoom) -
+        this.tileCoordinateOffset(cursor.y, zoom),
+      zoomOffset: this.zoomOffset,
+    };
+  }
+
   public get mapBoundsInTileSpace(): TileRect {
     const zoom = this.getZoom();
     const bounds = this.getBounds();

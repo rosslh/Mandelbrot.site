@@ -136,6 +136,17 @@ html.fractal-root {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   pointer-events: none;
+
+  // The offset-from-center row only appears at deep zoom, where it's the
+  // sole readout of sub-pixel movement; dim it slightly so it reads as
+  // secondary to the absolute coordinates.
+  .point-tooltip-offset {
+    color: var(--gray-300);
+
+    &[hidden] {
+      display: none;
+    }
+  }
 }
 
 // While a modifier key is held over the map, every shortcut targets an

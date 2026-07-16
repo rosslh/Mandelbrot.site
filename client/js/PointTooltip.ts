@@ -3,6 +3,23 @@ import throttle from "lodash/throttle";
 import type MandelbrotMap from "./MandelbrotMap";
 import { displayDigitsForZoom } from "./highPrecision";
 
+const LOG10_2 = Math.log10(2);
+
+// Digits to superscript characters, for scientific-notation exponents.
+const SUPERSCRIPTS: Record<string, string> = {
+  "0": "⁰",
+  "1": "¹",
+  "2": "²",
+  "3": "³",
+  "4": "⁴",
+  "5": "⁵",
+  "6": "⁶",
+  "7": "⁷",
+  "8": "⁸",
+  "9": "⁹",
+  "-": "⁻",
+};
+
 // Deep-zoom coordinates run to hundreds of digits, so displayed values are
 // trimmed to the decimals the cursor can distinguish (displayDigitsForZoom)
 // and then, when still long, shown head…tail. The head keeps the sign and
@@ -31,6 +48,31 @@ function formatIterations(count: number): string {
   return `${count.toLocaleString()} iteration${count === 1 ? "" : "s"}`;
 }
 
+/** Formats `value × 2^-zoomOffset` in scientific notation with a superscript
+ * exponent, e.g. "+3.2×10⁻⁴⁵". The deep-zoom scale is folded into the base-10
+ * exponent in log space, so tiny values that would underflow f64 (zoomOffset
+ * of hundreds) still render exactly. */
+function formatScaledOffset(value: number, zoomOffset: number): string {
+  const sign = value < 0 ? "−" : "+";
+  if (value === 0) {
+    return `${sign}0`;
+  }
+
+  const log10 = Math.log10(Math.abs(value)) - zoomOffset * LOG10_2;
+  let exponent = Math.floor(log10);
+  let mantissa = Number((10 ** (log10 - exponent)).toPrecision(2));
+  if (mantissa >= 10) {
+    mantissa /= 10;
+    exponent += 1;
+  }
+
+  const superscript = String(exponent)
+    .split("")
+    .map((char) => SUPERSCRIPTS[char])
+    .join("");
+  return `${sign}${mantissa}×10${superscript}`;
+}
+
 /** A cursor-following readout shown while ctrl is held over the fractal:
  * the complex-plane coordinates under the cursor, and the point's escape
  * time computed as a one-pixel render on the worker pool. Covers the hover
@@ -40,6 +82,7 @@ class PointTooltip {
   private element: HTMLDivElement;
   private reElement: HTMLDivElement;
   private imElement: HTMLDivElement;
+  private offsetElement: HTMLDivElement;
   private escapeTimeElement: HTMLDivElement;
   // The most recent mouse position over the map, so pressing ctrl shows the
   // tooltip without waiting for the next mousemove. Null while the cursor
@@ -57,8 +100,15 @@ class PointTooltip {
     this.element.hidden = true;
     this.reElement = document.createElement("div");
     this.imElement = document.createElement("div");
+    this.offsetElement = document.createElement("div");
+    this.offsetElement.className = "point-tooltip-offset";
     this.escapeTimeElement = document.createElement("div");
-    this.element.append(this.reElement, this.imElement, this.escapeTimeElement);
+    this.element.append(
+      this.reElement,
+      this.imElement,
+      this.offsetElement,
+      this.escapeTimeElement,
+    );
     map.getContainer().appendChild(this.element);
 
     map.on("mousemove", (event: L.LeafletMouseEvent) => {
@@ -99,6 +149,7 @@ class PointTooltip {
     const displayDigits = displayDigitsForZoom(this.map.effectiveZoom);
     this.reElement.textContent = `Re: ${formatCoordinate(re, displayDigits)}`;
     this.imElement.textContent = `Im: ${formatCoordinate(im, displayDigits)}`;
+    this.showOffsetFromCenter(latLng, displayDigits);
 
     // On reveal, blank the escape time until the first result lands; while
     // already visible the previous value stays up (results arrive within a
@@ -110,6 +161,34 @@ class PointTooltip {
 
     this.positionAt(containerPoint);
     this.throttledQueryEscapeTime(latLng);
+  }
+
+  /** The cursor's offset from the view center, in scientific notation. It is
+   * a genuinely tiny number where scientific notation is honest and compact,
+   * and it changes with every pixel of movement — but only once it drops
+   * below what the head…tail absolute display resolves (deep zoom), where it
+   * complements the absolute coordinates rather than duplicating them. */
+  private showOffsetFromCenter(latLng: L.LatLng, displayDigits: number) {
+    const offset = this.map.offsetFromCenterAtLatLng(latLng);
+
+    // The absolute coordinates resolve down to 10^-displayDigits; only show
+    // the offset once it is smaller than that (and so no longer visible in
+    // the absolute readout). The offset's base-10 exponent is dominated by
+    // the shared 2^-zoomOffset scale.
+    const largest = Math.max(Math.abs(offset.re), Math.abs(offset.im));
+    const exponent =
+      largest === 0
+        ? -Infinity
+        : Math.floor(Math.log10(largest) - offset.zoomOffset * LOG10_2);
+    if (exponent >= -displayDigits) {
+      this.offsetElement.hidden = true;
+      return;
+    }
+
+    const re = formatScaledOffset(offset.re, offset.zoomOffset);
+    const im = formatScaledOffset(offset.im, offset.zoomOffset);
+    this.offsetElement.textContent = `Δ from center: ${re}, ${im}`;
+    this.offsetElement.hidden = false;
   }
 
   private hide() {
