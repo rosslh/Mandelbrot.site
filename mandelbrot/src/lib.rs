@@ -617,6 +617,68 @@ fn distance_estimate_at_c(
     distance.is_finite().then_some(distance.max(0.0))
 }
 
+// Iterations spent settling the orbit onto its attracting cycle before the
+// period search begins. A superattracting cycle (the center of a bulb, e.g.
+// c = 0 or c = -1) locks on almost immediately, but points near the edge of a
+// component converge geometrically and need a long transient to get within
+// PERIOD_TOLERANCE of the cycle.
+const PERIOD_SETTLE_ITERATIONS: u32 = 4096;
+
+// How close two orbit points must be (in complex-plane distance) to count as
+// the same cycle point. Loose enough to survive the residual transient after
+// PERIOD_SETTLE_ITERATIONS, tight enough not to alias distinct points of a
+// low-period cycle together.
+const PERIOD_TOLERANCE: f64 = 1e-6;
+
+// Longest cycle the search will report. Beyond this a point is treated as
+// aperiodic-within-tolerance (returns None); the tooltip then shows nothing,
+// which is the honest answer for a point whose period exceeds what a settled
+// f64 orbit can resolve.
+const PERIOD_MAX: u32 = 1024;
+
+/// Period of the attracting cycle for a point `c` inside the set, or `None`
+/// when the point escapes (no attracting cycle), when no cycle is found within
+/// `PERIOD_MAX`, or when the orbit has not settled enough to resolve one.
+///
+/// The main cardioid is period 1, the period-2 bulb period 2, the two large
+/// period-3 bulbs period 3, and a minibrot's cardioid its own (higher) period —
+/// useful orientation for deep-zoom exploration (issue #39).
+///
+/// Method: iterate `PERIOD_SETTLE_ITERATIONS` steps to settle the orbit onto
+/// its attracting cycle, checking along the way that it has not escaped. Then
+/// take the settled point as a reference and iterate up to `PERIOD_MAX` more
+/// steps, returning the first step count at which the orbit returns within
+/// `PERIOD_TOLERANCE` of the reference — the cycle length. Only meaningful for
+/// exponent 2 (matching the quadratic set), which is all the tooltip queries.
+fn period_at_c(c: Complex64, max_iterations: u32, escape_radius_squared: f64) -> Option<u32> {
+    let mut z = c;
+
+    // Settle onto the attracting cycle, bailing out the moment the orbit
+    // escapes: an escaping point has no attracting cycle to report.
+    let settle = PERIOD_SETTLE_ITERATIONS.min(max_iterations);
+    for _ in 0..settle {
+        z = z * z + c;
+        if z.norm_sqr() >= escape_radius_squared {
+            return None;
+        }
+    }
+
+    // The settled orbit point stands in for the cycle; find the smallest number
+    // of further steps that returns near it.
+    let reference = z;
+    for period in 1..=PERIOD_MAX {
+        z = z * z + c;
+        if z.norm_sqr() >= escape_radius_squared {
+            return None;
+        }
+        if (z - reference).norm() < PERIOD_TOLERANCE {
+            return Some(period);
+        }
+    }
+
+    None
+}
+
 /// Escape-time iteration for two pixels at once, one per 128-bit SIMD lane
 /// (quadratic case). Escaped lanes are frozen with a mask while the other lane
 /// keeps iterating. The lane arithmetic is IEEE-identical to the scalar loop
@@ -3213,6 +3275,24 @@ pub fn distance_estimate_at_point(options: JsValue) -> Result<f64, JsValue> {
         options.exponent,
     )
     .unwrap_or(-1.0))
+}
+
+/// Period of the attracting cycle at a single point (see `period_at_c`), for
+/// the ctrl+hover tooltip. Returns 0 when the point is not in the set or no
+/// cycle is resolved, so the client can treat "no period" without a nullable
+/// crossing. Only the quadratic set (exponent 2) has the tooltip's periodicity
+/// readout; other exponents report 0. Powers the period readout (issue #39).
+#[wasm_bindgen]
+pub fn period_at_point(options: JsValue) -> Result<u32, JsValue> {
+    let options: PointQueryOptions =
+        serde_wasm_bindgen::from_value(options).map_err(JsValue::from)?;
+
+    if options.exponent != 2 {
+        return Ok(0);
+    }
+
+    let escape_radius_squared = ESCAPE_RADIUS * ESCAPE_RADIUS;
+    Ok(period_at_c(options.c(), options.iterations, escape_radius_squared).unwrap_or(0))
 }
 
 /// Recolors a tile from its cached per-pixel smoothed escape values (as

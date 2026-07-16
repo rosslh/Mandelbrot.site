@@ -617,6 +617,43 @@ mod lib_test {
     }
 
     #[test]
+    fn test_period_at_c() {
+        use num::complex::Complex64;
+
+        let escape_radius_squared = crate::ESCAPE_RADIUS * crate::ESCAPE_RADIUS;
+        let period = |re: f64, im: f64| {
+            super::period_at_c(Complex64::new(re, im), 100_000, escape_radius_squared)
+        };
+
+        // Main cardioid: c = 0 has the superattracting fixed point 0 (period 1).
+        assert_eq!(period(0.0, 0.0), Some(1));
+        // Interior cardioid point, still period 1.
+        assert_eq!(period(-0.12, 0.0), Some(1));
+
+        // Period-2 bulb: c = -1 has the superattracting 2-cycle {0, -1}.
+        assert_eq!(period(-1.0, 0.0), Some(2));
+
+        // Period-3 bulbs: the two large ones off the top and bottom of the
+        // cardioid are centered near c = -0.122 ± 0.745i.
+        assert_eq!(
+            period(-0.122_561_166_876_654, 0.744_861_766_619_745),
+            Some(3)
+        );
+        assert_eq!(
+            period(-0.122_561_166_876_654, -0.744_861_766_619_745),
+            Some(3)
+        );
+
+        // A period-4 bulb, centered near c = -1.311 on the real axis (the bulb
+        // hanging off the period-2 bulb).
+        assert_eq!(period(-1.310_702_641_336_832, 0.0), Some(4));
+
+        // Points outside the set escape and have no attracting cycle.
+        assert_eq!(period(2.0, 2.0), None);
+        assert_eq!(period(1.0, 1.0), None);
+    }
+
+    #[test]
     fn test_compute_pixel_color() {
         let palette = &super::Palette::Original(colorous::TURBO);
         let color_space = super::ValidColorSpace::Hsl;

@@ -6,6 +6,8 @@ import {
   DistanceEstimateRequest,
   DistanceEstimateResponse,
   MandelbrotResponse,
+  PeriodRequest,
+  PeriodResponse,
   TileRect,
   TileRenderPayload,
 } from "./protocol";
@@ -107,6 +109,39 @@ class RegionRenderer {
     )) as DistanceEstimateResponse;
 
     return distance < 0 ? null : distance;
+  }
+
+  /** The period of the attracting cycle at a single point, via a dedicated
+   * scalar wasm loop that settles the orbit onto its cycle and measures the
+   * cycle length (issue #39). Returns null when the point is not in the set
+   * (or no cycle could be resolved), which the wasm signals with 0. The main
+   * cardioid is period 1, the period-2 bulb period 2, a minibrot's cardioid
+   * its own higher period. Only the quadratic set has a period readout, so the
+   * wasm reports 0 for other exponents. Reads the same origin, zoom offset, and
+   * config as a tile render, so its point matches the tile layer's pixels. */
+  async periodAtPoint(
+    position: TilePosition,
+    zoom: number,
+  ): Promise<number | null> {
+    const request: PeriodRequest = {
+      type: "period",
+      payload: {
+        originRe: this.map.origin.re,
+        originIm: this.map.origin.im,
+        tileX: position.x,
+        tileY: position.y,
+        tileZoom: zoom,
+        zoomOffset: this.map.zoomOffset,
+        iterations: this.map.config.iterations,
+        exponent: this.map.config.exponent,
+      },
+    };
+
+    const period = (await this.map.pool.queue((workerTask) =>
+      workerTask(request),
+    )) as PeriodResponse;
+
+    return period > 0 ? period : null;
   }
 
   /** Renders the region and returns only its per-pixel smoothed escape values

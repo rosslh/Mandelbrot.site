@@ -207,6 +207,11 @@ const supportsRelaxedSimd = WebAssembly.validate(
     const distanceEstimate = (params) =>
       wasm.distance_estimate_at_point(params);
 
+    // Period of the attracting cycle for a single in-set point (issue #39):
+    // settles the orbit onto its cycle, then measures the cycle length.
+    // Returns 0 when the point is not in the set (or no cycle is resolved).
+    const period = (params) => wasm.period_at_point(params);
+
     const optimiseImage = async (payload) => {
       await ensureOxipngInitialized();
       const result = optimiseST(
@@ -224,6 +229,8 @@ const supportsRelaxedSimd = WebAssembly.validate(
           return getTile(request.payload);
         case "distanceEstimate":
           return distanceEstimate(request.payload);
+        case "period":
+          return period(request.payload);
         case "recolor":
           return recolorTile(request.payload);
         case "optimise":

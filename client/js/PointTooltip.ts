@@ -113,6 +113,7 @@ class PointTooltip {
   private offsetElement: HTMLDivElement;
   private escapeTimeElement: HTMLDivElement;
   private distanceElement: HTMLDivElement;
+  private periodElement: HTMLDivElement;
   private copyButton: HTMLButtonElement;
   // The most recent mouse position over the map, so pressing ctrl shows the
   // tooltip without waiting for the next mousemove. Null while the cursor
@@ -138,6 +139,7 @@ class PointTooltip {
     this.offsetElement.className = "point-tooltip-offset";
     this.escapeTimeElement = document.createElement("div");
     this.distanceElement = document.createElement("div");
+    this.periodElement = document.createElement("div");
     this.copyButton = document.createElement("button");
     this.copyButton.type = "button";
     this.copyButton.className = "point-tooltip-copy";
@@ -159,6 +161,7 @@ class PointTooltip {
       this.offsetElement,
       this.escapeTimeElement,
       this.distanceElement,
+      this.periodElement,
     );
     map.getContainer().appendChild(this.element);
 
@@ -288,6 +291,10 @@ class PointTooltip {
       this.escapeTimeElement.textContent = "Escape time: …";
       this.distanceElement.textContent = "Distance: …";
       this.distanceElement.hidden = false;
+      // Period applies only to in-set points; stay hidden until a result for
+      // an in-set point arrives, rather than flash a placeholder that most
+      // (exterior) hovers would immediately clear.
+      this.periodElement.hidden = true;
       this.element.hidden = false;
     }
 
@@ -387,6 +394,27 @@ class PointTooltip {
         }
         this.distanceElement.textContent = `Distance: ≈${formatDistance(distance)}`;
         this.distanceElement.hidden = false;
+      })
+      .catch(() => {
+        // The pool was terminated by a re-render; the next hover retries.
+      });
+
+    // The attracting-cycle period (#39): a scalar wasm loop that settles the
+    // orbit then measures its cycle length. Only in-set points have a cycle,
+    // so the row stays hidden for exterior points (and other exponents, which
+    // the wasm reports as no period).
+    this.map.regionRenderer
+      .periodAtPoint(position, zoom)
+      .then((period) => {
+        if (id !== this.queryId || this.element.hidden) {
+          return;
+        }
+        if (period === null) {
+          this.periodElement.hidden = true;
+          return;
+        }
+        this.periodElement.textContent = `Period: ${period.toLocaleString()}`;
+        this.periodElement.hidden = false;
       })
       .catch(() => {
         // The pool was terminated by a re-render; the next hover retries.

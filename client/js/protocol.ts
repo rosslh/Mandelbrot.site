@@ -77,6 +77,11 @@ export type DistanceEstimateRequest = {
   type: "distanceEstimate";
   payload: PointQueryPayload;
 };
+// Requests the period of the attracting cycle at a point (in-set points only).
+export type PeriodRequest = {
+  type: "period";
+  payload: PointQueryPayload;
+};
 export type RecolorPayload = {
   // Per-pixel smoothed escape values captured when the tile was rendered.
   values: Float32Array;
@@ -104,6 +109,7 @@ export type WarmupFloatExpRequest = { type: "warmupFloatExp" };
 export type WorkerRequest =
   | CalculateRequest
   | DistanceEstimateRequest
+  | PeriodRequest
   | OptimiseRequest
   | RecolorRequest
   | WarmupGeneralRequest
@@ -126,9 +132,13 @@ export type RecolorResponse = Uint8Array;
 // Exterior distance estimate in complex-plane units, or negative when the
 // point is inside the set (no exterior distance).
 export type DistanceEstimateResponse = number;
+// Period of the attracting cycle, or 0 when the point is not in the set (or no
+// cycle was resolved).
+export type PeriodResponse = number;
 export type WorkerResponse =
   | MandelbrotResponse
   | DistanceEstimateResponse
+  | PeriodResponse
   | OptimiseResponse
   | RecolorResponse;
 
