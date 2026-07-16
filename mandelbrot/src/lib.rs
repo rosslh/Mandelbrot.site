@@ -641,6 +641,27 @@ fn distance_estimate_at_c(
     distance.is_finite().then_some(distance.max(0.0))
 }
 
+/// Maps an exterior distance estimate (`distance_estimate_at_c`) to a
+/// palette-independent brightness in `[0, 1]` for the distance-estimate
+/// rendering mode (issue #46). The estimate is measured relative to the
+/// pixel spacing so the boundary keeps a uniform visual weight at every zoom
+/// depth: pixels a fraction of a pixel from the boundary map to ~0 (dark),
+/// pixels several pixels out map toward 1 (bright). `tanh` gives a smooth,
+/// bounded ramp with no hard clip.
+///
+/// Returns `f64::INFINITY` for interior points (no exterior distance), which
+/// the color mapping renders black exactly as it does for interior escape
+/// values, so DE tiles cache and recolor through the same `values` pipeline.
+fn distance_estimate_brightness(distance: Option<f64>, pixel_spacing: f64) -> f64 {
+    match distance {
+        // A non-positive pixel spacing would divide to a meaningless value;
+        // fall back to the raw distance so the tile is never degenerate.
+        Some(distance) if pixel_spacing > 0.0 => (distance / pixel_spacing).tanh(),
+        Some(distance) => distance.tanh(),
+        None => f64::INFINITY,
+    }
+}
+
 // Iterations spent settling the orbit onto its attracting cycle before the
 // period search begins. A superattracting cycle (the center of a bulb, e.g.
 // c = 0 or c = -1) locks on almost immediately, but points near the edge of a
@@ -2763,6 +2784,111 @@ fn generate_mandelbrot_set_image(
     )
 }
 
+/// Renders a tile in distance-estimate mode (issue #46) over an f64 view
+/// rectangle. Each exterior pixel's brightness derives from its distance to
+/// the set boundary (`distance_estimate_at_c` / `distance_estimate_brightness`)
+/// rather than its escape time, so the boundary renders at a uniform visual
+/// weight regardless of iteration count — the standard way to produce crisp
+/// boundary images. Interior pixels stay black.
+///
+/// A dedicated scalar loop rather than the tuned streaming escape kernels:
+/// tracking the derivative doubles the per-step work, so per the issue it is a
+/// separate kernel variant selected by mode, not a branch in the hot loops.
+///
+/// The per-pixel `[0, 1]` brightness is stored in the cached `values` (interior
+/// pixels keep the `INFINITY` sentinel), and the palette is applied over the
+/// fixed `0..1` range — so DE tiles recolor through the same `recolor_tile`
+/// pipeline as escape-time tiles (`ColoringOptions::distance_estimate` selects
+/// the fixed range there). Iteration stats stay `None`: the palette range is
+/// fixed, so there is nothing to auto-fit.
+fn generate_distance_estimate_image(
+    re_min: f64,
+    re_max: f64,
+    im_min: f64,
+    im_max: f64,
+    pixel_spacing: f64,
+    max_iterations: u32,
+    exponent: u32,
+    image_width: usize,
+    image_height: usize,
+    color_scheme: &str,
+    reverse_colors: bool,
+    shift_hue_amount: f32,
+    saturate_amount: f32,
+    lighten_amount: f32,
+    color_space: ValidColorSpace,
+    color_cycles: u32,
+) -> RenderedTile {
+    let (palette, should_reverse_colors, palette_is_cyclic) =
+        get_color_palette(color_scheme, reverse_colors);
+
+    let re_range = linspace(re_min, re_max, image_width);
+    let im_range = linspace(im_max, im_min, image_height);
+
+    if rect_in_set(re_range.clone(), im_range.clone(), max_iterations, exponent) {
+        return RenderedTile::solid_black(image_width, image_height, RenderTier::Direct);
+    }
+
+    let output_size: usize = image_width * image_height * NUM_COLOR_CHANNELS;
+    let mut img: Vec<u8> = vec![0; output_size];
+    let mut values: Vec<f32> = vec![f32::INFINITY; image_width * image_height];
+    for alpha_idx in (3..output_size).step_by(NUM_COLOR_CHANNELS) {
+        img[alpha_idx] = 255;
+    }
+
+    let escape_radius_squared = ESCAPE_RADIUS * ESCAPE_RADIUS;
+    let re_values: Vec<f64> = re_range.collect();
+
+    for (row, im) in im_range.enumerate() {
+        for (col, &re) in re_values.iter().enumerate() {
+            let distance = distance_estimate_at_c(
+                Complex64::new(re, im),
+                max_iterations,
+                escape_radius_squared,
+                exponent,
+            );
+            let brightness = distance_estimate_brightness(distance, pixel_spacing);
+
+            let pixel_index = row * image_width + col;
+            // Narrow to f32 before coloring so the tile matches a later
+            // `recolor_tile` of these same cached values bit-for-bit (recolor
+            // only has the f32 values to work from).
+            let brightness = f64::from(brightness as f32);
+            values[pixel_index] = brightness as f32;
+
+            // DE brightness is already normalized to [0, 1]; the palette maps
+            // it over that fixed range (interior/INFINITY renders black).
+            let pixel = color_from_smoothed_value(
+                brightness,
+                palette,
+                should_reverse_colors,
+                palette_is_cyclic,
+                color_cycles,
+                &color_space,
+                shift_hue_amount,
+                saturate_amount,
+                lighten_amount,
+                0.0,
+                1.0,
+            );
+
+            let index = pixel_index * NUM_COLOR_CHANNELS;
+            img[index] = pixel[0];
+            img[index + 1] = pixel[1];
+            img[index + 2] = pixel[2];
+        }
+    }
+
+    RenderedTile {
+        image: img,
+        values,
+        // The palette range is fixed at 0..1 in DE mode, so there is no
+        // iteration range to auto-fit.
+        stats: TileIterationStats::default(),
+        tier: RenderTier::Direct,
+    }
+}
+
 #[wasm_bindgen]
 pub fn get_mandelbrot_set_image(
     re_min: f64,
@@ -2842,6 +2968,11 @@ fn render_tile_precise(
     palette_min_iter: i32,
     palette_max_iter: i32,
     color_cycles: u32,
+    // Distance-estimate rendering mode (issue #46). Only the direct f64 path
+    // honors it; deeper (perturbation/float-exp) tiles fall back to escape-time
+    // coloring gracefully — see the `distance_estimate` handling below and the
+    // client gating that keeps DE mode on shallow views.
+    distance_estimate: bool,
 ) -> RenderedTile {
     let pixel_spacing =
         perturbation::pixel_spacing(tile_x_min, tile_x_max, tile_zoom, zoom_offset, image_width)
@@ -2874,6 +3005,27 @@ fn render_tile_precise(
         let im_max = origin_im_f64 - scaled_offset(tile_y_min);
         let im_min = origin_im_f64 - scaled_offset(tile_y_max);
 
+        if distance_estimate {
+            return generate_distance_estimate_image(
+                re_min,
+                re_max,
+                im_min,
+                im_max,
+                pixel_spacing,
+                max_iterations,
+                exponent,
+                image_width,
+                image_height,
+                color_scheme,
+                reverse_colors,
+                shift_hue_amount,
+                saturate_amount,
+                lighten_amount,
+                color_space,
+                color_cycles,
+            );
+        }
+
         return generate_mandelbrot_set_image(
             re_min,
             re_max,
@@ -2895,6 +3047,14 @@ fn render_tile_precise(
             color_cycles,
         );
     }
+
+    // Distance-estimate mode is only implemented on the direct f64 path
+    // (issue #46 ships it in stages, direct first). A deep-zoom tile reaching
+    // here in DE mode falls through to the escape-time perturbation renderer
+    // below — a graceful, if non-DE, image. The client keeps DE mode gated to
+    // shallow views, so this fallback is a safety net rather than a normal
+    // path.
+    let _ = distance_estimate;
 
     // Which perturbation tier this view falls into, computed independently of
     // frame construction so a failed frame (below) still reports the right
@@ -3044,6 +3204,8 @@ pub fn get_mandelbrot_image_precise(
         // Frozen signature (bench harness): predates the color-cycles
         // control, so it renders a single palette pass.
         1,
+        // The bench harness only measures escape-time rendering.
+        false,
     )
     .image
 }
@@ -3120,9 +3282,31 @@ pub struct ColoringOptions {
     pub palette_min_iter: i32,
     pub palette_max_iter: i32,
     pub color_cycles: u32,
+    /// Distance-estimate rendering mode (issue #46): the cached `values` are a
+    /// palette-independent brightness in `[0, 1]` (see
+    /// `distance_estimate_brightness`), not iteration counts, so the palette
+    /// range is fixed at `0..1` and the min/max thresholds are ignored.
+    /// Defaults to false so escape-time payloads that omit it still parse.
+    #[serde(default)]
+    pub distance_estimate: bool,
 }
 
 impl ColoringOptions {
+    /// The palette-normalization domain: the user's iteration thresholds in
+    /// escape-time mode, or the fixed `0..1` brightness range in
+    /// distance-estimate mode (where `values` are already normalized).
+    fn palette_thresholds(&self) -> (f64, f64) {
+        if self.distance_estimate {
+            (0.0, 1.0)
+        } else {
+            let min = f64::from(self.palette_min_iter);
+            (
+                min,
+                f64::from(self.palette_max_iter).max(min + f64::EPSILON),
+            )
+        }
+    }
+
     fn color_space(&self) -> ValidColorSpace {
         match self.color_space {
             0 => ValidColorSpace::Hsl,
@@ -3153,6 +3337,16 @@ pub struct TileRenderOptions {
     smooth_coloring: bool,
     include_values: bool,
     coloring: ColoringOptions,
+}
+
+impl TileRenderOptions {
+    /// Whether this render uses distance-estimate mode (issue #46). The flag
+    /// rides on `coloring` so it reaches `recolor_tile` too, but a render also
+    /// needs it directly to pick the DE kernel and bake brightness into the
+    /// cached `values`.
+    fn distance_estimate(&self) -> bool {
+        self.coloring.distance_estimate
+    }
 }
 
 /// Renders a Mandelbrot tile from a single options object (the production
@@ -3188,6 +3382,7 @@ pub fn render_tile(options: JsValue) -> Result<MandelbrotTile, JsValue> {
         options.coloring.palette_min_iter,
         options.coloring.palette_max_iter,
         options.coloring.color_cycles.max(1),
+        options.distance_estimate(),
     );
 
     Ok(MandelbrotTile::from_rendered(
@@ -3258,6 +3453,8 @@ pub fn get_mandelbrot_tile_precise(
         palette_min_iter,
         palette_max_iter,
         color_cycles.unwrap_or(1).max(1),
+        // Frozen positional signature (bench harness): escape-time only.
+        false,
     );
 
     MandelbrotTile::from_rendered(rendered, include_values)
@@ -3365,9 +3562,7 @@ pub fn recolor_values(values: &[f32], options: &ColoringOptions) -> Vec<u8> {
     let color_cycles = options.color_cycles.max(1);
     let color_space = options.color_space();
 
-    let min_iterations_threshold = f64::from(options.palette_min_iter);
-    let max_iterations_threshold =
-        f64::from(options.palette_max_iter).max(min_iterations_threshold + f64::EPSILON);
+    let (min_iterations_threshold, max_iterations_threshold) = options.palette_thresholds();
 
     let mut img: Vec<u8> = vec![0; values.len() * NUM_COLOR_CHANNELS];
 

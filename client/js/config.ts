@@ -26,6 +26,11 @@ export type MandelbrotConfig = {
   // perturbation f64 / hybrid float-exp) that rendered it (issue #50).
   showTierOverlay: boolean;
   smoothColoring: boolean;
+  // Distance-estimate rendering mode (issue #46): color each pixel by its
+  // distance to the set boundary instead of its escape time, for crisp
+  // boundary images. Only the direct f64 path renders it; deeper (zoomed)
+  // tiles fall back to escape-time coloring.
+  distanceEstimate: boolean;
   paletteMinIter: number;
   paletteMaxIter: number;
   // When enabled the palette range fits itself to the on-screen tiles and
@@ -52,6 +57,7 @@ export const defaultConfig: MandelbrotConfig = {
   highDpiTiles: false,
   showTierOverlay: false,
   smoothColoring: true,
+  distanceEstimate: false,
   paletteMinIter: 0,
   paletteMaxIter: 200,
   paletteAutoAdjust: true,
@@ -182,6 +188,14 @@ export const settingsSchema: SettingSpec[] = [
     max: 10 ** 9,
     resetView: true,
   },
+  // Distance-estimate mode: the DE brightness is baked into the cached
+  // escape/brightness values (like smoothColoring), so switching it re-renders.
+  {
+    key: "distanceEstimate",
+    control: "checkbox",
+    urlParam: "de",
+    effect: "rerender",
+  },
   { key: "highDpiTiles", control: "checkbox", effect: "rerender" },
   // Diagnostics overlay: toggling it only draws/clears a cosmetic overlay on
   // the already-rendered tiles, so its effect is "none" and the wiring
@@ -268,6 +282,7 @@ export function coloringOptions(config: MandelbrotConfig): ColoringOptions {
     paletteMinIter: config.paletteMinIter,
     paletteMaxIter: config.paletteMaxIter,
     colorCycles: config.colorCycles,
+    distanceEstimate: config.distanceEstimate,
   };
 }
 

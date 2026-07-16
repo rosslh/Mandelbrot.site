@@ -32,6 +32,11 @@ export type ColoringOptions = {
   // How many times the palette repeats across the palette range; cyclical
   // palettes wrap, others boomerang (alternate direction) to stay seamless.
   colorCycles: number;
+  // Distance-estimate rendering mode (issue #46): the cached values are a
+  // palette-independent brightness in [0, 1] rather than iteration counts, so
+  // the palette maps them over the fixed 0..1 range and the min/max iteration
+  // thresholds are ignored.
+  distanceEstimate: boolean;
 };
 
 // Everything a tile render needs, as one object handed through the worker

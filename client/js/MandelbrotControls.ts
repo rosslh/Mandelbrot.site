@@ -65,6 +65,7 @@ class MandelbrotControls {
         configKeys: [
           "iterations",
           "exponent",
+          "distanceEstimate",
           "highDpiTiles",
           "showTierOverlay",
         ],

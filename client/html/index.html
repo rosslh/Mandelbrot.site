@@ -156,6 +156,19 @@
             <input type="number" required id="exponent" name="exponent" />
           </div>
           <div class="checkbox-wrapper mobile-hidden">
+            <input
+              type="checkbox"
+              id="distanceEstimate"
+              name="distanceEstimate"
+            />
+            <label
+              for="distanceEstimate"
+              title="Color each pixel by its estimated distance to the boundary of the set instead of its escape time, rendering the boundary at a uniform visual weight for a crisp image. Available at shallow zoom (direct f64) only."
+              >Distance estimate
+              <span class="secondary">(Crisp boundary)</span></label
+            >
+          </div>
+          <div class="checkbox-wrapper mobile-hidden">
             <input type="checkbox" id="highDpiTiles" name="highDpiTiles" />
             <label for="highDpiTiles"
               >High resolution <span class="secondary">(Slow)</span></label

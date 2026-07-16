@@ -759,6 +759,145 @@ mod lib_test {
     }
 
     #[test]
+    fn test_distance_estimate_brightness() {
+        // Interior points (no exterior distance) map to the Infinity sentinel,
+        // which the color mapping renders black — exactly like interior escape
+        // values.
+        assert!(super::distance_estimate_brightness(None, 1e-3).is_infinite());
+
+        // A point on the boundary (distance 0) is fully dark; a point several
+        // pixels out is nearly full brightness; and brightness rises with
+        // distance in between.
+        let spacing = 1e-3;
+        let on_boundary = super::distance_estimate_brightness(Some(0.0), spacing);
+        let near = super::distance_estimate_brightness(Some(spacing * 0.5), spacing);
+        let far = super::distance_estimate_brightness(Some(spacing * 20.0), spacing);
+        assert_eq!(on_boundary, 0.0);
+        assert!(near > on_boundary);
+        assert!(far > near);
+        assert!((0.0..=1.0).contains(&far));
+        assert!(far > 0.99, "several pixels out should read near-white");
+
+        // The estimate is relative to pixel spacing, so the same distance
+        // reads darker at a coarser spacing (more pixels between it and the
+        // boundary) — the scale-invariance that keeps boundary weight uniform.
+        let d = 1e-4;
+        let fine = super::distance_estimate_brightness(Some(d), 1e-4);
+        let coarse = super::distance_estimate_brightness(Some(d), 1e-2);
+        assert!(coarse < fine);
+
+        // A degenerate (non-positive) pixel spacing must not divide by zero;
+        // it falls back to the raw distance and stays in range.
+        let fallback = super::distance_estimate_brightness(Some(1.0), 0.0);
+        assert!((0.0..=1.0).contains(&fallback));
+    }
+
+    #[test]
+    fn test_generate_distance_estimate_image() {
+        // The classic full-set view: mixes interior (black) and exterior
+        // pixels, with the boundary running through it.
+        let image_width = 40;
+        let image_height = 40;
+        let pixel_spacing = 3.0 / image_width as f64;
+        let rendered = super::generate_distance_estimate_image(
+            -2.0,
+            1.0,
+            -1.0,
+            1.0,
+            pixel_spacing,
+            500,
+            2,
+            image_width,
+            image_height,
+            "greys",
+            false,
+            0.0,
+            0.0,
+            0.0,
+            crate::ValidColorSpace::Hsl,
+            1,
+        );
+
+        assert_eq!(
+            rendered.image.len(),
+            image_width * image_height * super::NUM_COLOR_CHANNELS
+        );
+        assert_eq!(rendered.values.len(), image_width * image_height);
+
+        // The DE image must not be degenerate: it carries both interior
+        // (Infinity) pixels and a spread of finite exterior brightnesses.
+        assert!(rendered.values.iter().any(|v| v.is_infinite()));
+        let finite: Vec<f32> = rendered
+            .values
+            .iter()
+            .copied()
+            .filter(|v| v.is_finite())
+            .collect();
+        assert!(!finite.is_empty(), "exterior pixels must be present");
+        assert!(
+            finite.iter().all(|&v| (0.0..=1.0).contains(&v)),
+            "DE brightness is normalized to [0, 1]"
+        );
+        let brightest = finite.iter().cloned().fold(f32::MIN, f32::max);
+        let darkest = finite.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(
+            brightest - darkest > 0.1,
+            "a boundary-crossing view should span a range of brightnesses"
+        );
+
+        // Boundary pixels (small distance estimate, so near-black) must be
+        // darker than the deep exterior. With the greys palette, higher
+        // brightness -> lighter pixel, so compare a near-boundary column to the
+        // far corner of the view.
+        let luminance = |pixel_index: usize| -> u32 {
+            let base = pixel_index * super::NUM_COLOR_CHANNELS;
+            rendered.image[base] as u32
+                + rendered.image[base + 1] as u32
+                + rendered.image[base + 2] as u32
+        };
+        // Top-left corner sits at (-2, 1), the far exterior; the set boundary
+        // runs near the middle-right of this view.
+        let far_corner = luminance(0);
+        // A pixel is near the boundary if its brightness is among the smallest
+        // finite values; find one and confirm it is darker than the far corner.
+        let (dark_index, _) = rendered
+            .values
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| v.is_finite())
+            .min_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .expect("some exterior pixel exists");
+        assert!(
+            luminance(dark_index) < far_corner,
+            "boundary pixels must render darker than the far exterior"
+        );
+
+        // Interior pixels are black regardless of palette.
+        let interior_index = rendered
+            .values
+            .iter()
+            .position(|v| v.is_infinite())
+            .expect("interior pixel exists");
+        let base = interior_index * super::NUM_COLOR_CHANNELS;
+        assert_eq!(
+            &rendered.image[base..base + 4],
+            &[0, 0, 0, 255],
+            "interior pixels render black"
+        );
+
+        // DE tiles fix the palette range at 0..1, so no iteration stats are
+        // tracked (nothing to auto-fit).
+        assert!(rendered.stats.range.is_none());
+
+        // The cached brightness values recolor through the same pipeline as
+        // escape-time tiles when the distance-estimate flag is set.
+        let mut coloring = coloring_options("greys", 0, 200);
+        coloring.distance_estimate = true;
+        let recolored = super::recolor_values(&rendered.values, &coloring);
+        assert_eq!(recolored, rendered.image);
+    }
+
+    #[test]
     fn test_point_in_set() {
         // Test points known to be in the set
         assert!(super::point_in_set(0.0, 0.0, 100, 2));
@@ -2059,6 +2198,7 @@ mod lib_test {
             palette_min_iter: palette_min,
             palette_max_iter: palette_max,
             color_cycles: 1,
+            distance_estimate: false,
         }
     }
 
