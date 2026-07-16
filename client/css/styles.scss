@@ -147,6 +147,41 @@ html.fractal-root {
       display: none;
     }
   }
+
+  // The copy button only shows on the pinned tooltip (see PointTooltip.ts);
+  // it floats in the top-right corner, clear of the coordinate rows.
+  .point-tooltip-copy {
+    float: right;
+    margin-left: var(--space-8);
+    background: none;
+    border: none;
+    color: var(--gray-400);
+    padding: var(--space-2);
+    border-radius: var(--border-radius);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+
+    &:hover {
+      color: var(--gray-50);
+      background-color: var(--gray-700);
+    }
+
+    &[hidden] {
+      display: none;
+    }
+  }
+
+  // Pinned, the readout stays put and its coordinates become selectable, so
+  // let it wrap the full-precision (deep-zoom) values instead of overflowing.
+  &.pinned {
+    white-space: normal;
+    max-width: 320px;
+    word-break: break-all;
+    user-select: text;
+  }
 }
 
 // While a modifier key is held over the map, every shortcut targets an
