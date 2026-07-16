@@ -559,6 +559,64 @@ fn calculate_escape_iterations_general(
     (iter, z)
 }
 
+/// Exterior distance estimate for a single point `c`, in the same units as the
+/// complex plane. Iterates the orbit `z` alongside its derivative `dz = dz/dc`,
+/// whose step for `f(z) = z^exponent + c` is
+/// `dz' = exponent*z^(exponent-1)*dz + 1` (seeded `z0 = 0`, `dz0 = 0`). When
+/// the orbit escapes, the Koebe/Milnor
+/// exterior estimate `d = 2*|z|*ln|z| / |dz|` gives the approximate distance
+/// from `c` to the boundary of the set. It is a first-order estimate, accurate
+/// to within a small constant factor near the boundary, not an exact distance.
+///
+/// Returns `None` for points that do not escape within `max_iterations` (they
+/// are inside the set, so no exterior distance applies) and for the degenerate
+/// case of a vanishing derivative. A dedicated scalar loop rather than reusing
+/// the escape kernels, because tracking the derivative doubles the per-step
+/// work — cheap for a single hover query, but not worth adding to the tile
+/// kernels (issue #42).
+fn distance_estimate_at_c(
+    c: Complex64,
+    max_iterations: u32,
+    escape_radius_squared: f64,
+    exponent: u32,
+) -> Option<f64> {
+    // Interior shortcut for the quadratic set: cardioid/bulb points never
+    // escape, so there is no exterior distance to report.
+    if exponent == 2 && in_main_cardioid_or_bulb(c.re, c.im) {
+        return None;
+    }
+
+    let mut z = c;
+    // dz/dc after the first step (z1 = c): d/dc[z^e + c] at z0 = 0 is 1.
+    let mut dz = Complex64::new(1.0, 0.0);
+    let mut iter = 1u32;
+
+    while z.norm_sqr() < escape_radius_squared && iter < max_iterations {
+        // dz' = exponent * z^(exponent-1) * dz + 1, evaluated before z steps.
+        dz = Complex64::new(f64::from(exponent), 0.0) * z.powu(exponent - 1) * dz
+            + Complex64::new(1.0, 0.0);
+        z = z.powu(exponent) + c;
+        iter += 1;
+    }
+
+    // Did not escape: inside the set (or hit the iteration cap), no exterior
+    // distance.
+    if z.norm_sqr() < escape_radius_squared {
+        return None;
+    }
+
+    let z_norm = z.norm();
+    let dz_norm = dz.norm();
+    // A zero (or non-finite) derivative would divide to a meaningless value;
+    // treat it as "no estimate" rather than emit inf/NaN.
+    if !dz_norm.is_finite() || dz_norm == 0.0 || !z_norm.is_finite() {
+        return None;
+    }
+
+    let distance = 2.0 * z_norm * z_norm.ln() / dz_norm;
+    distance.is_finite().then_some(distance.max(0.0))
+}
+
 /// Escape-time iteration for two pixels at once, one per 128-bit SIMD lane
 /// (quadratic case). Escaped lanes are frozen with a mask while the other lane
 /// keeps iterating. The lane arithmetic is IEEE-identical to the scalar loop
@@ -3093,6 +3151,68 @@ pub fn get_mandelbrot_tile_precise(
     );
 
     MandelbrotTile::from_rendered(rendered, include_values)
+}
+
+/// A single point's coordinates, described exactly like a tile render (see
+/// `render_tile_precise`): an arbitrary-precision world origin plus a
+/// fractional position in Leaflet tile coordinates. Field names mirror the
+/// client's camelCase payload.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PointQueryOptions {
+    origin_re: String,
+    origin_im: String,
+    /// Fractional tile x/y of the point (the tile renderer's `x_min`/`y_min`
+    /// for a one-pixel span).
+    tile_x: f64,
+    tile_y: f64,
+    tile_zoom: i32,
+    zoom_offset: u32,
+    iterations: u32,
+    exponent: u32,
+}
+
+impl PointQueryOptions {
+    /// The complex point `c` this query addresses, in f64. Deep-zoom views
+    /// whose absolute coordinate exceeds f64 precision lose the sub-pixel
+    /// part of the origin here, but the exterior distance estimate is itself
+    /// approximate and the orbit diverges from `c` within a few steps, so the
+    /// escape-orbit derivative it depends on is unaffected.
+    fn c(&self) -> Complex64 {
+        let origin_re: f64 = self.origin_re.parse().unwrap_or(0.0);
+        let origin_im: f64 = self.origin_im.parse().unwrap_or(0.0);
+        let scaled_offset = |tile_coordinate: f64| {
+            float_exp::ldexp(
+                perturbation::tile_coordinate_offset(tile_coordinate, self.tile_zoom),
+                -(self.zoom_offset as i64),
+            )
+        };
+        Complex64::new(
+            origin_re + scaled_offset(self.tile_x),
+            origin_im - scaled_offset(self.tile_y),
+        )
+    }
+}
+
+/// Exterior distance estimate from a single point to the boundary of the set,
+/// in complex-plane units (see `distance_estimate_at_c`). Returns a negative
+/// value when the point is inside the set (or the estimate is unavailable), so
+/// the client can distinguish "no distance" from a genuine tiny distance
+/// without a nullable boundary crossing. Powers the ctrl+hover tooltip's
+/// distance-to-boundary readout (issue #42).
+#[wasm_bindgen]
+pub fn distance_estimate_at_point(options: JsValue) -> Result<f64, JsValue> {
+    let options: PointQueryOptions =
+        serde_wasm_bindgen::from_value(options).map_err(JsValue::from)?;
+
+    let escape_radius_squared = ESCAPE_RADIUS * ESCAPE_RADIUS;
+    Ok(distance_estimate_at_c(
+        options.c(),
+        options.iterations,
+        escape_radius_squared,
+        options.exponent,
+    )
+    .unwrap_or(-1.0))
 }
 
 /// Recolors a tile from its cached per-pixel smoothed escape values (as

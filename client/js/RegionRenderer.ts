@@ -3,6 +3,8 @@ import type { TilePosition } from "./MandelbrotMap";
 import { coloringOptions } from "./config";
 import {
   CalculateRequest,
+  DistanceEstimateRequest,
+  DistanceEstimateResponse,
   MandelbrotResponse,
   TileRect,
   TileRenderPayload,
@@ -74,6 +76,37 @@ class RegionRenderer {
     )) as MandelbrotResponse;
 
     return response.maxIter;
+  }
+
+  /** The exterior distance estimate from a single point to the boundary of
+   * the set, in complex-plane units, via a dedicated scalar wasm loop that
+   * tracks the orbit derivative (issue #42). Returns null when the point is
+   * inside the set (or the estimate is otherwise unavailable), which the wasm
+   * signals with a negative value. Reads the same origin, zoom offset, and
+   * config as a tile render, so its point matches the tile layer's pixels. */
+  async distanceToBoundaryAtPoint(
+    position: TilePosition,
+    zoom: number,
+  ): Promise<number | null> {
+    const request: DistanceEstimateRequest = {
+      type: "distanceEstimate",
+      payload: {
+        originRe: this.map.origin.re,
+        originIm: this.map.origin.im,
+        tileX: position.x,
+        tileY: position.y,
+        tileZoom: zoom,
+        zoomOffset: this.map.zoomOffset,
+        iterations: this.map.config.iterations,
+        exponent: this.map.config.exponent,
+      },
+    };
+
+    const distance = (await this.map.pool.queue((workerTask) =>
+      workerTask(request),
+    )) as DistanceEstimateResponse;
+
+    return distance < 0 ? null : distance;
   }
 
   /** Renders the region and returns only its per-pixel smoothed escape values

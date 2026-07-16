@@ -200,6 +200,13 @@ const supportsRelaxedSimd = WebAssembly.validate(
     const recolorTile = (params) =>
       wasm.recolor_tile(params.values, params.coloring);
 
+    // Exterior distance estimate for a single point (issue #42): a dedicated
+    // scalar loop in wasm that tracks the orbit derivative, far cheaper than a
+    // one-pixel render. Returns complex-plane units, negative when the point
+    // is inside the set.
+    const distanceEstimate = (params) =>
+      wasm.distance_estimate_at_point(params);
+
     const optimiseImage = async (payload) => {
       await ensureOxipngInitialized();
       const result = optimiseST(
@@ -215,6 +222,8 @@ const supportsRelaxedSimd = WebAssembly.validate(
       switch (request.type) {
         case "calculate":
           return getTile(request.payload);
+        case "distanceEstimate":
+          return distanceEstimate(request.payload);
         case "recolor":
           return recolorTile(request.payload);
         case "optimise":

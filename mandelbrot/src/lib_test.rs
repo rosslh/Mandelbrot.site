@@ -568,6 +568,55 @@ mod lib_test {
     }
 
     #[test]
+    fn test_distance_estimate_at_c() {
+        use num::complex::Complex64;
+
+        let escape_radius_squared = crate::ESCAPE_RADIUS * crate::ESCAPE_RADIUS;
+
+        // Interior points (origin, and a cardioid point) have no exterior
+        // distance.
+        assert_eq!(
+            super::distance_estimate_at_c(Complex64::new(0.0, 0.0), 1000, escape_radius_squared, 2),
+            None
+        );
+        assert_eq!(
+            super::distance_estimate_at_c(
+                Complex64::new(-0.5, 0.0),
+                1000,
+                escape_radius_squared,
+                2
+            ),
+            None
+        );
+
+        // A point well outside the set escapes fast and sits a comfortable
+        // distance from the boundary.
+        let far =
+            super::distance_estimate_at_c(Complex64::new(2.0, 2.0), 1000, escape_radius_squared, 2)
+                .expect("exterior point should have a distance estimate");
+        assert!(far > 0.0 && far.is_finite());
+
+        // A point just outside the set (near the cardioid cusp at re = 0.25)
+        // should report a small positive distance, smaller than the far point.
+        let near = super::distance_estimate_at_c(
+            Complex64::new(0.26, 0.0),
+            5000,
+            escape_radius_squared,
+            2,
+        )
+        .expect("exterior point should have a distance estimate");
+        assert!(near > 0.0 && near.is_finite());
+        assert!(near < far);
+
+        // The general-exponent path also produces a finite positive estimate
+        // for exterior points.
+        let general =
+            super::distance_estimate_at_c(Complex64::new(1.5, 1.5), 1000, escape_radius_squared, 3)
+                .expect("exterior point should have a distance estimate");
+        assert!(general > 0.0 && general.is_finite());
+    }
+
+    #[test]
     fn test_compute_pixel_color() {
         let palette = &super::Palette::Original(colorous::TURBO);
         let color_space = super::ValidColorSpace::Hsl;

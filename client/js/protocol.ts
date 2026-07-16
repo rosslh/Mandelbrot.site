@@ -58,6 +58,25 @@ export type CalculateRequest = {
   type: "calculate";
   payload: TileRenderPayload;
 };
+
+// A single point in the complex plane, described exactly like a tile render
+// (world origin plus a fractional Leaflet tile coordinate). Mirrors the serde
+// `PointQueryOptions` struct in mandelbrot/src/lib.rs.
+export type PointQueryPayload = {
+  originRe: string;
+  originIm: string;
+  tileX: number;
+  tileY: number;
+  tileZoom: number;
+  zoomOffset: number;
+  iterations: number;
+  exponent: number;
+};
+// Requests the exterior distance estimate from a point to the set boundary.
+export type DistanceEstimateRequest = {
+  type: "distanceEstimate";
+  payload: PointQueryPayload;
+};
 export type RecolorPayload = {
   // Per-pixel smoothed escape values captured when the tile was rendered.
   values: Float32Array;
@@ -84,6 +103,7 @@ export type WarmupDeepRequest = { type: "warmupDeep" };
 export type WarmupFloatExpRequest = { type: "warmupFloatExp" };
 export type WorkerRequest =
   | CalculateRequest
+  | DistanceEstimateRequest
   | OptimiseRequest
   | RecolorRequest
   | WarmupGeneralRequest
@@ -103,8 +123,12 @@ export type MandelbrotResponse = {
 };
 export type OptimiseResponse = ArrayBuffer;
 export type RecolorResponse = Uint8Array;
+// Exterior distance estimate in complex-plane units, or negative when the
+// point is inside the set (no exterior distance).
+export type DistanceEstimateResponse = number;
 export type WorkerResponse =
   | MandelbrotResponse
+  | DistanceEstimateResponse
   | OptimiseResponse
   | RecolorResponse;
 

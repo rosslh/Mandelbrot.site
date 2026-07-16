@@ -77,6 +77,25 @@ function formatScaledOffset(value: number, zoomOffset: number): string {
   return `${sign}${mantissa}×10${superscript}`;
 }
 
+/** Formats a positive distance in scientific notation with a superscript
+ * exponent, e.g. "3.2×10⁻¹²". Distances span many orders of magnitude — from
+ * order-1 far from the set to vanishingly small near the boundary at deep
+ * zoom — so scientific notation is both honest and compact. */
+function formatDistance(value: number): string {
+  let exponent = Math.floor(Math.log10(value));
+  let mantissa = Number((value / 10 ** exponent).toPrecision(2));
+  if (mantissa >= 10) {
+    mantissa /= 10;
+    exponent += 1;
+  }
+
+  const superscript = String(exponent)
+    .split("")
+    .map((char) => SUPERSCRIPTS[char])
+    .join("");
+  return `${mantissa}×10${superscript}`;
+}
+
 /** A cursor-following readout shown while ctrl is held over the fractal:
  * the complex-plane coordinates under the cursor, and the point's escape
  * time computed as a one-pixel render on the worker pool. Covers the hover
@@ -93,6 +112,7 @@ class PointTooltip {
   private imElement: HTMLDivElement;
   private offsetElement: HTMLDivElement;
   private escapeTimeElement: HTMLDivElement;
+  private distanceElement: HTMLDivElement;
   private copyButton: HTMLButtonElement;
   // The most recent mouse position over the map, so pressing ctrl shows the
   // tooltip without waiting for the next mousemove. Null while the cursor
@@ -117,6 +137,7 @@ class PointTooltip {
     this.offsetElement = document.createElement("div");
     this.offsetElement.className = "point-tooltip-offset";
     this.escapeTimeElement = document.createElement("div");
+    this.distanceElement = document.createElement("div");
     this.copyButton = document.createElement("button");
     this.copyButton.type = "button";
     this.copyButton.className = "point-tooltip-copy";
@@ -137,6 +158,7 @@ class PointTooltip {
       this.imElement,
       this.offsetElement,
       this.escapeTimeElement,
+      this.distanceElement,
     );
     map.getContainer().appendChild(this.element);
 
@@ -264,11 +286,13 @@ class PointTooltip {
     // throttle interval, and a steady value beats flicker).
     if (this.element.hidden) {
       this.escapeTimeElement.textContent = "Escape time: …";
+      this.distanceElement.textContent = "Distance: …";
+      this.distanceElement.hidden = false;
       this.element.hidden = false;
     }
 
     this.positionAt(containerPoint);
-    this.throttledQueryEscapeTime(latLng);
+    this.throttledQueryPointData(latLng);
   }
 
   /** The cursor's offset from the view center, in scientific notation. It is
@@ -304,7 +328,7 @@ class PointTooltip {
       return;
     }
     this.element.hidden = true;
-    this.throttledQueryEscapeTime.cancel();
+    this.throttledQueryPointData.cancel();
     // Drop any in-flight result so it cannot repaint a future reveal.
     this.queryId += 1;
   }
@@ -328,7 +352,7 @@ class PointTooltip {
       : "translate(-50%, 0)";
   }
 
-  private throttledQueryEscapeTime = throttle((latLng: L.LatLng) => {
+  private throttledQueryPointData = throttle((latLng: L.LatLng) => {
     const id = ++this.queryId;
     const zoom = this.map.getZoom();
     const position = this.map.latLngToTilePosition(latLng, zoom);
@@ -343,6 +367,26 @@ class PointTooltip {
           iterations === null
             ? `In set (>${formatIterations(this.map.config.iterations)})`
             : `Escape time: ${formatIterations(iterations)}`;
+      })
+      .catch(() => {
+        // The pool was terminated by a re-render; the next hover retries.
+      });
+
+    // The exterior distance estimate (#42): a scalar wasm loop with derivative
+    // tracking, a separate query from the escape-time one-pixel render. Hidden
+    // for in-set points, which have no exterior distance.
+    this.map.regionRenderer
+      .distanceToBoundaryAtPoint(position, zoom)
+      .then((distance) => {
+        if (id !== this.queryId || this.element.hidden) {
+          return;
+        }
+        if (distance === null) {
+          this.distanceElement.hidden = true;
+          return;
+        }
+        this.distanceElement.textContent = `Distance: ≈${formatDistance(distance)}`;
+        this.distanceElement.hidden = false;
       })
       .catch(() => {
         // The pool was terminated by a re-render; the next hover retries.
