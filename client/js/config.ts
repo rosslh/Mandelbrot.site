@@ -263,22 +263,36 @@ export function coloringOptions(config: MandelbrotConfig): ColoringOptions {
   };
 }
 
-/** The share URL encoding the given config, one query parameter per
- * schema entry that has one. */
-export function buildShareUrl(config: MandelbrotConfig): string {
-  const url = new URL(window.location.origin);
+/** The shared parameters for the given config as a plain object keyed by URL
+ * parameter name, e.g. `{ re, im, z, i, e, c, ... }`. Single source of truth
+ * for both the share URL and the PNG metadata blob, so the two never drift. */
+export function buildShareParams(
+  config: MandelbrotConfig,
+): Record<string, string> {
+  const params: Record<string, string> = {};
 
   for (const spec of settingsSchema) {
     if (!spec.urlParam) {
       continue;
     }
-    const value =
+    params[spec.urlParam] =
       spec.key === "paletteAutoAdjust"
         ? config.paletteAutoAdjust
           ? "auto"
           : "manual"
         : String(config[spec.key]);
-    url.searchParams.set(spec.urlParam, value);
+  }
+
+  return params;
+}
+
+/** The share URL encoding the given config, one query parameter per
+ * schema entry that has one. */
+export function buildShareUrl(config: MandelbrotConfig): string {
+  const url = new URL(window.location.origin);
+
+  for (const [param, value] of Object.entries(buildShareParams(config))) {
+    url.searchParams.set(param, value);
   }
 
   return url.toString();

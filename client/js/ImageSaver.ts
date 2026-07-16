@@ -1,5 +1,7 @@
 import { saveAs } from "file-saver";
 import type MandelbrotMap from "./MandelbrotMap";
+import { buildShareParams } from "./config";
+import { embedTextChunks } from "./pngMetadata";
 import { OptimiseRequest, OptimiseResponse, TileRect } from "./protocol";
 
 class ImageSaver {
@@ -111,6 +113,21 @@ class ImageSaver {
     return finalCanvas;
   }
 
+  /** Embeds the full, untruncated view parameters into the PNG as tEXt chunks
+   * so a saved image stays exactly regenerable even after it is renamed. The
+   * share URL and the JSON blob are both derived from `buildShareParams`, the
+   * same serialization the share button uses, so they never drift. Runs before
+   * the optional oxipng pass, which preserves text chunks. */
+  private embedViewMetadata(pngBuffer: ArrayBuffer): ArrayBuffer {
+    const params = buildShareParams(this.map.config);
+    const shareUrl = this.map.getShareUrl();
+    return embedTextChunks(pngBuffer, [
+      { keyword: "Software", text: "Mandelbrot.site" },
+      { keyword: "mandelbrot:url", text: shareUrl },
+      { keyword: "mandelbrot:params", text: JSON.stringify(params) },
+    ]);
+  }
+
   private async saveCanvasAsImage(
     canvas: HTMLCanvasElement,
     optimize: boolean,
@@ -123,7 +140,7 @@ class ImageSaver {
     }
     const dataUrl = canvas.toDataURL("image/png");
     const response = await fetch(dataUrl);
-    const rawPngBuffer = await response.arrayBuffer();
+    const rawPngBuffer = this.embedViewMetadata(await response.arrayBuffer());
 
     let finalBuffer = rawPngBuffer;
 
