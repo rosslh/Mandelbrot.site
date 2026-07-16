@@ -31,6 +31,13 @@ export type MandelbrotConfig = {
   // boundary images. Only the direct f64 path renders it; deeper (zoomed)
   // tiles fall back to escape-time coloring.
   distanceEstimate: boolean;
+  // Atom-domain rendering mode (issue #45): color each pixel by the detected
+  // period of its atom domain (the iteration index of the orbit's nearest
+  // approach to the origin) using a categorical palette, instead of its escape
+  // time — visualizing where the set's components of each period live. Only the
+  // direct f64 path renders it; deeper (zoomed) tiles fall back to escape-time
+  // coloring.
+  atomDomain: boolean;
   paletteMinIter: number;
   paletteMaxIter: number;
   // When enabled the palette range fits itself to the on-screen tiles and
@@ -58,6 +65,7 @@ export const defaultConfig: MandelbrotConfig = {
   showTierOverlay: false,
   smoothColoring: true,
   distanceEstimate: false,
+  atomDomain: false,
   paletteMinIter: 0,
   paletteMaxIter: 200,
   paletteAutoAdjust: true,
@@ -196,6 +204,14 @@ export const settingsSchema: SettingSpec[] = [
     urlParam: "de",
     effect: "rerender",
   },
+  // Atom-domain mode: the period value is baked into the cached escape/value
+  // buffer (like distanceEstimate), so switching it re-renders.
+  {
+    key: "atomDomain",
+    control: "checkbox",
+    urlParam: "ad",
+    effect: "rerender",
+  },
   { key: "highDpiTiles", control: "checkbox", effect: "rerender" },
   // Diagnostics overlay: toggling it only draws/clears a cosmetic overlay on
   // the already-rendered tiles, so its effect is "none" and the wiring
@@ -283,6 +299,7 @@ export function coloringOptions(config: MandelbrotConfig): ColoringOptions {
     paletteMaxIter: config.paletteMaxIter,
     colorCycles: config.colorCycles,
     distanceEstimate: config.distanceEstimate,
+    atomDomain: config.atomDomain,
   };
 }
 

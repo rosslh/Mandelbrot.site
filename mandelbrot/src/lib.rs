@@ -708,6 +708,62 @@ fn distance_estimate_brightness(distance: Option<f64>, pixel_spacing: f64) -> f6
     }
 }
 
+/// The iteration index at which the orbit of `c` (from `z = 0`) comes closest
+/// to the origin within the iteration budget — the "atom domain" of `c`
+/// (issue #45).
+///
+/// For a point inside a period-`p` hyperbolic component the orbit settles onto
+/// a `p`-cycle, and the cycle point nearest the origin recurs every `p` steps;
+/// the *first* step at which the running minimum of `|z_n|` is attained is
+/// therefore the smallest index of that nearest cycle point, and neighboring
+/// pixels that share the same period share the same nearest-approach index —
+/// so coloring by this index paints each period's atom domain a flat region.
+/// Exterior points get the index at which their (escaping) orbit dips closest
+/// to the origin before diverging, which likewise clusters by the component
+/// they orbit near, giving the boundary its filamentary period structure.
+///
+/// Iterating from `z = 0`, the index `0` reference point is never the minimum
+/// (`|z_0| = 0` would trivially win), so the search starts from the first
+/// mapped point `z_1 = c`; the returned index is at least `1`. Escaped orbits
+/// stop early (their minimum is always attained before escape), so the budget
+/// bounds the work. Only meaningful for exponent 2, matching the quadratic set.
+fn atom_domain_index_at_c(c: Complex64, max_iterations: u32, escape_radius_squared: f64) -> u32 {
+    let mut z = c;
+    let mut min_norm_sqr = z.norm_sqr();
+    let mut min_index: u32 = 1;
+
+    for index in 2..=max_iterations {
+        if z.norm_sqr() >= escape_radius_squared {
+            break;
+        }
+        z = z * z + c;
+        let norm_sqr = z.norm_sqr();
+        if norm_sqr < min_norm_sqr {
+            min_norm_sqr = norm_sqr;
+            min_index = index;
+        }
+    }
+
+    min_index
+}
+
+/// Maps an atom-domain index (`atom_domain_index_at_c`) to a palette-independent
+/// value in `[0, 1)` for the atom-domain rendering mode (issue #45). Coloring
+/// by period wants a *categorical* palette — adjacent periods should read as
+/// clearly distinct bands rather than a smooth ramp — so instead of normalizing
+/// the raw index (which would crush the low periods that dominate most views
+/// into a sliver at the dark end), each integer index is scattered across the
+/// palette by the fractional part of `index * φ⁻¹`. The golden-ratio conjugate
+/// gives a low-discrepancy sequence: successive indices land far apart on the
+/// color wheel, so consecutive periods contrast maximally while the mapping
+/// stays deterministic and palette-agnostic (it recolors through the same fixed
+/// `0..1` pipeline distance-estimate tiles use).
+fn atom_domain_value(index: u32) -> f64 {
+    // φ⁻¹ = (√5 − 1) / 2, the golden-ratio conjugate.
+    const GOLDEN_RATIO_CONJUGATE: f64 = 0.618_033_988_749_894_9;
+    (f64::from(index) * GOLDEN_RATIO_CONJUGATE).fract()
+}
+
 // Iterations spent settling the orbit onto its attracting cycle before the
 // period search begins. A superattracting cycle (the center of a bulb, e.g.
 // c = 0 or c = -1) locks on almost immediately, but points near the edge of a
@@ -2935,6 +2991,111 @@ fn generate_distance_estimate_image(
     }
 }
 
+/// Renders a tile in atom-domain mode (issue #45) over an f64 view rectangle.
+/// Each pixel is colored by the iteration index at which its orbit came closest
+/// to the origin (`atom_domain_index_at_c`), scattered across the palette by
+/// `atom_domain_value` so each detected period reads as a distinct categorical
+/// band — visualizing where the components of each period live rather than the
+/// escape-time gradient.
+///
+/// Unlike escape-time or distance-estimate mode, *every* pixel (interior and
+/// exterior alike) has a nearest-approach index, so there is no interior black
+/// sentinel: an interior tile is a meaningful flat atom domain, not a void. A
+/// dedicated scalar loop rather than the tuned streaming escape kernels, for
+/// the same reason distance-estimate mode uses one — this is a separate kernel
+/// variant selected by mode, not a branch in the hot loops.
+///
+/// The per-pixel `[0, 1)` value is stored in the cached `values` and the
+/// palette is applied over the fixed `0..1` range, so atom-domain tiles recolor
+/// through the same `recolor_tile` pipeline as escape-time tiles
+/// (`ColoringOptions::atom_domain` selects the fixed range there). Iteration
+/// stats stay `None`: the palette range is fixed, so there is nothing to
+/// auto-fit.
+#[allow(clippy::too_many_arguments)]
+fn generate_atom_domain_image(
+    re_min: f64,
+    re_max: f64,
+    im_min: f64,
+    im_max: f64,
+    max_iterations: u32,
+    image_width: usize,
+    image_height: usize,
+    color_scheme: &str,
+    reverse_colors: bool,
+    shift_hue_amount: f32,
+    saturate_amount: f32,
+    lighten_amount: f32,
+    color_space: ValidColorSpace,
+    color_cycles: u32,
+) -> RenderedTile {
+    let (palette, should_reverse_colors, palette_is_cyclic) =
+        get_color_palette(color_scheme, reverse_colors);
+
+    let re_range = linspace(re_min, re_max, image_width);
+    let im_range = linspace(im_max, im_min, image_height);
+
+    let output_size: usize = image_width * image_height * NUM_COLOR_CHANNELS;
+    let mut img: Vec<u8> = vec![0; output_size];
+    // Every pixel has an atom-domain value, so none stays at the interior
+    // Infinity sentinel — but initialize to it anyway (harmless, and matches
+    // the escape/DE buffers) before overwriting every entry below.
+    let mut values: Vec<f32> = vec![f32::INFINITY; image_width * image_height];
+    for alpha_idx in (3..output_size).step_by(NUM_COLOR_CHANNELS) {
+        img[alpha_idx] = 255;
+    }
+
+    let escape_radius_squared = ESCAPE_RADIUS * ESCAPE_RADIUS;
+    let re_values: Vec<f64> = re_range.collect();
+
+    for (row, im) in im_range.enumerate() {
+        for (col, &re) in re_values.iter().enumerate() {
+            let index = atom_domain_index_at_c(
+                Complex64::new(re, im),
+                max_iterations,
+                escape_radius_squared,
+            );
+            let value = atom_domain_value(index);
+
+            let pixel_index = row * image_width + col;
+            // Narrow to f32 before coloring so the tile matches a later
+            // `recolor_tile` of these same cached values bit-for-bit (recolor
+            // only has the f32 values to work from).
+            let value = f64::from(value as f32);
+            values[pixel_index] = value as f32;
+
+            // The atom-domain value is already in [0, 1); the palette maps it
+            // over that fixed range.
+            let pixel = color_from_smoothed_value(
+                value,
+                palette,
+                should_reverse_colors,
+                palette_is_cyclic,
+                color_cycles,
+                &color_space,
+                shift_hue_amount,
+                saturate_amount,
+                lighten_amount,
+                0.0,
+                1.0,
+            );
+
+            let index = pixel_index * NUM_COLOR_CHANNELS;
+            img[index] = pixel[0];
+            img[index + 1] = pixel[1];
+            img[index + 2] = pixel[2];
+        }
+    }
+
+    RenderedTile {
+        image: img,
+        values,
+        // The palette range is fixed at 0..1 in atom-domain mode, so there is
+        // no iteration range to auto-fit.
+        stats: TileIterationStats::default(),
+        tier: RenderTier::Direct,
+    }
+}
+
 /// Half-width of the fixed complex-plane window a Julia thumbnail spans, in
 /// each direction from the origin. A filled Julia set for `z^2 + c` lives
 /// entirely within `|z| <= 2` (the escape radius of the quadratic map), so a
@@ -3138,6 +3299,12 @@ fn render_tile_precise(
     // coloring gracefully — see the `distance_estimate` handling below and the
     // client gating that keeps DE mode on shallow views.
     distance_estimate: bool,
+    // Atom-domain rendering mode (issue #45): color each pixel by the iteration
+    // index of its orbit's nearest approach to the origin, visualizing the
+    // set's period structure. Like distance-estimate mode it is direct-f64 only
+    // and gated to shallow views by the client; deeper tiles fall back to
+    // escape-time coloring.
+    atom_domain: bool,
 ) -> RenderedTile {
     let pixel_spacing =
         perturbation::pixel_spacing(tile_x_min, tile_x_max, tile_zoom, zoom_offset, image_width)
@@ -3191,6 +3358,25 @@ fn render_tile_precise(
             );
         }
 
+        if atom_domain {
+            return generate_atom_domain_image(
+                re_min,
+                re_max,
+                im_min,
+                im_max,
+                max_iterations,
+                image_width,
+                image_height,
+                color_scheme,
+                reverse_colors,
+                shift_hue_amount,
+                saturate_amount,
+                lighten_amount,
+                color_space,
+                color_cycles,
+            );
+        }
+
         return generate_mandelbrot_set_image(
             re_min,
             re_max,
@@ -3213,13 +3399,14 @@ fn render_tile_precise(
         );
     }
 
-    // Distance-estimate mode is only implemented on the direct f64 path
-    // (issue #46 ships it in stages, direct first). A deep-zoom tile reaching
-    // here in DE mode falls through to the escape-time perturbation renderer
-    // below — a graceful, if non-DE, image. The client keeps DE mode gated to
-    // shallow views, so this fallback is a safety net rather than a normal
+    // Distance-estimate and atom-domain modes are only implemented on the
+    // direct f64 path (each ships direct-first). A deep-zoom tile reaching here
+    // in either mode falls through to the escape-time perturbation renderer
+    // below — a graceful, if unstyled, image. The client keeps both modes gated
+    // to shallow views, so this fallback is a safety net rather than a normal
     // path.
     let _ = distance_estimate;
+    let _ = atom_domain;
 
     // Which perturbation tier this view falls into, computed independently of
     // frame construction so a failed frame (below) still reports the right
@@ -3371,6 +3558,7 @@ pub fn get_mandelbrot_image_precise(
         1,
         // The bench harness only measures escape-time rendering.
         false,
+        false,
     )
     .image
 }
@@ -3454,14 +3642,22 @@ pub struct ColoringOptions {
     /// Defaults to false so escape-time payloads that omit it still parse.
     #[serde(default)]
     pub distance_estimate: bool,
+    /// Atom-domain rendering mode (issue #45): the cached `values` are a
+    /// palette-independent, period-scattered value in `[0, 1)` (see
+    /// `atom_domain_value`), not iteration counts, so the palette range is
+    /// fixed at `0..1` and the min/max thresholds are ignored. Defaults to
+    /// false so escape-time payloads that omit it still parse.
+    #[serde(default)]
+    pub atom_domain: bool,
 }
 
 impl ColoringOptions {
     /// The palette-normalization domain: the user's iteration thresholds in
-    /// escape-time mode, or the fixed `0..1` brightness range in
-    /// distance-estimate mode (where `values` are already normalized).
+    /// escape-time mode, or the fixed `0..1` range in the palette-independent
+    /// modes (distance-estimate and atom-domain), whose cached `values` are
+    /// already normalized.
     fn palette_thresholds(&self) -> (f64, f64) {
-        if self.distance_estimate {
+        if self.distance_estimate || self.atom_domain {
             (0.0, 1.0)
         } else {
             let min = f64::from(self.palette_min_iter);
@@ -3512,6 +3708,14 @@ impl TileRenderOptions {
     fn distance_estimate(&self) -> bool {
         self.coloring.distance_estimate
     }
+
+    /// Whether this render uses atom-domain mode (issue #45). Like
+    /// `distance_estimate`, the flag rides on `coloring` so it reaches
+    /// `recolor_tile` too, but a render needs it directly to pick the
+    /// atom-domain kernel and bake the period value into the cached `values`.
+    fn atom_domain(&self) -> bool {
+        self.coloring.atom_domain
+    }
 }
 
 /// Renders a Mandelbrot tile from a single options object (the production
@@ -3548,6 +3752,7 @@ pub fn render_tile(options: JsValue) -> Result<MandelbrotTile, JsValue> {
         options.coloring.palette_max_iter,
         options.coloring.color_cycles.max(1),
         options.distance_estimate(),
+        options.atom_domain(),
     );
 
     Ok(MandelbrotTile::from_rendered(
@@ -3676,6 +3881,7 @@ pub fn get_mandelbrot_tile_precise(
         palette_max_iter,
         color_cycles.unwrap_or(1).max(1),
         // Frozen positional signature (bench harness): escape-time only.
+        false,
         false,
     );
 

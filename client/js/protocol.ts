@@ -37,6 +37,12 @@ export type ColoringOptions = {
   // the palette maps them over the fixed 0..1 range and the min/max iteration
   // thresholds are ignored.
   distanceEstimate: boolean;
+  // Atom-domain rendering mode (issue #45): the cached values are a
+  // palette-independent, period-scattered value in [0, 1) (each detected
+  // period gets a distinct categorical band) rather than iteration counts, so
+  // the palette maps them over the fixed 0..1 range and the min/max iteration
+  // thresholds are ignored.
+  atomDomain: boolean;
 };
 
 // Everything a tile render needs, as one object handed through the worker

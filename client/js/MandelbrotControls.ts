@@ -66,6 +66,7 @@ class MandelbrotControls {
           "iterations",
           "exponent",
           "distanceEstimate",
+          "atomDomain",
           "highDpiTiles",
           "showTierOverlay",
         ],

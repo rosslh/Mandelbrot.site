@@ -898,6 +898,133 @@ mod lib_test {
     }
 
     #[test]
+    fn test_atom_domain_index_at_c() {
+        use num::complex::Complex64;
+
+        let escape_radius_squared = super::ESCAPE_RADIUS * super::ESCAPE_RADIUS;
+
+        // c = 0: the orbit is 0, 0, 0, ... so from z_1 = c = 0 onward every
+        // point is exactly the origin. The first minimum is attained at the
+        // starting index 1 and never beaten, so the index is 1 (period-1 atom).
+        assert_eq!(
+            super::atom_domain_index_at_c(Complex64::new(0.0, 0.0), 1000, escape_radius_squared),
+            1
+        );
+
+        // c = -1 (center of the period-2 bulb): the orbit settles onto the
+        // 2-cycle 0 <-> -1. z_1 = -1, z_2 = 0, z_3 = -1, ... The nearest point
+        // to the origin is z_2 = 0, so the running minimum is first attained at
+        // index 2 — the period-2 atom domain.
+        assert_eq!(
+            super::atom_domain_index_at_c(Complex64::new(-1.0, 0.0), 1000, escape_radius_squared),
+            2
+        );
+
+        // A far exterior point escapes almost immediately; its nearest approach
+        // to the origin is its own starting value z_1 = c (already large), so
+        // the reported index is the starting index 1 and the loop bails on
+        // escape without panicking or running the full budget.
+        let index =
+            super::atom_domain_index_at_c(Complex64::new(4.0, 4.0), 1000, escape_radius_squared);
+        assert_eq!(index, 1);
+
+        // The index is always at least 1 (index 0, |z_0| = 0, is excluded so it
+        // never trivially wins) and never exceeds the iteration budget.
+        for &(re, im) in &[(-0.5, 0.5), (0.25, 0.5), (-0.75, 0.1), (0.3, 0.0)] {
+            let index =
+                super::atom_domain_index_at_c(Complex64::new(re, im), 200, escape_radius_squared);
+            assert!(
+                (1..=200).contains(&index),
+                "index {index} out of range for c = ({re}, {im})"
+            );
+        }
+    }
+
+    #[test]
+    fn test_atom_domain_value() {
+        // Every index maps into [0, 1), the fixed palette domain.
+        for index in 0..2000u32 {
+            let value = super::atom_domain_value(index);
+            assert!((0.0..1.0).contains(&value), "value {value} out of [0, 1)");
+        }
+
+        // Consecutive indices land far apart on the palette (the golden-ratio
+        // scatter that makes adjacent periods read as distinct categorical
+        // bands): every successive pair differs by an appreciable amount.
+        for index in 1..500u32 {
+            let a = super::atom_domain_value(index);
+            let b = super::atom_domain_value(index + 1);
+            let gap = (a - b).abs().min(1.0 - (a - b).abs());
+            assert!(
+                gap > 0.1,
+                "consecutive indices {index} and {} too close: {a} vs {b}",
+                index + 1
+            );
+        }
+
+        // The mapping is deterministic.
+        assert_eq!(super::atom_domain_value(7), super::atom_domain_value(7));
+    }
+
+    #[test]
+    fn test_generate_atom_domain_image() {
+        // The classic full-set view: exterior filaments plus the interior
+        // components (each a flat atom domain — no interior black sentinel).
+        let image_width = 40;
+        let image_height = 40;
+        let rendered = super::generate_atom_domain_image(
+            -2.0,
+            1.0,
+            -1.0,
+            1.0,
+            500,
+            image_width,
+            image_height,
+            "turbo",
+            false,
+            0.0,
+            0.0,
+            0.0,
+            crate::ValidColorSpace::Hsl,
+            1,
+        );
+
+        assert_eq!(
+            rendered.image.len(),
+            image_width * image_height * super::NUM_COLOR_CHANNELS
+        );
+        assert_eq!(rendered.values.len(), image_width * image_height);
+
+        // Every pixel — interior and exterior alike — has an atom-domain value,
+        // so none is left at the interior Infinity sentinel, and all values sit
+        // in the fixed [0, 1) palette domain.
+        assert!(
+            rendered.values.iter().all(|v| v.is_finite()),
+            "atom-domain tiles color every pixel (no interior sentinel)"
+        );
+        assert!(
+            rendered.values.iter().all(|&v| (0.0..1.0).contains(&v)),
+            "atom-domain values are normalized to [0, 1)"
+        );
+
+        // The view spans several periods, so the image must not be degenerate:
+        // it carries a spread of distinct atom-domain values.
+        let distinct: std::collections::BTreeSet<u32> =
+            rendered.values.iter().map(|v| v.to_bits()).collect();
+        assert!(
+            distinct.len() > 3,
+            "a full-set view should span several atom domains"
+        );
+
+        // The cached values recolor through the same pipeline as escape-time
+        // tiles when the atom-domain flag is set — bit-for-bit.
+        let mut coloring = coloring_options("turbo", 0, 200);
+        coloring.atom_domain = true;
+        let recolored = super::recolor_values(&rendered.values, &coloring);
+        assert_eq!(recolored, rendered.image);
+    }
+
+    #[test]
     fn test_calculate_julia_escape_iterations() {
         use num::complex::Complex64;
 
@@ -2340,6 +2467,7 @@ mod lib_test {
             palette_max_iter: palette_max,
             color_cycles: 1,
             distance_estimate: false,
+            atom_domain: false,
         }
     }
 

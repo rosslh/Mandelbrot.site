@@ -75,6 +75,7 @@ fn palette_colors(name: &str) -> Vec<u8> {
             palette_max_iter: 255,
             color_cycles: 1,
             distance_estimate: false,
+            atom_domain: false,
         },
     )
 }
