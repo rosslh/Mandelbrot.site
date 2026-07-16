@@ -2,6 +2,7 @@ import debounce from "lodash/debounce";
 import * as L from "leaflet";
 import type MandelbrotMap from "./MandelbrotMap";
 import { MandelbrotResponse, TileRect, WorkerRequest } from "./protocol";
+import { drawTierOverlay } from "./tierOverlay";
 
 type Done = (error: null, tile: HTMLCanvasElement) => void;
 
@@ -151,6 +152,12 @@ class MandelbrotLayer extends L.GridLayer {
         scaledTileSize,
       );
       context.putImageData(imageData, 0, 0);
+      // Diagnostics: tint the tile by the precision tier that rendered it
+      // (issue #50). Drawn on top of the pixels; a later toggle repaints from
+      // the cached escape values, so it never has to be "undrawn".
+      if (this._map.config.showTierOverlay) {
+        drawTierOverlay(canvas, response.tier);
+      }
       // A generation bump mid-flight means this tile's escape data describes
       // superseded render parameters: still paint it (its neighbors look the
       // same), but keep it out of the cache.
@@ -161,6 +168,7 @@ class MandelbrotLayer extends L.GridLayer {
           response.maxIter,
           canvas,
           response.values,
+          response.tier,
         );
       }
       announceFirstTileRendered();

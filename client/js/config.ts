@@ -22,6 +22,9 @@ export type MandelbrotConfig = {
   colorSpace: number;
   reverseColors: boolean;
   highDpiTiles: boolean;
+  // Diagnostics: tint each tile by the precision tier (direct f64 /
+  // perturbation f64 / hybrid float-exp) that rendered it (issue #50).
+  showTierOverlay: boolean;
   smoothColoring: boolean;
   paletteMinIter: number;
   paletteMaxIter: number;
@@ -47,6 +50,7 @@ export const defaultConfig: MandelbrotConfig = {
   colorSpace: 2,
   reverseColors: false,
   highDpiTiles: false,
+  showTierOverlay: false,
   smoothColoring: true,
   paletteMinIter: 0,
   paletteMaxIter: 200,
@@ -179,6 +183,10 @@ export const settingsSchema: SettingSpec[] = [
     resetView: true,
   },
   { key: "highDpiTiles", control: "checkbox", effect: "rerender" },
+  // Diagnostics overlay: toggling it only draws/clears a cosmetic overlay on
+  // the already-rendered tiles, so its effect is "none" and the wiring
+  // repaints the on-screen tiles explicitly (see wireCheckboxInput).
+  { key: "showTierOverlay", control: "checkbox", effect: "none" },
   // Color scheme
   { key: "colorScheme", control: "select", urlParam: "c", effect: "recolor" },
   {

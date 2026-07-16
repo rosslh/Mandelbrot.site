@@ -21,6 +21,7 @@ import {
   WorkerRequest,
 } from "./protocol";
 import { decimalDigitsForZoom, offsetCoordinate } from "./highPrecision";
+import { drawTierOverlay } from "./tierOverlay";
 
 type QueuedTileTask = {
   id: string;
@@ -369,6 +370,33 @@ class MandelbrotMap extends L.Map {
     return changed;
   }
 
+  /** Draws the precision-tier diagnostics overlay (issue #50) on a tile
+   * canvas, when the overlay toggle is on. A no-op otherwise, so it can be
+   * called unconditionally after any tile paint. */
+  private paintTierOverlay(canvas: HTMLCanvasElement, tier: number) {
+    if (this.config.showTierOverlay) {
+      drawTierOverlay(canvas, tier);
+    }
+  }
+
+  /** Applies a toggle of the tier overlay to the on-screen tiles without
+   * re-rendering: turning it on draws the overlay on each cached tile;
+   * turning it off recolors the tiles from their cached escape values (an
+   * in-place repaint that clears the overlay along with restoring the exact
+   * pixels). Tiles still rendering pick up the new state when they land
+   * (MandelbrotLayer reads the flag at paint time). */
+  applyTierOverlayToggle() {
+    if (this.config.showTierOverlay) {
+      for (const tile of this.tileCache.tilesAtZoom(this.getZoom())) {
+        drawTierOverlay(tile.canvas, tile.tier);
+      }
+    } else {
+      // Recoloring repaints each tile from its escape values, overwriting the
+      // overlay-tinted border and badge with clean pixels.
+      this.recolorVisibleTiles();
+    }
+  }
+
   /** Recolors every cached on-screen tile in place with the current color
    * and palette settings — an O(pixels) pass over the cached escape values,
    * with no escape-time recomputation. */
@@ -449,7 +477,9 @@ class MandelbrotMap extends L.Map {
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
       for (const { tile, imageData } of repaints) {
-        tile.canvas.getContext("2d")?.putImageData(imageData, 0, 0);
+        const context = tile.canvas.getContext("2d");
+        context?.putImageData(imageData, 0, 0);
+        this.paintTierOverlay(tile.canvas, tile.tier);
       }
       return Promise.resolve();
     }
@@ -471,7 +501,16 @@ class MandelbrotMap extends L.Map {
       newPixels.width = tile.width;
       newPixels.height = tile.height;
       newPixels.getContext("2d")?.putImageData(imageData, 0, 0);
-      return [{ context, imageData, oldPixels, newPixels }];
+      return [
+        {
+          context,
+          imageData,
+          oldPixels,
+          newPixels,
+          canvas: tile.canvas,
+          tier: tile.tier,
+        },
+      ];
     });
 
     return new Promise((resolve) => {
@@ -490,9 +529,11 @@ class MandelbrotMap extends L.Map {
         const progress = Math.min(1, (now - start) / RECOLOR_FADE_MS);
         if (progress === 1) {
           // The blended frames are compositing approximations; finish with
-          // the worker's exact pixels.
+          // the worker's exact pixels, then redraw the diagnostics overlay
+          // (issue #50) on top of the settled pixels.
           for (const fade of fades) {
             fade.context.putImageData(fade.imageData, 0, 0);
+            this.paintTierOverlay(fade.canvas, fade.tier);
           }
           resolve();
           return;

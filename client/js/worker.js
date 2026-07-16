@@ -192,6 +192,9 @@ const supportsRelaxedSimd = WebAssembly.validate(
         values: params.includeValues ? tile.values : null,
         minIter: tile.min_iter >= 0 ? tile.min_iter : null,
         maxIter: tile.max_iter >= 0 ? tile.max_iter : null,
+        // Precision tier that rendered this tile, for the diagnostics
+        // overlay (issue #50).
+        tier: tile.tier,
       };
       tile.free();
       return result;

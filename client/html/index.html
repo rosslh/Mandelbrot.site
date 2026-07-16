@@ -161,6 +161,20 @@
               >High resolution <span class="secondary">(Slow)</span></label
             >
           </div>
+          <div class="checkbox-wrapper mobile-hidden">
+            <input
+              type="checkbox"
+              id="showTierOverlay"
+              name="showTierOverlay"
+            />
+            <label
+              for="showTierOverlay"
+              title="Tint each tile by the numeric precision path (direct f64, perturbation, or hybrid float-exp) the renderer picked for it."
+              >Precision overlay
+              <span class="secondary">(Diagnostic)</span></label
+            >
+          </div>
+          <ul id="tierLegend" class="tier-legend" hidden></ul>
         </div>
       </details>
       <details class="mobile-hidden" id="colorPalette">

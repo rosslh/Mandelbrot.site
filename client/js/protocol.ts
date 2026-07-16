@@ -126,6 +126,10 @@ export type MandelbrotResponse = {
   // entirely inside the set.
   minIter: number | null;
   maxIter: number | null;
+  // Which precision path rendered the tile, as a `RenderTier` discriminant
+  // (see tierOverlay.ts / the Rust `RenderTier` enum). Drives the diagnostics
+  // overlay (issue #50).
+  tier: number;
 };
 export type OptimiseResponse = ArrayBuffer;
 export type RecolorResponse = Uint8Array;

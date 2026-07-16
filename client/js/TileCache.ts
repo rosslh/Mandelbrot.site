@@ -48,6 +48,9 @@ export type CachedTile = {
   values: Float32Array;
   width: number;
   height: number;
+  // Precision tier that rendered the tile (see tierOverlay.ts), so the
+  // diagnostics overlay can be redrawn on toggle without re-rendering.
+  tier: number;
 };
 
 // A handful of pixels can escape at far higher iteration counts than the
@@ -120,6 +123,7 @@ class TileCache {
     maxIter: number | null,
     canvas: HTMLCanvasElement,
     values: Float32Array,
+    tier: number,
   ) {
     this.tiles.set(this.key(position), {
       x: position.x,
@@ -133,6 +137,7 @@ class TileCache {
       values,
       width: canvas.width,
       height: canvas.height,
+      tier,
     });
     this.version += 1;
   }

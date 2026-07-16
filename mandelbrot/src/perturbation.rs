@@ -45,6 +45,15 @@ pub const MIN_DIRECT_PIXEL_SPACING: f64 = 1.0 / (1u64 << 50) as f64;
 /// range. Below it, deltas and their squares stay clear of f64 underflow.
 const FLOAT_EXP_THRESHOLD: i64 = 250;
 
+/// Whether a perturbation render at the given effective zoom and exponent
+/// would take the hybrid float-exp path (rather than plain f64 deltas). Only
+/// the quadratic set has a float-exp kernel; other exponents stay on f64
+/// deltas at any depth. Kept as a free function so the tier can be reported
+/// even when frame construction fails (see `render_tile_precise`).
+pub fn uses_float_exp(effective_zoom: i64, exponent: u32) -> bool {
+    exponent == 2 && effective_zoom >= FLOAT_EXP_THRESHOLD
+}
+
 /// Maximum stored reference orbit length. Pixels needing more iterations wrap
 /// around via rebasing, which stays correct at any iteration count.
 const MAX_ORBIT_LENGTH: usize = 1_000_000;
@@ -1692,11 +1701,22 @@ impl PerturbedFrame {
             column_step,
             row_step,
             zoom_offset: zoom_offset as i64,
+            // The `exponent == 2` gate lives in `uses_float_exp` (the getter);
+            // this raw flag stays keyed on depth alone, as the compute paths
+            // expect (they combine it with `self.exponent == 2` themselves).
             use_float_exp: effective_zoom >= FLOAT_EXP_THRESHOLD,
             max_iterations,
             exponent,
             escape_radius_squared,
         })
+    }
+
+    /// Whether this frame runs the hybrid float-exp kernel rather than the
+    /// plain f64-delta one. Matches the `compute_all` dispatch: float-exp is
+    /// only taken for the quadratic set (other exponents stay on f64 deltas),
+    /// so the client's diagnostics overlay can report the true tier.
+    pub fn uses_float_exp(&self) -> bool {
+        self.use_float_exp && self.exponent == 2
     }
 
     /// The pixel's perturbation delta from the reference point as a plain

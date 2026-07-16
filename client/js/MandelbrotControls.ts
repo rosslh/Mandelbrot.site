@@ -23,6 +23,7 @@ import PaletteHistogram from "./PaletteHistogram";
 import { isValidDecimalCoordinate } from "./highPrecision";
 import { zoomFromMagnification } from "./magnification";
 import { describeZoomScale } from "./zoomScale";
+import { tierLegendEntries } from "./tierOverlay";
 import * as api from "./api";
 
 type ResetButtonConfig = {
@@ -61,9 +62,29 @@ class MandelbrotControls {
     this.resetButtonConfigs = [
       {
         buttonId: "resetRender",
-        configKeys: ["iterations", "exponent", "highDpiTiles"],
+        configKeys: [
+          "iterations",
+          "exponent",
+          "highDpiTiles",
+          "showTierOverlay",
+        ],
         specialHandling: () => {
           this.resetPaletteCeilingToIterations(this.map.config.iterations);
+        },
+        apply: (changedKeys) => {
+          // The reset may have flipped the overlay flag; keep its legend in
+          // step either way.
+          this.syncTierLegend();
+          // The tier overlay is cosmetic, so a reset that only toggles it off
+          // repaints in place; anything else re-renders.
+          const needsRerender = changedKeys.some(
+            (key) => key !== "showTierOverlay",
+          );
+          if (needsRerender) {
+            this.map.refresh();
+          } else {
+            this.map.applyTierOverlayToggle();
+          }
         },
       },
       {
@@ -147,6 +168,7 @@ class MandelbrotControls {
     syncAllInputsToConfig(this.map.config);
     this.handleInputs();
     this.syncAutoAdjustUi();
+    this.syncTierLegend();
     this.updateResetButtonsVisibility();
     this.loadDetailsState();
     this.paletteHistogram = new PaletteHistogram(this.map);
@@ -429,6 +451,13 @@ class MandelbrotControls {
         this.refreshPaletteHistogram();
         return;
       }
+      if (spec.key === "showTierOverlay") {
+        // Cosmetic overlay on already-rendered tiles: draw or clear it on the
+        // on-screen tiles instead of re-rendering (effect "none").
+        this.syncTierLegend();
+        this.map.applyTierOverlayToggle();
+        return;
+      }
       this.applySettingEffect(spec);
     };
   }
@@ -510,6 +539,31 @@ class MandelbrotControls {
    * so any palette min/max change (a manual edit, a refit) must repaint it. */
   refreshPaletteHistogram() {
     this.paletteHistogram?.update();
+  }
+
+  /** Builds the precision-tier legend (once) and shows it only while the tier
+   * overlay is enabled, so the tinted borders/badges on the tiles have a key.
+   * Idempotent: rebuilds nothing once the entries exist. */
+  syncTierLegend() {
+    const legend = document.getElementById("tierLegend");
+    if (!legend) {
+      return;
+    }
+
+    if (legend.childElementCount === 0) {
+      for (const { label, color } of tierLegendEntries()) {
+        const item = document.createElement("li");
+        const swatch = document.createElement("span");
+        swatch.className = "tier-legend-swatch";
+        swatch.style.backgroundColor = color;
+        const text = document.createElement("span");
+        text.textContent = label;
+        item.append(swatch, text);
+        legend.append(item);
+      }
+    }
+
+    legend.hidden = !this.map.config.showTierOverlay;
   }
 
   /** Reflects the auto-adjust state in the panel: while enabled the min/max

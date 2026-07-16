@@ -101,6 +101,23 @@ fn in_main_cardioid_or_bulb(re: f64, im: f64) -> bool {
     re_plus_one * re_plus_one + im_sq <= 0.0625
 }
 
+/// Which numeric precision path produced a tile. Reported alongside every
+/// render so the client's diagnostics overlay can tint each tile by the tier
+/// the renderer picked for it (issue #50). The `u8` discriminants are the
+/// wire values the client reads back (see `MandelbrotTile::tier`).
+#[derive(Clone, Copy)]
+pub(crate) enum RenderTier {
+    /// Direct f64 escape iteration (shallow views, or exponents the
+    /// perturbation path does not support).
+    Direct = 0,
+    /// Perturbation theory with f64 deltas from an arbitrary-precision
+    /// reference orbit.
+    Perturbation = 1,
+    /// Hybrid float-exp perturbation: deltas carry a separate exponent so
+    /// they survive underflow at extreme zoom depth.
+    FloatExp = 2,
+}
+
 /// Running min/max of the escaped-pixel iteration counts observed while
 /// rendering a tile. Interior pixels are rendered black regardless of the
 /// palette, so they are not tracked; `range` stays `None` for tiles entirely
@@ -129,15 +146,22 @@ struct RenderedTile {
     image: Vec<u8>,
     values: Vec<f32>,
     stats: TileIterationStats,
+    /// The precision path that produced this tile (for the client's
+    /// diagnostics overlay, issue #50).
+    tier: RenderTier,
 }
 
 impl RenderedTile {
-    /// A solid black tile, as produced for views entirely inside the set.
-    fn solid_black(image_width: usize, image_height: usize) -> RenderedTile {
+    /// A solid black tile, as produced for views entirely inside the set. The
+    /// tier is still reported so the overlay reflects the path the renderer
+    /// would have taken (a border-in-set perturbation tile stays on the
+    /// perturbation/float-exp tier).
+    fn solid_black(image_width: usize, image_height: usize, tier: RenderTier) -> RenderedTile {
         RenderedTile {
             image: create_solid_black_image(image_width, image_height),
             values: vec![f32::INFINITY; image_width * image_height],
             stats: TileIterationStats::default(),
+            tier,
         }
     }
 }
@@ -2668,10 +2692,12 @@ fn render_mandelbrot_set(
         }
     }
 
+    // Both callers of this loop are the direct f64 path.
     RenderedTile {
         image: img,
         values,
         stats,
+        tier: RenderTier::Direct,
     }
 }
 
@@ -2713,7 +2739,7 @@ fn generate_mandelbrot_set_image(
     let im_range = linspace(im_max, im_min, image_height);
 
     if rect_in_set(re_range.clone(), im_range.clone(), max_iterations, exponent) {
-        return RenderedTile::solid_black(image_width, image_height);
+        return RenderedTile::solid_black(image_width, image_height, RenderTier::Direct);
     }
 
     render_mandelbrot_set(
@@ -2870,6 +2896,16 @@ fn render_tile_precise(
         );
     }
 
+    // Which perturbation tier this view falls into, computed independently of
+    // frame construction so a failed frame (below) still reports the right
+    // tier to the diagnostics overlay.
+    let effective_zoom = tile_zoom as i64 + zoom_offset as i64;
+    let perturbation_tier = if perturbation::uses_float_exp(effective_zoom, exponent) {
+        RenderTier::FloatExp
+    } else {
+        RenderTier::Perturbation
+    };
+
     let frame = match perturbation::PerturbedFrame::new(
         origin_re,
         origin_im,
@@ -2886,11 +2922,11 @@ fn render_tile_precise(
         ESCAPE_RADIUS,
     ) {
         Ok(frame) => frame,
-        Err(_) => return RenderedTile::solid_black(image_width, image_height),
+        Err(_) => return RenderedTile::solid_black(image_width, image_height, perturbation_tier),
     };
 
     if frame.border_in_set(image_width, image_height) {
-        return RenderedTile::solid_black(image_width, image_height);
+        return RenderedTile::solid_black(image_width, image_height, perturbation_tier);
     }
 
     let (palette, should_reverse_colors, palette_is_cyclic) =
@@ -2943,6 +2979,13 @@ fn render_tile_precise(
         image: img,
         values,
         stats,
+        // Authoritative tier from the frame that actually ran, matching the
+        // `perturbation_tier` computed above.
+        tier: if frame.uses_float_exp() {
+            RenderTier::FloatExp
+        } else {
+            RenderTier::Perturbation
+        },
     }
 }
 
@@ -3022,6 +3065,10 @@ pub struct MandelbrotTile {
     pub min_iter: i32,
     /// Highest escaped-pixel iteration count, or -1 if no pixel escaped.
     pub max_iter: i32,
+    /// The precision path that produced this tile, as a `RenderTier`
+    /// discriminant (0 direct, 1 perturbation, 2 float-exp). Drives the
+    /// client's diagnostics overlay (issue #50).
+    pub tier: u8,
 }
 
 impl MandelbrotTile {
@@ -3040,6 +3087,7 @@ impl MandelbrotTile {
             },
             min_iter,
             max_iter,
+            tier: rendered.tier as u8,
         }
     }
 }
