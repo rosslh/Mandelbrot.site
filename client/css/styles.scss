@@ -368,6 +368,92 @@ datalist {
   }
 }
 
+#pinnedLocations {
+  #pinnedLocationsEmpty {
+    margin: 0;
+
+    &[hidden] {
+      display: none;
+    }
+
+    svg {
+      vertical-align: -0.15em;
+    }
+  }
+
+  #pinnedLocationsList {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .pinned-location {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-8);
+    border-radius: var(--border-radius);
+    padding: var(--space-2) var(--space-4);
+
+    &:hover {
+      background-color: var(--gray-800);
+
+      .pinned-location-actions {
+        visibility: visible;
+      }
+    }
+  }
+
+  .pinned-location-link {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .pinned-location-actions {
+    flex: 0 0 auto;
+    display: inline-flex;
+    gap: var(--space-2);
+    // Revealed on row hover; kept in the layout so it never shifts the date.
+    visibility: hidden;
+
+    // Also expose the actions for keyboard users focusing the buttons and on
+    // touch devices, where there is no hover state.
+    &:focus-within {
+      visibility: visible;
+    }
+  }
+
+  @media (pointer: coarse) {
+    .pinned-location-actions {
+      visibility: visible;
+    }
+  }
+
+  .pinned-location-action {
+    background: none;
+    border: none;
+    color: var(--gray-400);
+    padding: var(--space-4);
+    border-radius: var(--border-radius);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--font-size-md);
+
+    &:hover {
+      color: var(--gray-50);
+      background-color: var(--gray-700);
+    }
+  }
+}
+
 .button-wrapper {
   display: flex;
   align-items: center;

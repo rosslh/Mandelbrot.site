@@ -18,6 +18,7 @@ import {
 } from "./config";
 import FormModal from "./FormModal";
 import ConfirmModal from "./ConfirmModal";
+import PinnedLocations from "./PinnedLocations";
 import { isValidDecimalCoordinate } from "./highPrecision";
 import { zoomFromMagnification } from "./magnification";
 import { describeZoomScale } from "./zoomScale";
@@ -42,6 +43,7 @@ class MandelbrotControls {
   map: MandelbrotMap;
   resetButtonConfigs: ResetButtonConfig[];
   private changeExponentModal: ConfirmModal;
+  private pinnedLocations: PinnedLocations;
 
   constructor(map: MandelbrotMap) {
     this.map = map;
@@ -51,6 +53,8 @@ class MandelbrotControls {
       formId: "changeExponentForm",
       cancelId: "changeExponentCancel",
     });
+
+    this.pinnedLocations = new PinnedLocations();
 
     this.resetButtonConfigs = [
       {
@@ -617,8 +621,12 @@ class MandelbrotControls {
     ) as HTMLButtonElement;
 
     shareButton.onclick = () => {
-      navigator.clipboard.writeText(this.map.getShareUrl()).then(() => {
-        alert("The URL for this view has been copied!");
+      const shareUrl = this.map.getShareUrl();
+      // Pin the current view to the sidebar (persisted to localStorage) so it
+      // can be revisited later, and keep copying the link to the clipboard.
+      this.pinnedLocations.add(shareUrl);
+      navigator.clipboard.writeText(shareUrl).then(() => {
+        alert("The URL for this view has been copied and pinned!");
       });
       this.logEvent("share");
     };
