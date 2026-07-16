@@ -120,7 +120,7 @@ const appConfig = {
     extensions: [".ts", ".js"],
   },
   output: { path: dist, filename: "app.js" },
-  experiments: { syncWebAssembly: true },
+  experiments: { asyncWebAssembly: true },
   devtool: "source-map",
 };
 
@@ -152,7 +152,7 @@ const workerConfig = {
       {
         test: /\.wasm$/,
         // Both wasm-pack outputs (pkg/ and pkg-relaxed/) are wasm modules
-        // compiled by syncWebAssembly, not file assets.
+        // compiled by asyncWebAssembly, not file assets.
         exclude: /pkg(-relaxed)?\/.*\.wasm$/,
         type: "asset/resource",
         generator: {
@@ -165,7 +165,7 @@ const workerConfig = {
     extensions: [".ts", ".js", ".wasm"],
   },
   output: { path: dist, filename: "worker.js" },
-  experiments: { syncWebAssembly: true },
+  experiments: { asyncWebAssembly: true },
   devtool: "source-map",
 };
 
