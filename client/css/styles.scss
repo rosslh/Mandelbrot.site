@@ -127,6 +127,25 @@ html.fractal-root {
   }
 }
 
+// Cursor-following readout shown while ctrl is held over the fractal
+// (see PointTooltip.ts): the hovered point's coordinates and escape time.
+.point-tooltip {
+  min-width: unset;
+  border-radius: var(--border-radius);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+// While a modifier key is held over the map, every shortcut targets an
+// exact point or region — shift (zoom box), alt/option (center point),
+// ctrl (inspect point) — so the cursor marks it precisely (two classes
+// outweigh Leaflet's own .leaflet-grab cursor rule).
+.leaflet-container.crosshair-cursor {
+  cursor: crosshair;
+}
+
 #navigation {
   min-width: unset;
   bottom: env(safe-area-inset-bottom);
@@ -189,7 +208,11 @@ html.fractal-root {
       align-items: center;
       gap: var(--space-8);
 
-      #macShortcut {
+      code {
+        white-space: nowrap;
+      }
+
+      .mac-shortcut {
         display: none;
       }
     }

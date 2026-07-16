@@ -22,6 +22,15 @@ export function decimalDigitsForZoom(effectiveZoom: number): number {
   return Math.max(6, Math.ceil((Math.max(effectiveZoom, 0) + 32) * 0.30103));
 }
 
+/** Decimal digits a cursor-scale readout can meaningfully show at the given
+ * effective zoom: pixel scale (2^-(zoom+5) at 200px tiles) plus one guard
+ * digit. Unlike decimalDigitsForZoom, this excludes the ~10 digits of
+ * round-trip headroom, which describe sub-pixel machine state rather than
+ * anything a cursor position distinguishes. */
+export function displayDigitsForZoom(effectiveZoom: number): number {
+  return Math.max(3, Math.ceil((Math.max(effectiveZoom, 0) + 8) * 0.30103));
+}
+
 /**
  * Computes `origin + offset * 2^-zoomOffset`, where `origin` is a decimal
  * string and `offset` is an ordinary float. Returns a plain (non-exponential)

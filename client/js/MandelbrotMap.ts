@@ -4,6 +4,7 @@ import MandelbrotLayer from "./MandelbrotLayer";
 import { QueuedTask } from "threads/dist/master/pool-types";
 import MandelbrotControls from "./MandelbrotControls";
 import ImageSaver from "./ImageSaver";
+import PointTooltip from "./PointTooltip";
 import RegionRenderer from "./RegionRenderer";
 import TileCache, { CachedTile } from "./TileCache";
 import {
@@ -31,7 +32,7 @@ type MapWithResetView = L.Map & {
   _resetView: (center: L.LatLng | [number, number], zoom: number) => void;
 };
 
-type TilePosition = {
+export type TilePosition = {
   x: number;
   y: number;
 };
@@ -85,6 +86,7 @@ class MandelbrotMap extends L.Map {
   poolSpawned: Promise<void>;
   regionRenderer: RegionRenderer;
   imageSaver: ImageSaver;
+  pointTooltip: PointTooltip;
   queuedTileTasks: QueuedTileTask[] = [];
   origin: { re: string; im: string };
   zoomOffset: number;
@@ -143,6 +145,7 @@ class MandelbrotMap extends L.Map {
     this.addLoadingSpinnerControl();
     this.controls = new MandelbrotControls(this);
     this.imageSaver = new ImageSaver(this);
+    this.pointTooltip = new PointTooltip(this);
 
     // Anchor the world origin at the target coordinates (latLng (0, 0), the
     // center of Leaflet's tile universe) and set the initial view; for a
@@ -224,6 +227,29 @@ class MandelbrotMap extends L.Map {
     // "loading" event has already fired; seed the state instead.
     this.layerLoading = this.mandelbrotLayer.isLoading();
     this.updateLoadingSpinner();
+
+    this.setupModifierCursor();
+  }
+
+  /** Shows a crosshair cursor while any shortcut modifier is held over the
+   * map: shift (zoom box), alt/option (center point), and ctrl (inspect
+   * point) all target an exact point or region. */
+  private setupModifierCursor() {
+    const update = (event: KeyboardEvent | MouseEvent) => {
+      this.getContainer().classList.toggle(
+        "crosshair-cursor",
+        event.shiftKey || event.altKey || event.ctrlKey,
+      );
+    };
+    this.on("mousemove", (event: L.LeafletMouseEvent) =>
+      update(event.originalEvent),
+    );
+    window.addEventListener("keydown", update);
+    window.addEventListener("keyup", update);
+    // Modifier state is no longer observable after a focus loss.
+    window.addEventListener("blur", () =>
+      this.getContainer().classList.remove("crosshair-cursor"),
+    );
   }
 
   get effectiveZoom(): number {
@@ -237,7 +263,7 @@ class MandelbrotMap extends L.Map {
     return (value / 2 ** (zoom - 2)) * scaleFactor - 4;
   }
 
-  private latLngToTilePosition(latLng: L.LatLng, z: number): TilePosition {
+  latLngToTilePosition(latLng: L.LatLng, z: number): TilePosition {
     const point = this.project(latLng, z).unscaleBy(
       this.mandelbrotLayer.getTileSize(),
     );
@@ -245,26 +271,32 @@ class MandelbrotMap extends L.Map {
     return { x: point.x, y: point.y };
   }
 
-  /** The current view center as arbitrary-precision decimal strings. */
-  currentCenterCoordinates(): { re: string; im: string } {
+  /** The complex-plane coordinates of a map location as arbitrary-precision
+   * decimal strings. */
+  coordinatesAtLatLng(latLng: L.LatLng): { re: string; im: string } {
     const zoom = this.getZoom();
-    const center = this.latLngToTilePosition(this.getCenter(), zoom);
+    const position = this.latLngToTilePosition(latLng, zoom);
     const digits = decimalDigitsForZoom(this.effectiveZoom);
 
     return {
       re: offsetCoordinate(
         this.origin.re,
-        this.tileCoordinateOffset(center.x, zoom),
+        this.tileCoordinateOffset(position.x, zoom),
         this.zoomOffset,
         digits,
       ),
       im: offsetCoordinate(
         this.origin.im,
-        -this.tileCoordinateOffset(center.y, zoom),
+        -this.tileCoordinateOffset(position.y, zoom),
         this.zoomOffset,
         digits,
       ),
     };
+  }
+
+  /** The current view center as arbitrary-precision decimal strings. */
+  currentCenterCoordinates(): { re: string; im: string } {
+    return this.coordinatesAtLatLng(this.getCenter());
   }
 
   public get mapBoundsInTileSpace(): TileRect {

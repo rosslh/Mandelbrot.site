@@ -622,13 +622,16 @@ class MandelbrotControls {
 
   private handleShortcutHints() {
     const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
-    const windowsShortcut = document.getElementById("windowsShortcut");
-    const macShortcut = document.getElementById("macShortcut");
-
-    if (isMac && windowsShortcut && macShortcut) {
-      windowsShortcut.style.display = "none";
-      macShortcut.style.display = "inline-block";
+    if (!isMac) {
+      return;
     }
+
+    document
+      .querySelectorAll<HTMLElement>(".windows-shortcut")
+      .forEach((hint) => (hint.style.display = "none"));
+    document
+      .querySelectorAll<HTMLElement>(".mac-shortcut")
+      .forEach((hint) => (hint.style.display = "inline-block"));
   }
 
   private setCoordinateInputValues() {

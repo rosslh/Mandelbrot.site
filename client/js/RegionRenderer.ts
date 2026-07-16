@@ -1,4 +1,5 @@
 import type MandelbrotMap from "./MandelbrotMap";
+import type { TilePosition } from "./MandelbrotMap";
 import { coloringOptions } from "./config";
 import {
   CalculateRequest,
@@ -43,6 +44,36 @@ class RegionRenderer {
       smoothColoring: this.map.config.smoothColoring,
       coloring: coloringOptions(this.map.config),
     };
+  }
+
+  /** The escape iteration count at a single point, computed as a one-pixel
+   * render (so it uses the same kernels — and matches the same pixels — as
+   * the visible tiles at any zoom depth). Returns null when the point does
+   * not escape within the current iteration cap. The bounds span one screen
+   * pixel so the direct/perturbation tier choice matches the tile layer's. */
+  async escapeIterationsAtPoint(
+    position: TilePosition,
+    zoom: number,
+  ): Promise<number | null> {
+    const pixelSpan = 1 / this.map.mandelbrotLayer.getTileSize().x;
+    const bounds: TileRect = {
+      xMin: position.x,
+      xMax: position.x + pixelSpan,
+      yMin: position.y,
+      yMax: position.y + pixelSpan,
+      zoom,
+    };
+
+    const request: CalculateRequest = {
+      type: "calculate",
+      payload: this.buildPayload(bounds, 1, 1, false),
+    };
+
+    const response = (await this.map.pool.queue((workerTask) =>
+      workerTask(request),
+    )) as MandelbrotResponse;
+
+    return response.maxIter;
   }
 
   /** Renders the region to an offscreen canvas (no escape values, no tile
