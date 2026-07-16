@@ -529,6 +529,9 @@ class MandelbrotControls {
     const optimizeImageCheckbox = document.getElementById(
       "optimizeImage",
     ) as HTMLInputElement;
+    const exportRawDataCheckbox = document.getElementById(
+      "exportRawData",
+    ) as HTMLInputElement;
 
     const savedOptimizeState = localStorage.getItem(OPTIMIZE_IMAGE_STORAGE_KEY);
     if (savedOptimizeState !== null) {
@@ -541,6 +544,18 @@ class MandelbrotControls {
         JSON.stringify(optimizeImageCheckbox.checked),
       );
     };
+
+    // Optimization only applies to the PNG path; hide it while raw-data export
+    // is selected so the two options can't appear to combine.
+    const optimizeWrapper = optimizeImageCheckbox.closest(
+      ".checkbox-wrapper",
+    ) as HTMLElement | null;
+    const syncOptimizeVisibility = () => {
+      if (optimizeWrapper) {
+        optimizeWrapper.hidden = exportRawDataCheckbox.checked;
+      }
+    };
+    exportRawDataCheckbox.onchange = syncOptimizeVisibility;
 
     const modal = new FormModal(
       {
@@ -555,6 +570,7 @@ class MandelbrotControls {
           const currentOptimizeState = optimizeImageCheckbox.checked;
           modal.form.reset();
           optimizeImageCheckbox.checked = currentOptimizeState;
+          syncOptimizeVisibility();
           widthInput.value = String(
             window.screen.width * 2 * (window.devicePixelRatio || 1),
           );
@@ -574,6 +590,21 @@ class MandelbrotControls {
           }
 
           this.logEvent("imageSave");
+
+          if (exportRawDataCheckbox.checked) {
+            modal.beginBusy("Generating...");
+            this.map.imageSaver
+              .saveVisibleData(width, height)
+              .catch((error: unknown) => {
+                alert("Error exporting data\n\n" + error);
+                console.error(error);
+              })
+              .finally(() => {
+                modal.finishBusy();
+              });
+            return;
+          }
+
           modal.beginBusy("Generating...");
           const shouldOptimize = optimizeImageCheckbox.checked;
 

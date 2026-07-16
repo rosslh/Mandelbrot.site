@@ -2,6 +2,7 @@ import { saveAs } from "file-saver";
 import type MandelbrotMap from "./MandelbrotMap";
 import { buildShareParams } from "./config";
 import { embedTextChunks } from "./pngMetadata";
+import { buildZip, encodeNpyFloat32 } from "./dataExport";
 import { OptimiseRequest, OptimiseResponse, TileRect } from "./protocol";
 
 class ImageSaver {
@@ -35,6 +36,83 @@ class ImageSaver {
     await this.saveCanvasAsImage(finalCanvas, optimize, onStartOptimizing);
   }
 
+  /** Exports the current view's per-pixel escape values (issue #47) as a ZIP
+   * bundling a NumPy `.npy` float32 array and a JSON sidecar of the view
+   * parameters, so researchers get the raw numbers instead of a rasterized
+   * PNG. The value at row `y`, column `x` is the smoothed escape value used
+   * for coloring (or the raw iteration count when smooth coloring is off);
+   * interior pixels are `Infinity`. Reuses the image export's column layout
+   * and bounds handling so the data matches what a PNG of the same view would
+   * show. */
+  async saveVisibleData(totalWidth: number, totalHeight: number) {
+    const bounds = this.adjustBoundsForAspectRatio(
+      this.map.mapBoundsInTileSpace,
+      totalWidth,
+      totalHeight,
+    );
+
+    const columns = this.columnLayout(bounds, totalWidth);
+    const columnValues = await Promise.all(
+      columns.map((column) =>
+        this.map.regionRenderer.renderValues(
+          column.subBounds,
+          column.width,
+          totalHeight,
+        ),
+      ),
+    );
+
+    // Stitch the per-column row-major buffers into one row-major
+    // `totalHeight x totalWidth` array.
+    const values = new Float32Array(totalWidth * totalHeight);
+    columns.forEach((column, i) => {
+      const columnBuffer = columnValues[i];
+      for (let y = 0; y < totalHeight; y++) {
+        const source = columnBuffer.subarray(
+          y * column.width,
+          (y + 1) * column.width,
+        );
+        values.set(source, y * totalWidth + column.xOffset);
+      }
+    });
+
+    const npy = encodeNpyFloat32(values, totalHeight, totalWidth);
+    const metadata = {
+      software: "Mandelbrot.site",
+      url: this.map.getShareUrl(),
+      params: buildShareParams(this.map.config),
+      width: totalWidth,
+      height: totalHeight,
+      smoothColoring: this.map.config.smoothColoring,
+      // What each value means, so the file is self-describing without the app.
+      valueDescription: this.map.config.smoothColoring
+        ? "Smoothed escape value (fractional iteration count); Infinity for interior pixels."
+        : "Raw escape iteration count; Infinity for interior pixels.",
+      layout: "Row-major float32, shape (height, width), indexed as [y][x].",
+    };
+    const metadataBytes = new TextEncoder().encode(
+      JSON.stringify(metadata, null, 2),
+    );
+
+    const zip = buildZip([
+      { name: "data.npy", data: npy },
+      { name: "metadata.json", data: metadataBytes },
+    ]);
+
+    const blob = new Blob([zip], { type: "application/zip" });
+
+    // Deep-zoom coordinates can be hundreds of digits; keep filenames sane.
+    const truncate = (value: string) =>
+      value.length > 24 ? value.slice(0, 24) : value;
+
+    saveAs(
+      blob,
+      `mandelbrot${Date.now()}_r${truncate(this.map.config.re)}_im${truncate(
+        this.map.config.im,
+      )}_z${this.map.config.zoom}_data.zip`,
+    );
+  }
+
   private adjustBoundsForAspectRatio(
     bounds: TileRect,
     totalWidth: number,
@@ -61,33 +139,55 @@ class ImageSaver {
     return adjustedBounds;
   }
 
+  /** Splits the render into 24 vertical columns for parallelism across the
+   * worker pool. Every column is `columnWidth` wide except the last, which is
+   * clamped so the columns tile the full width exactly (`ceil` can otherwise
+   * overshoot `totalWidth`). Shared by the image and raw-data exports so both
+   * carve up the view identically. */
+  private columnLayout(
+    bounds: TileRect,
+    totalWidth: number,
+  ): { subBounds: TileRect; width: number; xOffset: number }[] {
+    const numColumns = 24;
+    const columnWidth = Math.ceil(totalWidth / numColumns);
+    const xDiff = bounds.xMax - bounds.xMin;
+
+    const columns: { subBounds: TileRect; width: number; xOffset: number }[] =
+      [];
+    for (let i = 0; i < numColumns; i++) {
+      const xOffset = columnWidth * i;
+      if (xOffset >= totalWidth) {
+        break;
+      }
+      const width = Math.min(columnWidth, totalWidth - xOffset);
+      columns.push({
+        subBounds: {
+          ...bounds,
+          xMin: bounds.xMin + xDiff * (xOffset / totalWidth),
+          xMax: bounds.xMin + xDiff * ((xOffset + width) / totalWidth),
+        },
+        width,
+        xOffset,
+      });
+    }
+
+    return columns;
+  }
+
   private async generateImageColumns(
     bounds: TileRect,
     totalWidth: number,
     totalHeight: number,
   ): Promise<HTMLCanvasElement[]> {
-    const numColumns = 24;
-    const columnWidth = Math.ceil(totalWidth / numColumns);
-    const xDiff = bounds.xMax - bounds.xMin;
-    const xDiffPerColumn = xDiff * (columnWidth / totalWidth);
-
-    const imagePromises: Promise<HTMLCanvasElement>[] = [];
-    for (let i = 0; i < numColumns; i++) {
-      const subBounds = {
-        ...bounds,
-        xMin: bounds.xMin + xDiffPerColumn * i,
-        xMax: bounds.xMin + xDiffPerColumn * (i + 1),
-      };
-      imagePromises.push(
+    return Promise.all(
+      this.columnLayout(bounds, totalWidth).map((column) =>
         this.map.regionRenderer.renderToCanvas(
-          subBounds,
-          columnWidth,
+          column.subBounds,
+          column.width,
           totalHeight,
         ),
-      );
-    }
-
-    return Promise.all(imagePromises);
+      ),
+    );
   }
 
   private combineImageColumns(

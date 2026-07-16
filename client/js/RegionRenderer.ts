@@ -76,6 +76,32 @@ class RegionRenderer {
     return response.maxIter;
   }
 
+  /** Renders the region and returns only its per-pixel smoothed escape values
+   * (row-major, `imageHeight * imageWidth` floats; `Infinity` for interior
+   * pixels), skipping the colorized image. Used by the raw-data export, which
+   * needs the numbers the tile layer normally caches for recoloring rather
+   * than the RGBA bytes. */
+  async renderValues(
+    bounds: TileRect,
+    imageWidth: number,
+    imageHeight: number,
+  ): Promise<Float32Array> {
+    const request: CalculateRequest = {
+      type: "calculate",
+      payload: this.buildPayload(bounds, imageWidth, imageHeight, true),
+    };
+
+    const response = (await this.map.pool.queue((workerTask) =>
+      workerTask(request),
+    )) as MandelbrotResponse;
+
+    if (!response.values) {
+      throw new Error("Render did not return escape values");
+    }
+
+    return response.values;
+  }
+
   /** Renders the region to an offscreen canvas (no escape values, no tile
    * cache entry — pure pixels for export-style consumers). */
   async renderToCanvas(
