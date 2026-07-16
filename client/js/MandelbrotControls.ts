@@ -17,6 +17,7 @@ import {
   syncInputToConfig,
 } from "./config";
 import FormModal from "./FormModal";
+import ConfirmModal from "./ConfirmModal";
 import { isValidDecimalCoordinate } from "./highPrecision";
 import { zoomFromMagnification } from "./magnification";
 import { describeZoomScale } from "./zoomScale";
@@ -40,9 +41,16 @@ const SMALL_SCREEN_WIDTH_PX = 800;
 class MandelbrotControls {
   map: MandelbrotMap;
   resetButtonConfigs: ResetButtonConfig[];
+  private changeExponentModal: ConfirmModal;
 
   constructor(map: MandelbrotMap) {
     this.map = map;
+
+    this.changeExponentModal = new ConfirmModal({
+      dialogId: "changeExponentModal",
+      formId: "changeExponentForm",
+      cancelId: "changeExponentCancel",
+    });
 
     this.resetButtonConfigs = [
       {
@@ -289,22 +297,45 @@ class MandelbrotControls {
         parsedValue = this.map.config[spec.key];
       }
 
-      if (spec.key === "iterations") {
-        this.resetPaletteCeilingToIterations(parsedValue);
+      // Settings that reset the view (the exponent) discard the current
+      // position, so confirm the change before applying it; a cancel restores
+      // the input to the value still held in the config.
+      if (spec.resetView && parsedValue !== this.map.config[spec.key]) {
+        const previousValue = this.map.config[spec.key];
+        this.changeExponentModal.open(
+          () => this.applyNumberInput(spec, input, parsedValue),
+          () => {
+            input.value = String(previousValue);
+          },
+        );
+        return;
       }
 
-      input.value = String(parsedValue);
-      this.map.config[spec.key] = parsedValue;
-      if (spec.resetView) {
-        // Changing the exponent picks a different fractal; iteration tuning
-        // for the old one doesn't carry over.
-        this.map.config.iterations = this.map.initialConfig.iterations;
-        syncInputToConfig(this.map.config, "iterations");
-      }
-
-      this.updateResetButtonsVisibility();
-      this.applySettingEffect(spec);
+      this.applyNumberInput(spec, input, parsedValue);
     }, 1000);
+  }
+
+  /** Commits a validated number input to the config and applies its effect. */
+  private applyNumberInput(
+    spec: NumberSpec,
+    input: HTMLInputElement,
+    parsedValue: number,
+  ) {
+    if (spec.key === "iterations") {
+      this.resetPaletteCeilingToIterations(parsedValue);
+    }
+
+    input.value = String(parsedValue);
+    this.map.config[spec.key] = parsedValue;
+    if (spec.resetView) {
+      // Changing the exponent picks a different fractal; iteration tuning
+      // for the old one doesn't carry over.
+      this.map.config.iterations = this.map.initialConfig.iterations;
+      syncInputToConfig(this.map.config, "iterations");
+    }
+
+    this.updateResetButtonsVisibility();
+    this.applySettingEffect(spec);
   }
 
   private wireCoordinateInput(spec: CoordinateSpec) {

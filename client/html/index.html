@@ -504,7 +504,7 @@
         />
       </a>
     </div>
-    <dialog id="saveImageModal" class="overlay">
+    <dialog id="saveImageModal" class="overlay form-modal">
       <form id="saveImageForm">
         <strong>Save image</strong>
         <div class="input-wrapper">
@@ -524,6 +524,25 @@
         <div class="submit-or-cancel">
           <button type="submit" id="saveImageSubmit">Save</button>
           <button type="button" id="saveImageCancel" class="underline-button">
+            Cancel
+          </button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="changeExponentModal" class="overlay form-modal">
+      <form id="changeExponentForm">
+        <strong>Change exponent?</strong>
+        <p>
+          Changing the exponent renders a different fractal and resets the view
+          to its starting position.
+        </p>
+        <div class="submit-or-cancel">
+          <button type="submit" id="changeExponentSubmit">Change</button>
+          <button
+            type="button"
+            id="changeExponentCancel"
+            class="underline-button"
+          >
             Cancel
           </button>
         </div>
