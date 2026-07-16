@@ -472,6 +472,38 @@ datalist {
   }
 }
 
+#juliaSet {
+  #juliaSetHint {
+    margin: 0;
+  }
+
+  #juliaSetThumbnail {
+    // The Julia set is symmetric about the origin, so a square keeps it
+    // undistorted while filling the sidebar column width.
+    aspect-ratio: 1 / 1;
+    background-color: var(--gray-900);
+    border: 1px solid var(--gray-600);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    // Preserve the crisp per-pixel escape bands rather than smoothing the
+    // upscaled thumbnail.
+    image-rendering: pixelated;
+  }
+
+  #juliaSetCoordinates {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+    // Reserve a line so the thumbnail doesn't jump when the readout appears.
+    min-height: 1em;
+  }
+}
+
 #zoomScaleCaption {
   margin: 0;
 

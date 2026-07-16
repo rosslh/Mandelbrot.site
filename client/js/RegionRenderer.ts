@@ -5,6 +5,7 @@ import {
   CalculateRequest,
   DistanceEstimateRequest,
   DistanceEstimateResponse,
+  JuliaRequest,
   MandelbrotResponse,
   PeriodRequest,
   PeriodResponse,
@@ -142,6 +143,39 @@ class RegionRenderer {
     )) as PeriodResponse;
 
     return period > 0 ? period : null;
+  }
+
+  /** Renders a Julia set thumbnail for the parameter `c = (cRe, cIm)` under
+   * the cursor (issue #12), as RGBA bytes for a `size x size` image. Uses the
+   * map's current palette, iteration cap, exponent, and appearance settings —
+   * read at call time, like the tile renderer — so the preview matches the
+   * fractal on screen. `c` is an ordinary f64: Julia sets live within `|c| < 2`,
+   * far inside f64 precision, so the cursor's deep-zoom sub-pixel precision is
+   * not needed for the parameter. */
+  async renderJulia(
+    cRe: number,
+    cIm: number,
+    size: number,
+  ): Promise<Uint8Array> {
+    const request: JuliaRequest = {
+      type: "julia",
+      payload: {
+        cRe,
+        cIm,
+        iterations: this.map.config.iterations,
+        exponent: this.map.config.exponent,
+        imageWidth: size,
+        imageHeight: size,
+        smoothColoring: this.map.config.smoothColoring,
+        coloring: coloringOptions(this.map.config),
+      },
+    };
+
+    const response = (await this.map.pool.queue((workerTask) =>
+      workerTask(request),
+    )) as MandelbrotResponse;
+
+    return response.image;
   }
 
   /** Renders the region and returns only its per-pixel smoothed escape values

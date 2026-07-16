@@ -5,6 +5,7 @@ import { QueuedTask } from "threads/dist/master/pool-types";
 import MandelbrotControls from "./MandelbrotControls";
 import ImageSaver from "./ImageSaver";
 import PointTooltip from "./PointTooltip";
+import JuliaPanel from "./JuliaPanel";
 import RegionRenderer from "./RegionRenderer";
 import TileCache, { CachedTile } from "./TileCache";
 import {
@@ -88,6 +89,7 @@ class MandelbrotMap extends L.Map {
   regionRenderer: RegionRenderer;
   imageSaver: ImageSaver;
   pointTooltip: PointTooltip;
+  juliaPanel: JuliaPanel;
   queuedTileTasks: QueuedTileTask[] = [];
   origin: { re: string; im: string };
   zoomOffset: number;
@@ -147,6 +149,7 @@ class MandelbrotMap extends L.Map {
     this.controls = new MandelbrotControls(this);
     this.imageSaver = new ImageSaver(this);
     this.pointTooltip = new PointTooltip(this);
+    this.juliaPanel = new JuliaPanel(this);
 
     // Anchor the world origin at the target coordinates (latLng (0, 0), the
     // center of Leaflet's tile universe) and set the initial view; for a
@@ -323,6 +326,25 @@ class MandelbrotMap extends L.Map {
         this.tileCoordinateOffset(center.y, zoom) -
         this.tileCoordinateOffset(cursor.y, zoom),
       zoomOffset: this.zoomOffset,
+    };
+  }
+
+  /** The absolute complex coordinate of a map location as ordinary f64. Only
+   * meaningful at shallow zoom (where `zoomOffset` is 0 and the origin fits in
+   * f64); deep-zoom callers must use the arbitrary-precision
+   * `coordinatesAtLatLng`. Used by the Julia panel, whose parameter `c` is an
+   * f64 pair. */
+  complexAtLatLngFloat(latLng: L.LatLng): { re: number; im: number } {
+    const zoom = this.getZoom();
+    const position = this.latLngToTilePosition(latLng, zoom);
+    const scale = 2 ** -this.zoomOffset;
+    return {
+      re:
+        Number(this.origin.re) +
+        this.tileCoordinateOffset(position.x, zoom) * scale,
+      im:
+        Number(this.origin.im) -
+        this.tileCoordinateOffset(position.y, zoom) * scale,
     };
   }
 
@@ -561,6 +583,8 @@ class MandelbrotMap extends L.Map {
       this.recolorPendingOnLoad = true;
     }
     this.recolorVisibleTiles();
+    // The Julia thumbnail uses the same palette; keep it in step.
+    this.juliaPanel?.refresh();
   }
 
   /** Applies an explicit palette-range action (a reset, or enabling
@@ -574,6 +598,8 @@ class MandelbrotMap extends L.Map {
     this.recolorVisibleTiles();
     // The refit moved the palette bounds; keep the histogram markers in step.
     this.controls?.refreshPaletteHistogram();
+    // The Julia thumbnail maps its escape counts over the same palette range.
+    this.juliaPanel?.refresh();
   }
 
   /** Runs when every visible tile has finished rendering: fit the palette to

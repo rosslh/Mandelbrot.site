@@ -200,6 +200,22 @@ const supportsRelaxedSimd = WebAssembly.validate(
       return result;
     };
 
+    // Julia set thumbnail for the parameter c under the cursor (issue #12).
+    // Reuses the tile struct (image + stats), so it frees the wasm-bindgen
+    // object the same way getTile does; the panel only needs the image.
+    const getJulia = (params) => {
+      const tile = wasm.render_julia(params);
+      const result = {
+        image: tile.image,
+        values: null,
+        minIter: tile.min_iter >= 0 ? tile.min_iter : null,
+        maxIter: tile.max_iter >= 0 ? tile.max_iter : null,
+        tier: tile.tier,
+      };
+      tile.free();
+      return result;
+    };
+
     const recolorTile = (params) =>
       wasm.recolor_tile(params.values, params.coloring);
 
@@ -230,6 +246,8 @@ const supportsRelaxedSimd = WebAssembly.validate(
       switch (request.type) {
         case "calculate":
           return getTile(request.payload);
+        case "julia":
+          return getJulia(request.payload);
         case "distanceEstimate":
           return distanceEstimate(request.payload);
         case "period":

@@ -64,6 +64,25 @@ export type CalculateRequest = {
   payload: TileRenderPayload;
 };
 
+// A Julia thumbnail render (issue #12). Unlike a Mandelbrot tile the view is
+// fixed (the whole set is framed), so only the parameter `c` under the cursor
+// plus the shared appearance settings ride along — no origin or tile geometry.
+// Mirrors the serde `JuliaRenderOptions` struct in mandelbrot/src/lib.rs.
+export type JuliaRenderPayload = {
+  cRe: number;
+  cIm: number;
+  iterations: number;
+  exponent: number;
+  imageWidth: number;
+  imageHeight: number;
+  smoothColoring: boolean;
+  coloring: ColoringOptions;
+};
+export type JuliaRequest = {
+  type: "julia";
+  payload: JuliaRenderPayload;
+};
+
 // A single point in the complex plane, described exactly like a tile render
 // (world origin plus a fractional Leaflet tile coordinate). Mirrors the serde
 // `PointQueryOptions` struct in mandelbrot/src/lib.rs.
@@ -113,6 +132,7 @@ export type WarmupDeepRequest = { type: "warmupDeep" };
 export type WarmupFloatExpRequest = { type: "warmupFloatExp" };
 export type WorkerRequest =
   | CalculateRequest
+  | JuliaRequest
   | DistanceEstimateRequest
   | PeriodRequest
   | OptimiseRequest

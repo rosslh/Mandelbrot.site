@@ -898,6 +898,147 @@ mod lib_test {
     }
 
     #[test]
+    fn test_calculate_julia_escape_iterations() {
+        use num::complex::Complex64;
+
+        // For c = 0 the filled Julia set is the closed unit disk: points with
+        // |z0| < 1 never escape, points with |z0| > 1 do.
+        let c = Complex64::new(0.0, 0.0);
+        let (iterations, _) =
+            super::calculate_julia_escape_iterations(Complex64::new(0.5, 0.0), c, 100, 9.0, 2);
+        assert_eq!(iterations, 100, "|z0| < 1 stays bounded for c = 0");
+
+        let (iterations, _) =
+            super::calculate_julia_escape_iterations(Complex64::new(1.5, 0.0), c, 100, 9.0, 2);
+        assert!(iterations < 100, "|z0| > 1 escapes for c = 0");
+
+        // Unlike the Mandelbrot iteration, c is fixed and z0 varies: the same
+        // z0 that stays bounded for c = 0 can escape for a different c.
+        let c = Complex64::new(2.0, 2.0);
+        let (iterations, _) =
+            super::calculate_julia_escape_iterations(Complex64::new(0.5, 0.0), c, 100, 9.0, 2);
+        assert!(iterations < 100, "large |c| pushes the orbit out to escape");
+
+        // The general (exponent > 2) branch behaves too: z0 = 0, c = 0 is a
+        // fixed point that never escapes.
+        let (iterations, final_z) = super::calculate_julia_escape_iterations(
+            Complex64::new(0.0, 0.0),
+            Complex64::new(0.0, 0.0),
+            100,
+            9.0,
+            3,
+        );
+        assert_eq!(iterations, 100);
+        assert_eq!(final_z, Complex64::new(0.0, 0.0));
+    }
+
+    #[test]
+    fn test_generate_julia_image() {
+        // A well-known Julia parameter (the "Douady rabbit", c = -0.123 + 0.745i)
+        // produces a connected set with both interior and exterior pixels.
+        let image_width = 48;
+        let image_height = 48;
+        let rendered = super::generate_julia_image(
+            -0.123,
+            0.745,
+            200,
+            2,
+            image_width,
+            image_height,
+            "turbo",
+            false,
+            0.0,
+            0.0,
+            0.0,
+            crate::ValidColorSpace::Hsl,
+            true,
+            0,
+            200,
+            1,
+        );
+
+        assert_eq!(
+            rendered.image.len(),
+            image_width * image_height * super::NUM_COLOR_CHANNELS
+        );
+        assert_eq!(rendered.values.len(), image_width * image_height);
+
+        // Alpha is fully opaque everywhere.
+        assert!(
+            rendered.image[3..]
+                .iter()
+                .step_by(super::NUM_COLOR_CHANNELS)
+                .all(|&a| a == 255),
+            "every pixel is opaque"
+        );
+
+        // The set is non-trivial: some pixels stay bounded (interior, Infinity
+        // sentinel) and some escape (finite smoothed value).
+        assert!(
+            rendered.values.iter().any(|v| v.is_infinite()),
+            "the Douady rabbit has interior pixels"
+        );
+        assert!(
+            rendered.values.iter().any(|v| v.is_finite()),
+            "the view frames exterior pixels too"
+        );
+
+        // Interior pixels render black; a mix of escaping pixels means the
+        // image is not a solid color.
+        let interior_index = rendered
+            .values
+            .iter()
+            .position(|v| v.is_infinite())
+            .expect("interior pixel exists");
+        let base = interior_index * super::NUM_COLOR_CHANNELS;
+        assert_eq!(&rendered.image[base..base + 4], &[0, 0, 0, 255]);
+
+        // Escaped pixels populate the iteration range for palette auto-fit.
+        assert!(rendered.stats.range.is_some());
+    }
+
+    #[test]
+    fn test_generate_julia_image_symmetry() {
+        // Filled Julia sets have point symmetry about the origin: z and -z
+        // share the same escape time (the map z -> z^2 + c is even up to the
+        // constant, and both branches of z^2 coincide). The fixed origin-
+        // centered window with even width samples symmetric z0 pairs, so the
+        // image is symmetric under a 180-degree rotation.
+        let size = 32;
+        let rendered = super::generate_julia_image(
+            -0.8,
+            0.156,
+            150,
+            2,
+            size,
+            size,
+            "greys",
+            false,
+            0.0,
+            0.0,
+            0.0,
+            crate::ValidColorSpace::Hsl,
+            false,
+            0,
+            150,
+            1,
+        );
+
+        for row in 0..size {
+            for col in 0..size {
+                let index = row * size + col;
+                let mirror = (size - 1 - row) * size + (size - 1 - col);
+                let value = rendered.values[index];
+                let mirror_value = rendered.values[mirror];
+                assert!(
+                    (value == mirror_value) || (value.is_infinite() && mirror_value.is_infinite()),
+                    "Julia set is symmetric under 180-degree rotation"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_point_in_set() {
         // Test points known to be in the set
         assert!(super::point_in_set(0.0, 0.0, 100, 2));

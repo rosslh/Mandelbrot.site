@@ -583,6 +583,52 @@ fn calculate_escape_iterations_general(
     (iter, z)
 }
 
+/// Escape-time iteration for a Julia set: unlike the Mandelbrot iteration
+/// (where `z` starts at 0 and `c` is the pixel), here `c` is a fixed parameter
+/// for the whole image and `z` starts at the pixel coordinate `z0`. Iterates
+/// `z -> z^exponent + c` and returns the escape iteration count plus the final
+/// `z`, matching the tuple the Mandelbrot escape functions return so the shared
+/// coloring pipeline consumes it identically.
+///
+/// The same Brent-style periodicity check as the Mandelbrot loops catches
+/// non-escaping (interior) orbits early. There is no closed-form interior test
+/// for a Julia set (its shape depends on `c`), so periodicity is the only
+/// shortcut.
+fn calculate_julia_escape_iterations(
+    z0: Complex64,
+    c: Complex64,
+    max_iterations: u32,
+    escape_radius_squared: f64,
+    exponent: u32,
+) -> (u32, Complex64) {
+    let mut z = z0;
+    let mut iter = 0;
+
+    let mut saved = z;
+    let mut next_save = PERIODICITY_FIRST_SAVE;
+
+    while z.norm_sqr() < escape_radius_squared && iter < max_iterations {
+        z = if exponent == 2 {
+            z * z + c
+        } else {
+            z.powu(exponent) + c
+        };
+        iter += 1;
+
+        if iter % PERIODICITY_CHECK_STRIDE == 0 {
+            if z == saved {
+                return (max_iterations, z);
+            }
+            if iter == next_save {
+                saved = z;
+                next_save = next_save.saturating_mul(2);
+            }
+        }
+    }
+
+    (iter, z)
+}
+
 /// Exterior distance estimate for a single point `c`, in the same units as the
 /// complex plane. Iterates the orbit `z` alongside its derivative `dz = dz/dc`,
 /// whose step for `f(z) = z^exponent + c` is
@@ -2889,6 +2935,125 @@ fn generate_distance_estimate_image(
     }
 }
 
+/// Half-width of the fixed complex-plane window a Julia thumbnail spans, in
+/// each direction from the origin. A filled Julia set for `z^2 + c` lives
+/// entirely within `|z| <= 2` (the escape radius of the quadratic map), so a
+/// square view of `[-2, 2] x [-2, 2]` always frames the whole set regardless
+/// of the parameter `c`. Higher exponents stay within their (smaller) escape
+/// radius too, so the same window frames them.
+const JULIA_VIEW_HALF_EXTENT: f64 = 2.0;
+
+/// Renders a Julia set thumbnail for the fixed parameter `c = (c_re, c_im)`.
+///
+/// Where the Mandelbrot renderer sweeps `c` across the pixels (iterating from
+/// `z = 0`), a Julia render fixes `c` for the whole image and sweeps the
+/// starting point `z0` across the pixels of a fixed `[-2, 2] x [-2, 2]` window
+/// (see `JULIA_VIEW_HALF_EXTENT`), iterating `z -> z^exponent + c`. The escape
+/// counts feed the same smoothing and coloring pipeline as a Mandelbrot tile,
+/// so the thumbnail honors the map's palette and appearance settings.
+///
+/// A plain scalar loop (as the distance-estimate renderer uses): the thumbnail
+/// is small and computed only when the cursor pauses, so it never touches the
+/// tuned streaming escape kernels.
+#[allow(clippy::too_many_arguments)]
+fn generate_julia_image(
+    c_re: f64,
+    c_im: f64,
+    max_iterations: u32,
+    exponent: u32,
+    image_width: usize,
+    image_height: usize,
+    color_scheme: &str,
+    reverse_colors: bool,
+    shift_hue_amount: f32,
+    saturate_amount: f32,
+    lighten_amount: f32,
+    color_space: ValidColorSpace,
+    smooth_coloring: bool,
+    palette_min_iter: i32,
+    palette_max_iter: i32,
+    color_cycles: u32,
+) -> RenderedTile {
+    let (palette, should_reverse_colors, palette_is_cyclic) =
+        get_color_palette(color_scheme, reverse_colors);
+
+    // The starting point z0 sweeps the fixed window; im runs top-to-bottom so
+    // the thumbnail's orientation matches the map (increasing im upward).
+    let re_range = linspace(-JULIA_VIEW_HALF_EXTENT, JULIA_VIEW_HALF_EXTENT, image_width);
+    let im_range = linspace(
+        JULIA_VIEW_HALF_EXTENT,
+        -JULIA_VIEW_HALF_EXTENT,
+        image_height,
+    );
+
+    let c = Complex64::new(c_re, c_im);
+    let escape_radius_squared = ESCAPE_RADIUS * ESCAPE_RADIUS;
+
+    let output_size: usize = image_width * image_height * NUM_COLOR_CHANNELS;
+    let mut img: Vec<u8> = vec![0; output_size];
+    let mut values: Vec<f32> = vec![f32::INFINITY; image_width * image_height];
+    let mut stats = TileIterationStats::default();
+    for alpha_idx in (3..output_size).step_by(NUM_COLOR_CHANNELS) {
+        img[alpha_idx] = 255;
+    }
+
+    let min_iterations_threshold = f64::from(palette_min_iter);
+    let max_iterations_threshold =
+        f64::from(palette_max_iter).max(min_iterations_threshold + f64::EPSILON);
+
+    let re_values: Vec<f64> = re_range.collect();
+
+    for (row, im) in im_range.enumerate() {
+        for (col, &re) in re_values.iter().enumerate() {
+            let (escape_iterations, z) = calculate_julia_escape_iterations(
+                Complex64::new(re, im),
+                c,
+                max_iterations,
+                escape_radius_squared,
+                exponent,
+            );
+            stats.record(escape_iterations, max_iterations);
+
+            let smoothed_value = smoothed_escape_value(
+                escape_iterations,
+                z,
+                max_iterations,
+                exponent,
+                smooth_coloring,
+            );
+
+            let pixel_index = row * image_width + col;
+            values[pixel_index] = smoothed_value as f32;
+
+            let pixel = color_from_smoothed_value(
+                smoothed_value,
+                palette,
+                should_reverse_colors,
+                palette_is_cyclic,
+                color_cycles,
+                &color_space,
+                shift_hue_amount,
+                saturate_amount,
+                lighten_amount,
+                min_iterations_threshold,
+                max_iterations_threshold,
+            );
+
+            let index = pixel_index * NUM_COLOR_CHANNELS;
+            img[index] = pixel[0];
+            img[index + 1] = pixel[1];
+            img[index + 2] = pixel[2];
+        }
+    }
+
+    RenderedTile {
+        image: img,
+        values,
+        stats,
+        tier: RenderTier::Direct,
+    }
+}
+
 #[wasm_bindgen]
 pub fn get_mandelbrot_set_image(
     re_min: f64,
@@ -3389,6 +3554,63 @@ pub fn render_tile(options: JsValue) -> Result<MandelbrotTile, JsValue> {
         rendered,
         options.include_values,
     ))
+}
+
+/// Everything a Julia thumbnail render needs (issue #12), as one deserializable
+/// object mirroring the client's camelCase payload. Unlike a Mandelbrot tile,
+/// the view is fixed (`generate_julia_image` frames the whole set), so this
+/// carries only the parameter `c` under the cursor plus the shared appearance
+/// settings — no arbitrary-precision origin or tile geometry. `c` is an f64:
+/// Julia sets live within `|c| < 2`, well inside f64 precision, and the
+/// thumbnail is a coarse preview, so the cursor's deep-zoom sub-pixel precision
+/// is not needed here.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JuliaRenderOptions {
+    /// The parameter `c` under the cursor, in the complex plane.
+    c_re: f64,
+    c_im: f64,
+    iterations: u32,
+    exponent: u32,
+    image_width: usize,
+    image_height: usize,
+    smooth_coloring: bool,
+    coloring: ColoringOptions,
+}
+
+/// Renders a Julia set thumbnail for the parameter `c` under the cursor
+/// (issue #12). The panel below the controls shows the filled Julia set for
+/// `z -> z^exponent + c`, framed to the fixed `[-2, 2] x [-2, 2]` window that
+/// contains every such set, colored with the map's current palette and
+/// appearance settings. Distance-estimate mode does not apply (it is a
+/// Mandelbrot-boundary technique), so the flag is ignored and escape-time
+/// coloring is always used. Returns the RGBA bytes plus iteration stats, like a
+/// tile render; the `values` buffer is unused by the panel and left empty.
+#[wasm_bindgen]
+pub fn render_julia(options: JsValue) -> Result<MandelbrotTile, JsValue> {
+    let options: JuliaRenderOptions =
+        serde_wasm_bindgen::from_value(options).map_err(JsValue::from)?;
+
+    let rendered = generate_julia_image(
+        options.c_re,
+        options.c_im,
+        options.iterations,
+        options.exponent,
+        options.image_width,
+        options.image_height,
+        &options.coloring.color_scheme,
+        options.coloring.reverse_colors,
+        options.coloring.shift_hue_amount,
+        options.coloring.saturate_amount,
+        options.coloring.lighten_amount,
+        options.coloring.color_space(),
+        options.smooth_coloring,
+        options.coloring.palette_min_iter,
+        options.coloring.palette_max_iter,
+        options.coloring.color_cycles.max(1),
+    );
+
+    Ok(MandelbrotTile::from_rendered(rendered, false))
 }
 
 /// Renders a Mandelbrot tile at any zoom depth (see `render_tile_precise`
