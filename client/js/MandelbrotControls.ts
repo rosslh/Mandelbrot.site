@@ -171,6 +171,18 @@ class MandelbrotControls {
       },
     ];
 
+    // The precision-tier overlay is a rendering diagnostic; only expose its
+    // control in dev builds. The config default is off and the setting has
+    // no share-URL parameter, so hiding the checkbox removes the feature.
+    if (process.env.NODE_ENV === "production") {
+      const tierOverlayWrapper = document
+        .getElementById("showTierOverlay")
+        ?.closest(".checkbox-wrapper") as HTMLElement | null;
+      if (tierOverlayWrapper) {
+        tierOverlayWrapper.hidden = true;
+      }
+    }
+
     // The config may already carry share-URL values (applied before the
     // controls exist); this writes every setting into its input once.
     syncAllInputsToConfig(this.map.config);

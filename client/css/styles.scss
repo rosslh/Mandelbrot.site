@@ -407,6 +407,12 @@ datalist {
   font-size: var(--font-size-xs);
   color: var(--gray-300);
 
+  // The display above would defeat the hidden attribute syncTierLegend
+  // toggles the legend with.
+  &[hidden] {
+    display: none;
+  }
+
   li {
     display: flex;
     align-items: center;
