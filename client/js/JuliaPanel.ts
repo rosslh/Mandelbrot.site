@@ -1,18 +1,23 @@
 import * as L from "leaflet";
-import debounce from "lodash/debounce";
+import throttle from "lodash/throttle";
 import type MandelbrotMap from "./MandelbrotMap";
 
-// Side length of the square Julia thumbnail, in device pixels. Small enough to
-// render on the worker pool between tiles without contending with the visible
-// layer, large enough to read the set's shape. The <canvas> is sized to this
-// and scaled to fit the sidebar column by CSS.
-const THUMBNAIL_SIZE = 200;
+// The thumbnail renders at its laid-out CSS size times the display's
+// devicePixelRatio (like the tile layer's high-resolution mode), so it is
+// pixel-sharp on high-DPI screens. This is the fallback CSS side length for
+// the moment before the panel has a layout to measure.
+const THUMBNAIL_FALLBACK_CSS_PX = 200;
+
+// Upper bound on the backing-store side length, so an extreme
+// devicePixelRatio cannot turn each cursor move into a heavyweight render on
+// the worker pool the tile layer is also using.
+const THUMBNAIL_MAX_DEVICE_PX = 800;
 
 // Minimum spacing between Julia renders while the cursor moves. Each render is
-// a small offscreen image on the worker pool; this bounds pool traffic while
-// tiles are also rendering, and reads a steady preview rather than one that
-// churns on every pixel of cursor movement.
-const RENDER_DEBOUNCE_MS = 120;
+// a small offscreen image on the worker pool; throttling bounds pool traffic
+// while tiles are also rendering, but keeps the preview tracking the cursor
+// live instead of waiting for it to stop.
+const RENDER_THROTTLE_MS = 120;
 
 /** The Julia set panel below the controls (issue #12): a thumbnail of the
  * filled Julia set for the parameter `c` under the cursor, iterating
@@ -22,7 +27,7 @@ const RENDER_DEBOUNCE_MS = 120;
  * palette and appearance settings so it matches the fractal on screen.
  *
  * Renders through the same worker pool as the tile layer (a dedicated wasm
- * entrypoint, `render_julia`), debounced so cursor movement does not flood the
+ * entrypoint, `render_julia`), throttled so cursor movement does not flood the
  * pool. */
 class JuliaPanel {
   private map: MandelbrotMap;
@@ -41,8 +46,6 @@ class JuliaPanel {
     this.canvas = document.getElementById(
       "juliaSetCanvas",
     ) as HTMLCanvasElement;
-    this.canvas.width = THUMBNAIL_SIZE;
-    this.canvas.height = THUMBNAIL_SIZE;
     this.ctx = this.canvas.getContext("2d");
     this.coordinatesElement = document.getElementById("juliaSetCoordinates");
 
@@ -79,6 +82,19 @@ class JuliaPanel {
     this.scheduleRender();
   }
 
+  /** The thumbnail's device-pixel side length: the laid-out CSS size scaled
+   * by the display's devicePixelRatio (the same DPI detection the tile
+   * layer's high-resolution mode uses), bounded above so extreme ratios stay
+   * cheap. Falls back to a nominal size before the panel has a layout. */
+  private thumbnailSize(): number {
+    const dpr = window.devicePixelRatio || 1;
+    const cssSize = this.canvas.clientWidth || THUMBNAIL_FALLBACK_CSS_PX;
+    return Math.min(
+      THUMBNAIL_MAX_DEVICE_PX,
+      Math.max(1, Math.round(cssSize * dpr)),
+    );
+  }
+
   /** The parameter `c` to visualize: the cursor's complex coordinate while it
    * is over the map, or the center of the visible region otherwise. */
   private parameterC(): { re: number; im: number } {
@@ -86,11 +102,11 @@ class JuliaPanel {
     return this.map.complexAtLatLngFloat(latLng);
   }
 
-  /** Renders the Julia thumbnail unless the panel is collapsed. Debounced so
-   * cursor movement (and rapid view changes) coalesce into one render. */
-  private scheduleRender = debounce(() => {
+  /** Renders the Julia thumbnail unless the panel is collapsed. Throttled so
+   * cursor movement updates the preview live without flooding the pool. */
+  private scheduleRender = throttle(() => {
     void this.render();
-  }, RENDER_DEBOUNCE_MS);
+  }, RENDER_THROTTLE_MS);
 
   private async render() {
     const panel = document.getElementById(
@@ -107,22 +123,25 @@ class JuliaPanel {
     const { re, im } = this.parameterC();
     this.showCoordinates(re, im);
 
+    const size = this.thumbnailSize();
     const id = ++this.renderId;
     try {
-      const image = await this.map.regionRenderer.renderJulia(
-        re,
-        im,
-        THUMBNAIL_SIZE,
-      );
+      const image = await this.map.regionRenderer.renderJulia(re, im, size);
       // A newer render (or a pool re-creation that resolved out of order)
       // supersedes this one.
       if (id !== this.renderId || !this.ctx) {
         return;
       }
+      // Size the backing store to the render (setting it also clears the
+      // canvas, so only on change); CSS keeps the displayed size.
+      if (this.canvas.width !== size || this.canvas.height !== size) {
+        this.canvas.width = size;
+        this.canvas.height = size;
+      }
       const imageData = new ImageData(
         Uint8ClampedArray.from(image),
-        THUMBNAIL_SIZE,
-        THUMBNAIL_SIZE,
+        size,
+        size,
       );
       this.ctx.putImageData(imageData, 0, 0);
     } catch {
