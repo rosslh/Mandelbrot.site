@@ -19,6 +19,20 @@ const CURSOR_GAP_PX = 12;
 // while tiles are rendering.
 const QUERY_THROTTLE_MS = 150;
 
+const SUPERSCRIPTS: { [k: string]: string } = {
+  "0": "⁰",
+  "1": "¹",
+  "2": "²",
+  "3": "³",
+  "4": "⁴",
+  "5": "⁵",
+  "6": "⁶",
+  "7": "⁷",
+  "8": "⁸",
+  "9": "⁹",
+  "-": "⁻",
+};
+
 function formatCoordinate(value: string, displayDigits: number): string {
   const dot = value.indexOf(".");
   const trimmed = dot === -1 ? value : value.slice(0, dot + 1 + displayDigits);
@@ -29,6 +43,30 @@ function formatCoordinate(value: string, displayDigits: number): string {
 
 function formatIterations(count: number): string {
   return `${count.toLocaleString()} iteration${count === 1 ? "" : "s"}`;
+}
+
+function formatScientific(value: number, sigDigits = 3): string {
+  if (!Number.isFinite(value) || value === 0) {
+    return "0";
+  }
+
+  const sign = value > 0 ? "+" : "-";
+  const abs = Math.abs(value);
+  let exp = Math.floor(Math.log10(abs));
+  let mant = abs / 10 ** exp;
+  const decimals = Math.max(0, sigDigits - 1);
+  mant = Number(mant.toFixed(decimals));
+  if (mant >= 10) {
+    mant /= 10;
+    exp += 1;
+  }
+
+  const mantStr = mant.toFixed(decimals).replace(/\.?0+$/, "");
+  const expStr = String(exp)
+    .split("")
+    .map((c) => SUPERSCRIPTS[c] ?? c)
+    .join("");
+  return `${sign}${mantStr}×10${expStr}`;
 }
 
 /** A cursor-following readout shown while ctrl is held over the fractal:
@@ -102,46 +140,18 @@ class PointTooltip {
     this.reElement.textContent = `Re: ${formatCoordinate(re, displayDigits)}`;
     this.imElement.textContent = `Im: ${formatCoordinate(im, displayDigits)}`;
 
-    // Compute a floating-point offset from the view center. This mirrors the
-    // high-precision path (offsetCoordinate uses tileCoordinateOffset and
-    // divides by 2^zoomOffset), but here a f64 is sufficient for a compact
-    // cursor-local readout. Show it in scientific notation once it's smaller
-    // than the absolute display resolution.
     const zoom = this.map.getZoom();
-    const position = this.map.latLngToTilePosition(latLng, zoom);
+    const cursorPosition = this.map.latLngToTilePosition(latLng, zoom);
+    const centerPosition = this.map.latLngToTilePosition(this.map.getCenter(), zoom);
+    const scale = 2 ** this.map.zoomOffset;
     const reOffset =
-      this.map.tileCoordinateOffset(position.x, zoom) / 2 ** this.map.zoomOffset;
+      (this.map.tileCoordinateOffset(cursorPosition.x, zoom) -
+        this.map.tileCoordinateOffset(centerPosition.x, zoom)) /
+      scale;
     const imOffset =
-      -this.map.tileCoordinateOffset(position.y, zoom) / 2 ** this.map.zoomOffset;
-
-    function toScientific(n: number, sigDigits = 3): string {
-      if (!Number.isFinite(n) || n === 0) return "0";
-      const sign = n > 0 ? "+" : "-";
-      const abs = Math.abs(n);
-      const exp = Math.floor(Math.log10(abs));
-      const mant = abs / 10 ** exp;
-      const decimals = Math.max(0, sigDigits - 1);
-      const mantStr = mant.toFixed(decimals).replace(/(?:\.0+)$/, "");
-      // Superscript digits for nicer presentation (e.g. ×10⁻⁴⁵)
-      const supMap: { [k: string]: string } = {
-        "0": "⁰",
-        "1": "¹",
-        "2": "²",
-        "3": "³",
-        "4": "⁴",
-        "5": "⁵",
-        "6": "⁶",
-        "7": "⁷",
-        "8": "⁸",
-        "9": "⁹",
-        "-": "⁻",
-      };
-      const expStr = String(exp)
-        .split("")
-        .map((c) => supMap[c] ?? c)
-        .join("");
-      return `${sign}${mantStr}×10${expStr}`;
-    }
+      -(this.map.tileCoordinateOffset(cursorPosition.y, zoom) -
+        this.map.tileCoordinateOffset(centerPosition.y, zoom)) /
+      scale;
 
     // Only render a small-offset readout when the delta is meaningfully
     // smaller than the absolute coordinate display resolution.
@@ -149,7 +159,7 @@ class PointTooltip {
       Math.abs(reOffset) < 10 ** -displayDigits ||
       Math.abs(imOffset) < 10 ** -displayDigits
     ) {
-      this.offsetElement.textContent = `Δre ${toScientific(reOffset)}, Δim ${toScientific(imOffset)}`;
+      this.offsetElement.textContent = `Δre ${formatScientific(reOffset)}, Δim ${formatScientific(imOffset)}`;
       this.offsetElement.style.display = "block";
     } else {
       this.offsetElement.textContent = "";

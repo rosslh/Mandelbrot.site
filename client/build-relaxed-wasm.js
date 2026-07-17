@@ -22,6 +22,22 @@ const path = require("path");
 
 const crateDir = path.resolve(__dirname, "..", "mandelbrot");
 
+function commandExists(command) {
+  const result = spawnSync(command, ["--version"], {
+    stdio: "ignore",
+    shell: false,
+  });
+
+  return !result.error && result.status === 0;
+}
+
+if (!commandExists("wasm-pack")) {
+  console.error(
+    "wasm-pack is not installed or not on PATH. Install Rust and wasm-pack, then rerun npm run dev.",
+  );
+  process.exit(1);
+}
+
 const result = spawnSync(
   "wasm-pack",
   ["build", "--release", "--out-dir", "pkg-relaxed"],
@@ -36,6 +52,12 @@ const result = spawnSync(
 );
 
 if (result.status !== 0) {
-  console.error("relaxed-simd wasm build failed");
+  if (result.error && result.error.code === "ENOENT") {
+    console.error(
+      "wasm-pack could not be started. Install Rust/wasm-pack and reopen your terminal so PATH updates.",
+    );
+  } else {
+    console.error("relaxed-simd wasm build failed");
+  }
   process.exit(result.status ?? 1);
 }
