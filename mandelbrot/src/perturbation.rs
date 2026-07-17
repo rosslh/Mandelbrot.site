@@ -214,23 +214,33 @@ fn compute_reference_orbit(
     }
 }
 
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Clone)]
 struct OrbitCacheKey {
     origin_re: String,
     origin_im: String,
     exponent: u32,
-    precision_bits: usize,
+    escape_radius_squared: f64,
 }
 
 struct OrbitCacheEntry {
     key: OrbitCacheKey,
+    /// Working precision the orbit's big-float iteration ran at. Not part of
+    /// the key: the kernels consume only the f64-rounded values, and the
+    /// precision formula's headroom (see `PerturbedFrame::new`) keeps those
+    /// roundings stable under extra bits, so an orbit computed at higher
+    /// precision than a render needs is reused rather than recomputed.
+    precision_bits: usize,
     orbit: Rc<ReferenceOrbit>,
 }
 
 thread_local! {
-    // One cached orbit per worker thread. Tiles of the same view share the
-    // same origin, so this makes the expensive high-precision computation a
-    // once-per-view cost instead of once-per-tile.
+    // One cached orbit per worker thread — a single entry bounds the held
+    // memory to one orbit's f64 values plus its coeff table. Tiles of the
+    // same view share the same origin, so this makes the expensive
+    // high-precision computation a once-per-view cost instead of
+    // once-per-tile; zoom-animation frames likewise share one origin across
+    // every depth, so the precision-`>=` reuse above makes it a once-per-run
+    // cost instead of once-per-frame.
     static ORBIT_CACHE: RefCell<Option<OrbitCacheEntry>> = const { RefCell::new(None) };
 }
 
@@ -249,7 +259,7 @@ fn get_reference_orbit(
         origin_re: origin_re_text.to_string(),
         origin_im: origin_im_text.to_string(),
         exponent,
-        precision_bits,
+        escape_radius_squared,
     };
 
     ORBIT_CACHE.with(|cache| {
@@ -257,7 +267,7 @@ fn get_reference_orbit(
 
         if let Some(entry) = cache.as_ref() {
             let orbit_is_sufficient = entry.orbit.escaped || entry.orbit.values.len() > length;
-            if entry.key == key && orbit_is_sufficient {
+            if entry.key == key && entry.precision_bits >= precision_bits && orbit_is_sufficient {
                 return Rc::clone(&entry.orbit);
             }
         }
@@ -271,6 +281,7 @@ fn get_reference_orbit(
         ));
         *cache = Some(OrbitCacheEntry {
             key,
+            precision_bits,
             orbit: Rc::clone(&orbit),
         });
         orbit
