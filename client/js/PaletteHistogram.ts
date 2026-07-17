@@ -97,7 +97,10 @@ class PaletteHistogram {
     const panel = document.getElementById("paletteRange");
     panel?.addEventListener("toggle", () => this.update());
 
-    this.update();
+    // The map may not have a view yet (the controls are constructed before
+    // the initial goToCoordinates), and getBounds() throws until it does;
+    // whenReady defers the first paint to the initial view when needed.
+    map.whenReady(() => this.update());
   }
 
   /** Recomputes and redraws from the current view, throttled. */
