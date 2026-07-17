@@ -151,9 +151,21 @@ const workerConfig = {
       },
       {
         test: /\.wasm$/,
-        // Both wasm-pack outputs (pkg/ and pkg-relaxed/) are wasm modules
-        // compiled by syncWebAssembly, not file assets.
-        exclude: /pkg(-relaxed)?\/.*\.wasm$/,
+        // The wasm-pack outputs are synchronous WebAssembly modules, not
+        // file assets.
+        include: [
+          path.resolve(__dirname, "../mandelbrot/pkg"),
+          path.resolve(__dirname, "../mandelbrot/pkg-relaxed"),
+        ],
+        type: "webassembly/sync",
+      },
+      {
+        test: /\.wasm$/,
+        // Other wasm files are emitted as assets.
+        exclude: [
+          path.resolve(__dirname, "../mandelbrot/pkg"),
+          path.resolve(__dirname, "../mandelbrot/pkg-relaxed"),
+        ],
         type: "asset/resource",
         generator: {
           filename: "[name][ext]",

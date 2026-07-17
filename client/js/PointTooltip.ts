@@ -153,18 +153,10 @@ class PointTooltip {
         this.map.tileCoordinateOffset(centerPosition.y, zoom)) /
       scale;
 
-    // Only render a small-offset readout when the delta is meaningfully
-    // smaller than the absolute coordinate display resolution.
-    if (
-      Math.abs(reOffset) < 10 ** -displayDigits ||
-      Math.abs(imOffset) < 10 ** -displayDigits
-    ) {
-      this.offsetElement.textContent = `Δre ${formatScientific(reOffset)}, Δim ${formatScientific(imOffset)}`;
-      this.offsetElement.style.display = "block";
-    } else {
-      this.offsetElement.textContent = "";
-      this.offsetElement.style.display = "none";
-    }
+    this.offsetElement.textContent = `Δre ${formatScientific(
+      reOffset,
+    )}, Δim ${formatScientific(imOffset)}`;
+    this.offsetElement.hidden = false;
 
     // On reveal, blank the escape time until the first result lands; while
     // already visible the previous value stays up (results arrive within a
