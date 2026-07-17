@@ -1,5 +1,9 @@
-import type * as L from "leaflet";
 import type { TileRect } from "./protocol";
+
+// The x/y/z triple identifying a cached tile. Structurally satisfied by
+// Leaflet's `Coords` (the tile layer's case) and by plain objects (offscreen
+// consumers like the zoom animator's per-frame palette fit).
+type TilePositionKey = { x: number; y: number; z: number };
 
 type TileIterationRange = { min: number; max: number };
 
@@ -117,12 +121,12 @@ class TileCache {
     result: ViewHistogram | null;
   } | null = null;
 
-  private key(position: L.Coords): string {
+  private key(position: TilePositionKey): string {
     return `${position.x}:${position.y}:${position.z}`;
   }
 
   record(
-    position: L.Coords,
+    position: TilePositionKey,
     minIter: number | null,
     maxIter: number | null,
     canvas: HTMLCanvasElement,
@@ -146,7 +150,7 @@ class TileCache {
     this.version += 1;
   }
 
-  remove(position: L.Coords) {
+  remove(position: TilePositionKey) {
     if (this.tiles.delete(this.key(position))) {
       this.version += 1;
     }

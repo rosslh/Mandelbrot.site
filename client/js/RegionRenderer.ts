@@ -3,12 +3,15 @@ import type { TilePosition } from "./MandelbrotMap";
 import { coloringOptions } from "./config";
 import {
   CalculateRequest,
+  ColoringOptions,
   DistanceEstimateRequest,
   DistanceEstimateResponse,
   JuliaRequest,
   MandelbrotResponse,
   PeriodRequest,
   PeriodResponse,
+  RecolorRequest,
+  RecolorResponse,
   TileRect,
   TileRenderPayload,
 } from "./protocol";
@@ -178,6 +181,48 @@ class RegionRenderer {
     return response.image;
   }
 
+  /** Renders the region and returns the full worker response: the RGBA
+   * image, the escaped-pixel iteration range, the precision tier, and (when
+   * `includeValues` is set) the per-pixel smoothed escape values that
+   * recoloring consumes. */
+  async renderRegion(
+    bounds: TileRect,
+    imageWidth: number,
+    imageHeight: number,
+    includeValues: boolean,
+  ): Promise<MandelbrotResponse> {
+    const request: CalculateRequest = {
+      type: "calculate",
+      payload: this.buildPayload(
+        bounds,
+        imageWidth,
+        imageHeight,
+        includeValues,
+      ),
+    };
+
+    return (await this.map.pool.queue((workerTask) =>
+      workerTask(request),
+    )) as MandelbrotResponse;
+  }
+
+  /** Re-applies a palette to previously rendered escape values, returning the
+   * new RGBA bytes — the same worker path the tile layer uses to recolor
+   * cached tiles without re-rendering. */
+  async recolor(
+    values: Float32Array,
+    coloring: ColoringOptions,
+  ): Promise<Uint8Array> {
+    const request: RecolorRequest = {
+      type: "recolor",
+      payload: { values, coloring },
+    };
+
+    return (await this.map.pool.queue((workerTask) =>
+      workerTask(request),
+    )) as RecolorResponse;
+  }
+
   /** Renders the region and returns only its per-pixel smoothed escape values
    * (row-major, `imageHeight * imageWidth` floats; `Infinity` for interior
    * pixels), skipping the colorized image. Used by the raw-data export, which
@@ -188,14 +233,12 @@ class RegionRenderer {
     imageWidth: number,
     imageHeight: number,
   ): Promise<Float32Array> {
-    const request: CalculateRequest = {
-      type: "calculate",
-      payload: this.buildPayload(bounds, imageWidth, imageHeight, true),
-    };
-
-    const response = (await this.map.pool.queue((workerTask) =>
-      workerTask(request),
-    )) as MandelbrotResponse;
+    const response = await this.renderRegion(
+      bounds,
+      imageWidth,
+      imageHeight,
+      true,
+    );
 
     if (!response.values) {
       throw new Error("Render did not return escape values");
@@ -221,14 +264,12 @@ class RegionRenderer {
     canvas.width = imageWidth;
     canvas.height = imageHeight;
 
-    const request: CalculateRequest = {
-      type: "calculate",
-      payload: this.buildPayload(bounds, imageWidth, imageHeight, false),
-    };
-
-    const response = (await this.map.pool.queue((workerTask) =>
-      workerTask(request),
-    )) as MandelbrotResponse;
+    const response = await this.renderRegion(
+      bounds,
+      imageWidth,
+      imageHeight,
+      false,
+    );
 
     const imageData = new ImageData(
       Uint8ClampedArray.from(response.image),

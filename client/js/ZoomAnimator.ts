@@ -1,6 +1,9 @@
 import { saveAs } from "file-saver";
 import type MandelbrotMap from "./MandelbrotMap";
+import TileCache from "./TileCache";
 import { AnimationSpec, buildFrameRects, frameCount } from "./animationFrames";
+import { coloringOptions } from "./config";
+import type { TileRect } from "./protocol";
 
 // Candidate container/codec strings in preference order. Safari records H.264
 // MP4 natively; Chrome and Firefox fall back to WebM (VP9, then VP8). The
@@ -112,6 +115,24 @@ class ZoomAnimator {
     );
     const total = frameCount(spec);
 
+    // Palette refitting: the config's palette range is auto-fit to the deep
+    // target view, whose iteration counts dwarf a shallow frame's — rendering
+    // every frame with it clamps most of the sweep to a single color. In auto
+    // palette mode each frame is instead refit to its own iteration range,
+    // matching what the live view shows at that depth. A throwaway TileCache
+    // holding the frame as one full-viewport tile reuses the exact fit the map
+    // applies on screen (center-weighted, neighbor-capped percentile clip).
+    // Manual palette mode keeps the user's fixed range, also matching the live
+    // view; the distance-estimate and atom-domain modes normalize their values
+    // to a fixed 0..1 domain, so there is nothing to refit.
+    const coloring = coloringOptions(this.map.config);
+    const fitCache =
+      this.map.config.paletteAutoAdjust &&
+      !coloring.distanceEstimate &&
+      !coloring.atomDomain
+        ? new TileCache()
+        : null;
+
     // Phase 1: render every frame off-screen. Kept as ImageBitmaps so the
     // paced playback phase can blit them into the recorder at exact timing
     // regardless of how long each (variably expensive) render took.
@@ -119,12 +140,7 @@ class ZoomAnimator {
     try {
       for (let i = 0; i < rects.length; i++) {
         this.throwIfCancelled();
-        const canvas = await this.map.regionRenderer.renderToCanvas(
-          rects[i],
-          spec.width,
-          spec.height,
-        );
-        frames.push(await createImageBitmap(canvas));
+        frames.push(await this.renderFrame(rects[i], spec, fitCache));
         onProgress({
           phase: "rendering",
           // Rendering is the bulk of the work; give it 90% of the bar.
@@ -155,11 +171,95 @@ class ZoomAnimator {
     }
   }
 
+  /** Renders one animation frame to an ImageBitmap. With a `fitCache` (auto
+   * palette mode), the frame's palette range is refit to its own escaped-pixel
+   * values and the frame recolored accordingly; the cache holds the frame as a
+   * single full-viewport tile at the unit bounds below, which reproduces the
+   * map's on-screen fit exactly. An all-interior frame has no range to fit and
+   * stays as rendered (solid interior color either way). */
+  private async renderFrame(
+    rect: TileRect,
+    spec: AnimationSpec,
+    fitCache: TileCache | null,
+  ): Promise<ImageBitmap> {
+    const renderer = this.map.regionRenderer;
+    if (!fitCache) {
+      const canvas = await renderer.renderToCanvas(
+        rect,
+        spec.width,
+        spec.height,
+      );
+      return createImageBitmap(canvas);
+    }
+
+    const response = await renderer.renderRegion(
+      rect,
+      spec.width,
+      spec.height,
+      true,
+    );
+
+    const canvas = document.createElement("canvas");
+    canvas.width = spec.width;
+    canvas.height = spec.height;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("Could not get canvas context.");
+    }
+
+    let image = response.image;
+    if (
+      response.values &&
+      response.minIter !== null &&
+      response.maxIter !== null
+    ) {
+      // The whole frame recorded as the one tile spanning [0,1) x [0,1) at
+      // zoom 0, so the unit viewport below covers exactly its pixels.
+      fitCache.record(
+        { x: 0, y: 0, z: 0 },
+        response.minIter,
+        response.maxIter,
+        canvas,
+        response.values,
+        response.tier,
+      );
+      const range = fitCache.detectedRange({
+        xMin: 0,
+        xMax: 1,
+        yMin: 0,
+        yMax: 1,
+        zoom: 0,
+      });
+      if (range) {
+        image = await renderer.recolor(response.values, {
+          ...coloringOptions(this.map.config),
+          paletteMinIter: range.min,
+          paletteMaxIter: range.max,
+        });
+      }
+    }
+
+    context.putImageData(
+      new ImageData(Uint8ClampedArray.from(image), spec.width, spec.height),
+      0,
+      0,
+    );
+    return createImageBitmap(canvas);
+  }
+
   /** Blits the pre-rendered frames onto a canvas that a `MediaRecorder` is
    * capturing, one frame every `1000 / fps` ms so the recording plays at the
-   * requested rate. `captureStream(0)` gives a manual track: each frame is
-   * captured by an explicit `requestFrame`, so no frames are dropped or
-   * duplicated even when the main thread is busy. */
+   * requested rate. Preferred mode is a manual capture stream
+   * (`captureStream(0)`): each frame is captured by an explicit
+   * `requestFrame`, so no frames are dropped or duplicated even when the main
+   * thread is busy. Where the manual API lives varies by engine — Chromium
+   * puts `requestFrame` on the video track, Firefox on the stream — and
+   * engines with neither (older WebKit) fall back to an auto-capturing stream
+   * at the target rate, which records whenever the canvas is repainted;
+   * pacing the repaints below then still yields the right timing. Calling
+   * `requestFrame` on a static canvas is the only capture in manual mode, so
+   * a missed detection here shows up as a frozen single-frame video — which
+   * is why the fallback chain is explicit rather than optional-chained. */
   private encodeFrames(
     spec: AnimationSpec,
     mime: string,
@@ -174,10 +274,25 @@ class ZoomAnimator {
       return Promise.reject(new Error("Could not get canvas context."));
     }
 
-    const stream = canvas.captureStream(0);
-    const [track] = stream.getVideoTracks() as (MediaStreamTrack & {
+    let stream = canvas.captureStream(0) as MediaStream & {
+      requestFrame?: () => void;
+    };
+    let [track] = stream.getVideoTracks() as (MediaStreamTrack & {
       requestFrame?: () => void;
     })[];
+    let requestFrame: (() => void) | null = null;
+    if (typeof track.requestFrame === "function") {
+      requestFrame = () => track.requestFrame();
+    } else if (typeof stream.requestFrame === "function") {
+      requestFrame = () => stream.requestFrame();
+    } else {
+      // No manual capture available: replace the never-capturing manual
+      // stream with an auto-capturing one before hooking up the recorder.
+      track.stop();
+      stream = canvas.captureStream(spec.fps);
+      [track] = stream.getVideoTracks();
+    }
+
     const recorder = new MediaRecorder(stream, {
       mimeType: mime,
       videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
@@ -215,9 +330,9 @@ class ZoomAnimator {
           return;
         }
         context.drawImage(frames[index], 0, 0);
-        // A manual capture stream exposes requestFrame; guard for the spec's
-        // optional typing.
-        track.requestFrame?.();
+        // Manual capture mode; in the auto fallback the repaint itself
+        // triggers the capture.
+        requestFrame?.();
         index += 1;
         onFrame(index);
         setTimeout(drawNext, frameIntervalMs);

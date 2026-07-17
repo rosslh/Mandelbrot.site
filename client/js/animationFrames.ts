@@ -68,29 +68,38 @@ function targetFraming(
 /** The `TileRect` for a single frame at effective zoom `frameZoom`, centered on
  * the animation origin. `targetZoom` is the effective zoom of the target view
  * the half-extents were captured at; `zoomOffset` is the map's fixed deep-zoom
- * offset for the whole animation. The tile-space half-extents are constant
- * across frames — only the `zoom` field and the center (which scales as
- * `2^(zoom-2)`) change — so the complex-plane width scales as `2^-frameZoom`. */
+ * offset for the whole animation. Interpolated frame zooms are fractional, but
+ * the wasm's `TileBounds.zoom` is an integer, so each frame is re-anchored to
+ * the nearest integer leaflet zoom: a tile coordinate `v` at zoom `z` describes
+ * the same complex point as `v * 2^(n-z)` at zoom `n` (the mapping scales by
+ * exactly `2^(zoom-2)`), so scaling the center and half-extents this way keeps
+ * the frame's complex-plane rectangle — and thus the exponential zoom sweep —
+ * exact while emitting an integer `zoom` field. */
 export function frameBounds(
   framing: { centerX: number; centerY: number; halfX: number; halfY: number },
   targetZoom: number,
   zoomOffset: number,
   frameZoom: number,
 ): TileRect {
-  // Leaflet tile coordinates scale by 2^(zoom-2); re-anchor the captured center
-  // to the frame's leaflet zoom, keeping the same complex point centered.
   const leafletTargetZoom = targetZoom - zoomOffset;
-  const leafletFrameZoom = frameZoom - zoomOffset;
-  const scale = 2 ** (leafletFrameZoom - leafletTargetZoom);
+  const fractionalFrameZoom = frameZoom - zoomOffset;
+  const leafletFrameZoom = Math.round(fractionalFrameZoom);
 
-  const centerX = framing.centerX * scale;
-  const centerY = framing.centerY * scale;
+  // Re-anchor the captured center from the target's zoom and the constant
+  // half-extents from the frame's fractional zoom to the integer frame zoom.
+  const centerScale = 2 ** (leafletFrameZoom - leafletTargetZoom);
+  const extentScale = 2 ** (leafletFrameZoom - fractionalFrameZoom);
+
+  const centerX = framing.centerX * centerScale;
+  const centerY = framing.centerY * centerScale;
+  const halfX = framing.halfX * extentScale;
+  const halfY = framing.halfY * extentScale;
 
   return {
-    xMin: centerX - framing.halfX,
-    xMax: centerX + framing.halfX,
-    yMin: centerY - framing.halfY,
-    yMax: centerY + framing.halfY,
+    xMin: centerX - halfX,
+    xMax: centerX + halfX,
+    yMin: centerY - halfY,
+    yMax: centerY + halfY,
     zoom: leafletFrameZoom,
   };
 }
