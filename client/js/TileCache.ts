@@ -8,7 +8,7 @@ type TileIterationRange = { min: number; max: number };
  * with the same 1024 buckets, neighbor-capping, and center weighting the
  * palette auto-fit uses, so drawing it makes the fit's behavior visible.
  * Weights are fractional (center weighting), so the counts are weighted
- * masses rather than pixel counts; the interior/escaped split and the mean
+ * masses rather than pixel counts; the interior/escaped split and the median
  * are computed over the same weighting. */
 export type ViewHistogram = {
   // The histogram domain — the raw escaped-iteration range across visible
@@ -25,8 +25,12 @@ export type ViewHistogram = {
   // fraction.
   escapedMass: number;
   interiorMass: number;
-  // Weighted mean escape value across escaped pixels.
-  mean: number;
+  // Weighted median escape value across escaped pixels: the distribution is
+  // heavily skewed (exterior mass at the bottom, a long boundary/filament
+  // tail), so the median reads as "typical escape time in view" where a mean
+  // would sit above most of the mass. Resolved from the buckets, so it is
+  // accurate to the bucket width.
+  median: number;
 };
 
 // Inclusive pixel-index bounds of a tile's on-screen portion.
@@ -286,8 +290,9 @@ class TileCache {
 
     let result: ViewHistogram | null = null;
     if (range !== null) {
-      // A single-value domain still yields useful aggregates (mean, interior
-      // fraction); widen it by one so the buckets have somewhere to land.
+      // A single-value domain still yields useful aggregates (median,
+      // interior fraction); widen it by one so the buckets have somewhere to
+      // land.
       const max = Math.max(range.max, range.min + 1);
       result = this.buildHistogram(bounds, { min: range.min, max });
     }
@@ -313,8 +318,6 @@ class TileCache {
     const halfHeight = (bounds.yMax - bounds.yMin) / 2 || 1;
     let escapedMass = 0;
     let interiorMass = 0;
-    // Weighted sum of the raw (uncapped) escape values, for the mean.
-    let valueSum = 0;
 
     for (const tile of this.tiles.values()) {
       if (tile.zoom !== bounds.zoom || tile.range === null) {
@@ -408,7 +411,6 @@ class TileCache {
           );
           buckets[bucket] += weight;
           escapedMass += weight;
-          valueSum += weight * value;
         }
       }
     }
@@ -420,6 +422,22 @@ class TileCache {
       }
     }
 
+    // Weighted median: the bucket where the cumulative mass crosses half,
+    // read at its center. Bucket width bounds the error, which is exactly
+    // right for a glanceable readout.
+    let median = min;
+    if (escapedMass > 0) {
+      const half = escapedMass / 2;
+      let cumulative = 0;
+      for (let bucket = 0; bucket < HISTOGRAM_BUCKETS; bucket++) {
+        cumulative += buckets[bucket];
+        if (cumulative >= half) {
+          median = min + ((bucket + 0.5) * (max - min)) / HISTOGRAM_BUCKETS;
+          break;
+        }
+      }
+    }
+
     return {
       min,
       max,
@@ -427,7 +445,7 @@ class TileCache {
       peak,
       escapedMass,
       interiorMass,
-      mean: escapedMass > 0 ? valueSum / escapedMass : min,
+      median,
     };
   }
 

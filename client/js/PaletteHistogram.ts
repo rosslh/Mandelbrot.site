@@ -42,7 +42,7 @@ function formatCount(value: number): string {
 /** The levels-style iteration histogram in the palette-range panel (issue
  * #49): the center-weighted distribution of visible escape values that palette
  * auto-fit fits over, with the current palette min/max bounds overlaid as
- * draggable markers, plus a compact readout of the view's min/max/mean escape
+ * draggable markers, plus a compact readout of the view's min/max/median escape
  * time and interior-pixel fraction.
  *
  * The distribution comes from TileCache.viewStats — the same scan auto-fit
@@ -56,7 +56,7 @@ class PaletteHistogram {
   private statsList: HTMLElement;
   private minStat: HTMLElement;
   private maxStat: HTMLElement;
-  private meanStat: HTMLElement;
+  private medianStat: HTMLElement;
   private interiorStat: HTMLElement;
   private emptyMessage: HTMLElement;
   // The last computed distribution, so a marker drag can repaint the bounds
@@ -77,7 +77,9 @@ class PaletteHistogram {
     ) as HTMLElement;
     this.minStat = document.getElementById("paletteStatMin") as HTMLElement;
     this.maxStat = document.getElementById("paletteStatMax") as HTMLElement;
-    this.meanStat = document.getElementById("paletteStatMean") as HTMLElement;
+    this.medianStat = document.getElementById(
+      "paletteStatMedian",
+    ) as HTMLElement;
     this.interiorStat = document.getElementById(
       "paletteStatInterior",
     ) as HTMLElement;
@@ -123,7 +125,7 @@ class PaletteHistogram {
     // domain itself as the view's escape-time extent.
     this.minStat.textContent = formatCount(stats.min);
     this.maxStat.textContent = formatCount(stats.max);
-    this.meanStat.textContent = formatCount(stats.mean);
+    this.medianStat.textContent = formatCount(stats.median);
     const totalMass = stats.escapedMass + stats.interiorMass;
     this.interiorStat.textContent =
       totalMass > 0 ? formatPercent(stats.interiorMass / totalMass) : "0%";
