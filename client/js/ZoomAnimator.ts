@@ -68,10 +68,11 @@ function pickRecorderMime(): string | null {
  * frame per output frame off-screen through the shared worker pool — reusing
  * the exact tile pipeline (and thus its perturbation/precision handling at
  * deep zoom) via `RegionRenderer` — then encodes the sequence with the
- * browser-native `MediaRecorder` fed by a canvas `captureStream`. The expensive
- * per-pixel work happens on the worker pool, off the main thread; the recorder
- * encodes on its own browser thread. Progress is reported per frame and the run
- * can be cancelled between frames. */
+ * browser-native `MediaRecorder` fed by a canvas `captureStream`. Frames
+ * render concurrently, enough in flight to keep every pool worker busy; the
+ * expensive per-pixel work happens on the worker pool, off the main thread,
+ * and the recorder encodes on its own browser thread. Progress is reported
+ * per frame and the run can be cancelled between frames. */
 class ZoomAnimator {
   private map: MandelbrotMap;
   private cancelled = false;
@@ -119,71 +120,108 @@ class ZoomAnimator {
     // target view, whose iteration counts dwarf a shallow frame's — rendering
     // every frame with it clamps most of the sweep to a single color. In auto
     // palette mode each frame is instead refit to its own iteration range,
-    // matching what the live view shows at that depth. A throwaway TileCache
-    // holding the frame as one full-viewport tile reuses the exact fit the map
-    // applies on screen (center-weighted, neighbor-capped percentile clip).
+    // matching what the live view shows at that depth (see renderFrame).
     // Manual palette mode keeps the user's fixed range, also matching the live
     // view; the distance-estimate and atom-domain modes normalize their values
     // to a fixed 0..1 domain, so there is nothing to refit.
     const coloring = coloringOptions(this.map.config);
-    const fitCache =
+    const refitPalette =
       this.map.config.paletteAutoAdjust &&
       !coloring.distanceEstimate &&
-      !coloring.atomDomain
-        ? new TileCache()
-        : null;
+      !coloring.atomDomain;
 
-    // Phase 1: render every frame off-screen. Kept as ImageBitmaps so the
-    // paced playback phase can blit them into the recorder at exact timing
-    // regardless of how long each (variably expensive) render took.
-    const frames: ImageBitmap[] = [];
+    // Phase 1: render every frame off-screen, concurrently across the worker
+    // pool (a frame is a single worker task, so sequential rendering would
+    // leave all but one worker idle). Slots are pre-allocated and each frame
+    // lands at its own index, so animation order survives out-of-order
+    // completion. Kept as ImageBitmaps so the paced playback phase can blit
+    // them into the recorder at exact timing regardless of how long each
+    // (variably expensive) render took.
+    const frames: (ImageBitmap | null)[] = new Array(total).fill(null);
     try {
-      for (let i = 0; i < rects.length; i++) {
-        this.throwIfCancelled();
-        frames.push(await this.renderFrame(rects[i], spec, fitCache));
-        onProgress({
-          phase: "rendering",
-          // Rendering is the bulk of the work; give it 90% of the bar.
-          fraction: ((i + 1) / total) * 0.9,
-          frame: i + 1,
-          totalFrames: total,
-        });
+      // One runner per pool worker plus one spare: an in-flight frame
+      // occupies at most one worker at a time (its render, then its recolor),
+      // and the spare covers the main-thread gaps between a frame's tasks
+      // (palette fit, bitmap creation) so the pool never idles.
+      const concurrency = Math.min(total, this.map.poolSize + 1);
+      let nextIndex = 0;
+      let completed = 0;
+      let failure: unknown = null;
+      const runner = async () => {
+        while (failure === null && !this.cancelled && nextIndex < total) {
+          const index = nextIndex;
+          nextIndex += 1;
+          try {
+            frames[index] = await this.renderFrame(
+              rects[index],
+              spec,
+              refitPalette,
+            );
+          } catch (error) {
+            failure ??= error;
+            return;
+          }
+          completed += 1;
+          onProgress({
+            phase: "rendering",
+            // Rendering is the bulk of the work; give it 90% of the bar.
+            // Frames finish out of order, but `completed` only grows, so the
+            // reported progress stays monotonic.
+            fraction: (completed / total) * 0.9,
+            frame: completed,
+            totalFrames: total,
+          });
+        }
+      };
+      // The runners trap their own errors, so this waits for every in-flight
+      // frame to settle — the finally below must not close bitmaps while a
+      // renderFrame could still assign one.
+      await Promise.all(Array.from({ length: concurrency }, runner));
+      this.throwIfCancelled();
+      if (failure !== null) {
+        throw failure;
       }
 
-      this.throwIfCancelled();
-
       // Phase 2: play the rendered frames into the recorder at the target fps.
-      const blob = await this.encodeFrames(spec, mime, frames, (frame) =>
-        onProgress({
-          phase: "encoding",
-          fraction: 0.9 + (frame / total) * 0.1,
-          frame,
-          totalFrames: total,
-        }),
+      const blob = await this.encodeFrames(
+        spec,
+        mime,
+        frames as ImageBitmap[],
+        (frame) =>
+          onProgress({
+            phase: "encoding",
+            fraction: 0.9 + (frame / total) * 0.1,
+            frame,
+            totalFrames: total,
+          }),
       );
 
       const extension = mime.startsWith("video/mp4") ? "mp4" : "webm";
       saveAs(blob, this.buildFilename(extension));
     } finally {
       for (const frame of frames) {
-        frame.close();
+        frame?.close();
       }
     }
   }
 
-  /** Renders one animation frame to an ImageBitmap. With a `fitCache` (auto
+  /** Renders one animation frame to an ImageBitmap. With `refitPalette` (auto
    * palette mode), the frame's palette range is refit to its own escaped-pixel
-   * values and the frame recolored accordingly; the cache holds the frame as a
-   * single full-viewport tile at the unit bounds below, which reproduces the
-   * map's on-screen fit exactly. An all-interior frame has no range to fit and
-   * stays as rendered (solid interior color either way). */
+   * values and the frame recolored accordingly; a frame-local throwaway
+   * TileCache holds the frame as a single full-viewport tile at the unit
+   * bounds below, which reproduces the map's on-screen fit exactly
+   * (center-weighted, neighbor-capped percentile clip). The fit depends only
+   * on this frame's values, and frames render concurrently, so the cache must
+   * not be shared — interleaved record/read pairs would fit one frame against
+   * another's values. An all-interior frame has no range to fit and stays as
+   * rendered (solid interior color either way). */
   private async renderFrame(
     rect: TileRect,
     spec: AnimationSpec,
-    fitCache: TileCache | null,
+    refitPalette: boolean,
   ): Promise<ImageBitmap> {
     const renderer = this.map.regionRenderer;
-    if (!fitCache) {
+    if (!refitPalette) {
       const canvas = await renderer.renderToCanvas(
         rect,
         spec.width,
@@ -215,6 +253,7 @@ class ZoomAnimator {
     ) {
       // The whole frame recorded as the one tile spanning [0,1) x [0,1) at
       // zoom 0, so the unit viewport below covers exactly its pixels.
+      const fitCache = new TileCache();
       fitCache.record(
         { x: 0, y: 0, z: 0 },
         response.minIter,

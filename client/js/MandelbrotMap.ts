@@ -82,6 +82,9 @@ class MandelbrotMap extends L.Map {
   initialConfig: MandelbrotConfig;
   config: MandelbrotConfig;
   pool: Pool<TaskThread>;
+  // Worker count of the current pool, for consumers that size their own
+  // concurrency to it (the zoom animator's frame pipeline).
+  poolSize: number;
   // Resolves once every worker in the current pool has spawned and finished
   // its warmup renders; the tile layer holds the initial batch until then
   // (see queueTileGeneration).
@@ -706,6 +709,7 @@ class MandelbrotMap extends L.Map {
     const warmDeepKernel =
       !isMultibrot && !warmFloatExpKernel && initialZoom >= DEEP_ZOOM_THRESHOLD;
     const poolSize = renderPoolSize();
+    this.poolSize = poolSize;
     let spawnedWorkers = 0;
     let signalPoolSpawned: () => void;
     this.poolSpawned = new Promise((resolve) => {
