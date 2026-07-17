@@ -11,6 +11,8 @@
   --gray-800: #262626;
   --gray-900: #171717;
   --gray-950: #0a0a0a;
+  // The palette-histogram drag handles.
+  --red-500: #ef4444;
 
   // Spacing
   --space-2: 2px;
@@ -73,6 +75,22 @@ html.fractal-root {
 // while tiles are rendering or being repainted. Its width matches the zoom
 // control (26px, or 34px with leaflet-touch borders) so the circle centers
 // exactly beneath the buttons.
+// Dual-tone ring: the dark track reads against light palettes, the white
+// arc against dark ones, and the shadow separates the arc from light
+// backgrounds — no backdrop needed. Shared by the tile-loading spinner and
+// the palette-histogram loading overlay.
+@mixin spinner-ring {
+  content: "";
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  border: 3px solid rgb(10 10 10 / 50%);
+  border-top-color: #fff;
+  border-radius: 50%;
+  filter: drop-shadow(0 0 1px rgb(0 0 0 / 60%));
+  animation: tile-spinner-rotate 0.8s linear infinite;
+}
+
 .tile-loading-spinner {
   display: none;
   width: 26px;
@@ -88,19 +106,8 @@ html.fractal-root {
     display: flex;
   }
 
-  // Dual-tone ring: the dark track reads against light palettes, the white
-  // arc against dark ones, and the shadow separates the arc from light
-  // backgrounds — no backdrop needed.
   &::after {
-    content: "";
-    box-sizing: border-box;
-    width: 22px;
-    height: 22px;
-    border: 3px solid rgb(10 10 10 / 50%);
-    border-top-color: #fff;
-    border-radius: 50%;
-    filter: drop-shadow(0 0 1px rgb(0 0 0 / 60%));
-    animation: tile-spinner-rotate 0.8s linear infinite;
+    @include spinner-ring;
   }
 }
 
@@ -436,6 +443,37 @@ datalist {
     margin: 0;
   }
 
+  #paletteHistogramCanvasWrap {
+    // Positioning context for the loading-spinner overlay.
+    position: relative;
+  }
+
+  // While the view's tiles are still rendering the last-drawn histogram
+  // stays up, dimmed beneath the spinner, instead of blanking out (the
+  // stats list is hidden by showLoading).
+  &.loading {
+    canvas {
+      opacity: 0.35;
+    }
+  }
+
+  .histogram-spinner {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+
+    &[hidden] {
+      display: none;
+    }
+
+    &::after {
+      @include spinner-ring;
+    }
+  }
+
   canvas {
     display: block;
     width: 100%;
@@ -453,6 +491,12 @@ datalist {
     grid-template-columns: 1fr 1fr;
     gap: var(--space-4) var(--space-12);
     margin: 0;
+
+    // The grid display above would defeat the hidden attribute the panel
+    // toggles the stats with.
+    &[hidden] {
+      display: none;
+    }
 
     > div {
       display: flex;

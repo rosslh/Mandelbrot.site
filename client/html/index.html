@@ -155,26 +155,17 @@
             </label>
             <input type="number" required id="exponent" name="exponent" />
           </div>
-          <div class="checkbox-wrapper mobile-hidden">
-            <input
-              type="checkbox"
-              id="distanceEstimate"
-              name="distanceEstimate"
-            />
+          <div class="input-wrapper mobile-hidden">
             <label
-              for="distanceEstimate"
-              title="Color each pixel by its estimated distance to the boundary of the set instead of its escape time, rendering the boundary at a uniform visual weight for a crisp image. Available at shallow zoom (direct f64) only."
-              >Distance estimate
-              <span class="secondary">(Crisp boundary)</span></label
+              for="renderMode"
+              title="What each pixel's color encodes. Standard: escape time. Distance estimate: distance to the set boundary, for a crisp image. Atom domains: the period of the pixel's atom domain on a categorical palette. The non-standard modes are available at shallow zoom (direct f64) only."
+              >Mode</label
             >
-          </div>
-          <div class="checkbox-wrapper mobile-hidden">
-            <input type="checkbox" id="atomDomain" name="atomDomain" />
-            <label
-              for="atomDomain"
-              title="Color each pixel by the period of its atom domain (the iteration at which its orbit comes closest to the origin) with a categorical palette instead of its escape time, revealing where the set's components of each period live. Available at shallow zoom (direct f64) only."
-              >Atom domains <span class="secondary">(Period map)</span></label
-            >
+            <select id="renderMode" name="renderMode" required>
+              <option value="standard">Standard</option>
+              <option value="distanceEstimate">Distance estimate</option>
+              <option value="atomDomain">Atom domains</option>
+            </select>
           </div>
           <div class="checkbox-wrapper mobile-hidden">
             <input type="checkbox" id="highDpiTiles" name="highDpiTiles" />
@@ -314,14 +305,19 @@
             <label for="paletteAutoAdjust">Auto-adjust</label>
           </div>
           <div id="paletteHistogram">
-            <p id="paletteHistogramEmpty" class="secondary">
-              Rendering the view…
-            </p>
-            <canvas
-              id="paletteHistogramCanvas"
-              title="Distribution of escape times in view. Drag the bright edges to set the palette range."
-              aria-label="Histogram of escape times in the current view"
-            ></canvas>
+            <p id="paletteHistogramEmpty" class="secondary" hidden></p>
+            <div id="paletteHistogramCanvasWrap">
+              <canvas
+                id="paletteHistogramCanvas"
+                title="Distribution of escape times in view. Drag the red markers to set the palette range."
+                aria-label="Histogram of escape times in the current view"
+              ></canvas>
+              <div
+                id="paletteHistogramSpinner"
+                class="histogram-spinner"
+                hidden
+              ></div>
+            </div>
             <dl id="paletteHistogramStats">
               <div>
                 <dt>Min</dt>
@@ -342,24 +338,6 @@
                 <dd id="paletteStatInterior">–</dd>
               </div>
             </dl>
-          </div>
-          <div class="input-wrapper">
-            <label for="paletteMinIter">Min iterations</label>
-            <input
-              type="number"
-              id="paletteMinIter"
-              name="paletteMinIter"
-              required
-            />
-          </div>
-          <div class="input-wrapper">
-            <label for="paletteMaxIter">Max iterations</label>
-            <input
-              type="number"
-              id="paletteMaxIter"
-              name="paletteMaxIter"
-              required
-            />
           </div>
         </div>
       </details>

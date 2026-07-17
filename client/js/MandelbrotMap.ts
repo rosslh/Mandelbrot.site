@@ -14,7 +14,6 @@ import {
   coloringOptions,
   MandelbrotConfig,
   parseShareParams,
-  syncInputToConfig,
 } from "./config";
 import {
   RecolorResponse,
@@ -389,8 +388,12 @@ class MandelbrotMap extends L.Map {
 
     this.config.paletteMinIter = range.min;
     this.config.paletteMaxIter = range.max;
-    syncInputToConfig(this.config, "paletteMinIter");
-    syncInputToConfig(this.config, "paletteMaxIter");
+    if (changed) {
+      // The histogram's bound markers track the config, so the fit moving
+      // the bounds must repaint them. Optional-chained: the fit can run
+      // before the controls (which own the histogram) are constructed.
+      this.controls?.refreshPaletteHistogram();
+    }
 
     return changed;
   }

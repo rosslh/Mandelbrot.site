@@ -12,6 +12,7 @@ import {
   SelectSpec,
   SettingSpec,
   SliderSpec,
+  isFixedPaletteMode,
   settingsSchema,
   syncAllInputsToConfig,
   syncInputToConfig,
@@ -71,8 +72,7 @@ class MandelbrotControls {
         configKeys: [
           "iterations",
           "exponent",
-          "distanceEstimate",
-          "atomDomain",
+          "renderMode",
           "highDpiTiles",
           "showTierOverlay",
         ],
@@ -81,8 +81,10 @@ class MandelbrotControls {
         },
         apply: (changedKeys) => {
           // The reset may have flipped the overlay flag; keep its legend in
-          // step either way.
+          // step either way. It can likewise have turned off a fixed-palette
+          // mode, re-enabling the palette-range panel.
           this.syncTierLegend();
+          this.syncPaletteRangeAvailability();
           // The tier overlay is cosmetic, so a reset that only toggles it off
           // repaints in place; anything else re-renders.
           const needsRerender = changedKeys.some(
@@ -120,7 +122,6 @@ class MandelbrotControls {
           // Reset paletteMaxIter based on current iterations
           this.map.config.paletteMaxIter = this.map.config.iterations;
           syncInputToConfig(this.map.config, "paletteMaxIter");
-          this.syncAutoAdjustUi();
         },
         // The range only affects coloring: fit (auto) or apply the reset
         // values (manual) via an in-place repaint.
@@ -187,7 +188,7 @@ class MandelbrotControls {
     // controls exist); this writes every setting into its input once.
     syncAllInputsToConfig(this.map.config);
     this.handleInputs();
-    this.syncAutoAdjustUi();
+    this.syncPaletteRangeAvailability();
     this.syncTierLegend();
     this.updateResetButtonsVisibility();
     this.loadDetailsState();
@@ -333,20 +334,6 @@ class MandelbrotControls {
         parsedValue = this.map.config[spec.key];
       }
 
-      // The palette bounds must stay ordered; an inversion reverts to the
-      // previous value.
-      if (
-        spec.key === "paletteMinIter" &&
-        parsedValue > this.map.config.paletteMaxIter
-      ) {
-        parsedValue = this.map.config[spec.key];
-      } else if (
-        spec.key === "paletteMaxIter" &&
-        parsedValue < this.map.config.paletteMinIter
-      ) {
-        parsedValue = this.map.config[spec.key];
-      }
-
       // Settings that reset the view (the exponent) discard the current
       // position, so confirm the change before applying it; a cancel restores
       // the input to the value still held in the config.
@@ -387,13 +374,9 @@ class MandelbrotControls {
     this.updateResetButtonsVisibility();
     this.applySettingEffect(spec);
 
-    // A manual palette bound (or an iteration-cap change, which resets the
-    // ceiling) moves the histogram markers.
-    if (
-      spec.key === "paletteMinIter" ||
-      spec.key === "paletteMaxIter" ||
-      spec.key === "iterations"
-    ) {
+    // An iteration-cap change resets the palette ceiling, which moves the
+    // histogram markers.
+    if (spec.key === "iterations") {
       this.refreshPaletteHistogram();
     }
   }
@@ -453,6 +436,12 @@ class MandelbrotControls {
         this.map.config[spec.key] = Number(select.value);
       }
       this.updateResetButtonsVisibility();
+      // The fixed-palette modes suspend the palette-range panel (they ignore
+      // its bounds), so a mode change updates its availability and note.
+      if (spec.key === "renderMode") {
+        this.syncPaletteRangeAvailability();
+        this.refreshPaletteHistogram();
+      }
       this.applySettingEffect(spec);
     };
   }
@@ -463,9 +452,9 @@ class MandelbrotControls {
       this.map.config[spec.key] = checkbox.checked;
       this.updateResetButtonsVisibility();
       if (spec.key === "paletteAutoAdjust") {
-        this.syncAutoAdjustUi();
-        // Disabling keeps the current values for the user to edit; enabling
-        // fits to the visible tiles via an in-place recolor, no re-render.
+        // Disabling keeps the current values (edited by dragging the
+        // histogram markers); enabling fits to the visible tiles via an
+        // in-place recolor, no re-render.
         if (this.map.config.paletteAutoAdjust) {
           this.map.refitPaletteAndRecolor();
         }
@@ -587,15 +576,17 @@ class MandelbrotControls {
     legend.hidden = !this.map.config.showTierOverlay;
   }
 
-  /** Reflects the auto-adjust state in the panel: while enabled the min/max
-   * inputs become read-only displays of the applied values. */
-  syncAutoAdjustUi() {
-    const isAuto = this.map.config.paletteAutoAdjust;
-
-    (document.getElementById("paletteMinIter") as HTMLInputElement).disabled =
-      isAuto;
-    (document.getElementById("paletteMaxIter") as HTMLInputElement).disabled =
-      isAuto;
+  /** The palette range only applies to escape-time coloring; the fixed-range
+   * modes (distance estimate, atom domains) ignore it, so hide the panel's
+   * auto-adjust checkbox while one is active, leaving just the histogram's
+   * explanatory note. */
+  syncPaletteRangeAvailability() {
+    const wrapper = document
+      .getElementById("paletteAutoAdjust")
+      ?.closest(".checkbox-wrapper") as HTMLElement | null;
+    if (wrapper) {
+      wrapper.hidden = isFixedPaletteMode(this.map.config);
+    }
   }
 
   private async logEvent(eventName: "imageSave" | "share") {

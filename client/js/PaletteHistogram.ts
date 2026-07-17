@@ -1,7 +1,7 @@
 import throttle from "lodash/throttle";
 import type MandelbrotMap from "./MandelbrotMap";
 import type { ViewHistogram } from "./TileCache";
-import { syncInputToConfig } from "./config";
+import { isFixedPaletteMode, syncInputToConfig } from "./config";
 
 // The histogram redraw scans every visible pixel (via TileCache.viewStats),
 // so it is throttled to keep view moves and tile loads cheap; the memoized
@@ -51,7 +51,10 @@ function formatCount(value: number): string {
  * overriding the fit) and recolors in place. */
 class PaletteHistogram {
   private map: MandelbrotMap;
+  private container: HTMLElement;
   private canvas: HTMLCanvasElement;
+  private canvasWrap: HTMLElement;
+  private spinner: HTMLElement;
   private ctx: CanvasRenderingContext2D | null;
   private statsList: HTMLElement;
   private minStat: HTMLElement;
@@ -68,9 +71,16 @@ class PaletteHistogram {
   constructor(map: MandelbrotMap) {
     this.map = map;
 
+    this.container = document.getElementById("paletteHistogram") as HTMLElement;
     this.canvas = document.getElementById(
       "paletteHistogramCanvas",
     ) as HTMLCanvasElement;
+    this.canvasWrap = document.getElementById(
+      "paletteHistogramCanvasWrap",
+    ) as HTMLElement;
+    this.spinner = document.getElementById(
+      "paletteHistogramSpinner",
+    ) as HTMLElement;
     this.ctx = this.canvas.getContext("2d");
     this.statsList = document.getElementById(
       "paletteHistogramStats",
@@ -105,19 +115,58 @@ class PaletteHistogram {
 
   /** Recomputes and redraws from the current view, throttled. */
   update = throttle(() => {
+    // The fixed-palette rendering modes ignore the palette range and report
+    // no iteration stats, so explain that instead of waiting forever on data
+    // that will never arrive. Clearing lastStats also disables marker drags.
+    if (isFixedPaletteMode(this.map.config)) {
+      this.lastStats = null;
+      const mode =
+        this.map.config.renderMode === "distanceEstimate"
+          ? "distance estimate"
+          : "atom domains";
+      this.showEmptyMessage(`The palette range doesn't apply in ${mode} mode.`);
+      return;
+    }
+
     const stats = this.map.tileCache.viewStats(this.map.mapBoundsInTileSpace);
     this.lastStats = stats;
     this.render(stats);
   }, UPDATE_THROTTLE_MS);
 
+  /** Replaces the histogram with an explanatory note (the fixed-palette
+   * rendering modes, where the panel does not apply). */
+  private showEmptyMessage(text: string) {
+    this.emptyMessage.textContent = text;
+    this.emptyMessage.hidden = false;
+    this.canvasWrap.hidden = true;
+    this.statsList.hidden = true;
+    this.spinner.hidden = true;
+    this.container.classList.remove("loading");
+  }
+
+  /** The current view has no scanned pixels yet (its tiles are still
+   * rendering): keep the last-drawn histogram up, dimmed beneath a loading
+   * spinner, rather than blanking the panel. The stats are hidden outright —
+   * stale numbers read as current more easily than stale bars do. */
+  private showLoading() {
+    this.emptyMessage.hidden = true;
+    this.canvasWrap.hidden = false;
+    this.statsList.hidden = true;
+    this.spinner.hidden = false;
+    this.container.classList.add("loading");
+  }
+
   private render(stats: ViewHistogram | null) {
     const hasData = stats !== null && stats.escapedMass > 0;
-    this.emptyMessage.hidden = hasData;
-    this.canvas.hidden = !hasData;
-    this.statsList.hidden = !hasData;
     if (!stats || !hasData) {
+      this.showLoading();
       return;
     }
+    this.emptyMessage.hidden = true;
+    this.canvasWrap.hidden = false;
+    this.statsList.hidden = false;
+    this.spinner.hidden = true;
+    this.container.classList.remove("loading");
 
     this.renderStats(stats);
     this.renderCanvas(stats);
@@ -156,7 +205,7 @@ class PaletteHistogram {
     const barColor = styles.getPropertyValue("--gray-300").trim() || "#d4d4d4";
     const dimColor = styles.getPropertyValue("--gray-600").trim() || "#525252";
     const markerColor =
-      styles.getPropertyValue("--gray-50").trim() || "#fafafa";
+      styles.getPropertyValue("--red-500").trim() || "#ef4444";
 
     const buckets = stats.buckets;
     const n = buckets.length;
@@ -281,10 +330,7 @@ class PaletteHistogram {
     if (config.paletteAutoAdjust) {
       config.paletteAutoAdjust = false;
       syncInputToConfig(config, "paletteAutoAdjust");
-      this.map.controls.syncAutoAdjustUi();
     }
-    syncInputToConfig(config, "paletteMinIter");
-    syncInputToConfig(config, "paletteMaxIter");
 
     this.map.controls.notifyPaletteBoundsChanged();
     this.map.applyColorSettings();

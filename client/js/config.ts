@@ -26,18 +26,18 @@ export type MandelbrotConfig = {
   // perturbation f64 / hybrid float-exp) that rendered it (issue #50).
   showTierOverlay: boolean;
   smoothColoring: boolean;
-  // Distance-estimate rendering mode (issue #46): color each pixel by its
-  // distance to the set boundary instead of its escape time, for crisp
-  // boundary images. Only the direct f64 path renders it; deeper (zoomed)
-  // tiles fall back to escape-time coloring.
-  distanceEstimate: boolean;
-  // Atom-domain rendering mode (issue #45): color each pixel by the detected
-  // period of its atom domain (the iteration index of the orbit's nearest
-  // approach to the origin) using a categorical palette, instead of its escape
-  // time — visualizing where the set's components of each period live. Only the
-  // direct f64 path renders it; deeper (zoomed) tiles fall back to escape-time
-  // coloring.
-  atomDomain: boolean;
+  // What each pixel's color encodes — one of RENDER_MODES:
+  // - "standard": escape time (the classic coloring).
+  // - "distanceEstimate" (issue #46): distance to the set boundary, for
+  //   crisp boundary images.
+  // - "atomDomain" (issue #45): the detected period of the pixel's atom
+  //   domain (the iteration index of the orbit's nearest approach to the
+  //   origin) on a categorical palette, visualizing where the set's
+  //   components of each period live.
+  // The non-standard modes render on the direct f64 path only; deeper
+  // (zoomed) tiles fall back to escape-time coloring. They also fix the
+  // palette domain, ignoring the palette range.
+  renderMode: string;
   paletteMinIter: number;
   paletteMaxIter: number;
   // When enabled the palette range fits itself to the on-screen tiles and
@@ -64,8 +64,7 @@ export const defaultConfig: MandelbrotConfig = {
   highDpiTiles: false,
   showTierOverlay: false,
   smoothColoring: true,
-  distanceEstimate: false,
-  atomDomain: false,
+  renderMode: "standard",
   paletteMinIter: 0,
   paletteMaxIter: 200,
   paletteAutoAdjust: true,
@@ -74,6 +73,19 @@ export const defaultConfig: MandelbrotConfig = {
   im: "0",
   zoom: 3,
 };
+
+export const RENDER_MODES = [
+  "standard",
+  "distanceEstimate",
+  "atomDomain",
+] as const;
+
+/** Whether the config's render mode fixes the palette domain (the
+ * distance-estimate and atom-domain modes), making the palette range
+ * inapplicable. */
+export function isFixedPaletteMode(config: MandelbrotConfig): boolean {
+  return config.renderMode !== "standard";
+}
 
 type NumericConfigKey = {
   [K in keyof MandelbrotConfig]: MandelbrotConfig[K] extends number ? K : never;
@@ -112,11 +124,23 @@ export type NumberSpec = BaseSpec & {
   // exponent picks a different fractal, so the old position is meaningless).
   resetView?: boolean;
 };
+// A numeric setting with no sidebar input: it is set programmatically (the
+// palette bounds, via the histogram markers or the auto fit) but still rides
+// share URLs and participates in resets.
+export type VirtualNumberSpec = BaseSpec & {
+  key: NumericConfigKey;
+  control: "virtualNumber";
+  min: number;
+  max: number;
+};
 export type SliderSpec = BaseSpec & {
   key: NumericConfigKey;
   control: "slider";
 };
-export type SelectSpec = BaseSpec & { key: "colorScheme"; control: "select" };
+export type SelectSpec = BaseSpec & {
+  key: "colorScheme" | "renderMode";
+  control: "select";
+};
 export type SelectNumberSpec = BaseSpec & {
   key: NumericConfigKey;
   control: "selectNumber";
@@ -145,6 +169,7 @@ export type MagnificationSpec = BaseSpec & {
 
 export type SettingSpec =
   | NumberSpec
+  | VirtualNumberSpec
   | SliderSpec
   | SelectSpec
   | SelectNumberSpec
@@ -196,20 +221,14 @@ export const settingsSchema: SettingSpec[] = [
     max: 10 ** 9,
     resetView: true,
   },
-  // Distance-estimate mode: the DE brightness is baked into the cached
-  // escape/brightness values (like smoothColoring), so switching it re-renders.
+  // Render mode: what the cached per-pixel values encode (escape time,
+  // boundary distance, or atom-domain period), so switching re-renders.
+  // Legacy share URLs carried the modes as the "de"/"ad" boolean params;
+  // parseShareParams still honors those.
   {
-    key: "distanceEstimate",
-    control: "checkbox",
-    urlParam: "de",
-    effect: "rerender",
-  },
-  // Atom-domain mode: the period value is baked into the cached escape/value
-  // buffer (like distanceEstimate), so switching it re-renders.
-  {
-    key: "atomDomain",
-    control: "checkbox",
-    urlParam: "ad",
+    key: "renderMode",
+    control: "select",
+    urlParam: "m",
     effect: "rerender",
   },
   { key: "highDpiTiles", control: "checkbox", effect: "rerender" },
@@ -260,10 +279,12 @@ export const settingsSchema: SettingSpec[] = [
     effect: "recolor",
   },
   // Palette range ("pm" is serialized as auto/manual rather than the raw
-  // boolean; see buildShareUrl/parseShareParams)
+  // boolean; see buildShareUrl/parseShareParams). The bounds have no sidebar
+  // inputs — they are set by dragging the histogram markers or by the auto
+  // fit — but keep their share-URL parameters.
   {
     key: "paletteMinIter",
-    control: "number",
+    control: "virtualNumber",
     urlParam: "pmin",
     effect: "recolor",
     min: -(10 ** 9),
@@ -271,7 +292,7 @@ export const settingsSchema: SettingSpec[] = [
   },
   {
     key: "paletteMaxIter",
-    control: "number",
+    control: "virtualNumber",
     urlParam: "pmax",
     effect: "recolor",
     min: -(10 ** 9),
@@ -298,8 +319,11 @@ export function coloringOptions(config: MandelbrotConfig): ColoringOptions {
     paletteMinIter: config.paletteMinIter,
     paletteMaxIter: config.paletteMaxIter,
     colorCycles: config.colorCycles,
-    distanceEstimate: config.distanceEstimate,
-    atomDomain: config.atomDomain,
+    // The worker protocol (and the Rust struct behind it) carries the two
+    // modes as independent flags; the single-select mode guarantees at most
+    // one is set.
+    distanceEstimate: config.renderMode === "distanceEstimate",
+    atomDomain: config.renderMode === "atomDomain",
   };
 }
 
@@ -385,7 +409,8 @@ export function parseShareParams(search: string): Partial<MandelbrotConfig> {
     }
 
     switch (spec.control) {
-      case "number": {
+      case "number":
+      case "virtualNumber": {
         const value = Number(raw);
         if (!Number.isNaN(value)) {
           assign[spec.key] = clamp(value, spec.min, spec.max);
@@ -418,14 +443,43 @@ export function parseShareParams(search: string): Partial<MandelbrotConfig> {
     parsed.paletteAutoAdjust = false;
   }
 
+  // An unknown mode value falls back to the default by omission.
+  if (
+    parsed.renderMode !== undefined &&
+    !(RENDER_MODES as readonly string[]).includes(parsed.renderMode)
+  ) {
+    delete parsed.renderMode;
+  }
+  // Legacy share URLs carried the render modes as two boolean params.
+  // Distance estimate wins when both are set, matching the renderer's
+  // precedence back then.
+  if (parsed.renderMode === undefined) {
+    if (params.get("de") === "true") {
+      parsed.renderMode = "distanceEstimate";
+    } else if (params.get("ad") === "true") {
+      parsed.renderMode = "atomDomain";
+    }
+  }
+
   return parsed;
 }
+
+// Settings that exist only in the config (no sidebar input element);
+// syncInputToConfig skips them rather than warning about a missing element.
+const virtualKeys = new Set<keyof MandelbrotConfig>(
+  settingsSchema
+    .filter((spec) => spec.control === "virtualNumber")
+    .map((spec) => spec.key),
+);
 
 /** Writes a setting's current config value into its sidebar input. */
 export function syncInputToConfig(
   config: MandelbrotConfig,
   key: keyof MandelbrotConfig,
 ) {
+  if (virtualKeys.has(key)) {
+    return;
+  }
   const element = document.getElementById(key);
   if (!element) {
     console.warn(`Could not find input element for setting: ${key}`);
