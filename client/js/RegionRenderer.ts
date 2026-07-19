@@ -149,17 +149,21 @@ class RegionRenderer {
   }
 
   /** Renders a Julia set thumbnail for the parameter `c = (cRe, cIm)` under
-   * the cursor (issue #12), as RGBA bytes for a `size x size` image. Uses the
-   * map's current palette, iteration cap, exponent, and appearance settings —
-   * read at call time, like the tile renderer — so the preview matches the
-   * fractal on screen. `c` is an ordinary f64: Julia sets live within `|c| < 2`,
-   * far inside f64 precision, so the cursor's deep-zoom sub-pixel precision is
-   * not needed for the parameter. */
+   * the cursor (issue #12), returning the full worker response for a
+   * `size x size` image (RGBA bytes, iteration range, and — when
+   * `includeValues` is set — the per-pixel escape values the panel's palette
+   * refit recolors from). Uses the map's current palette, iteration cap,
+   * exponent, and appearance settings — read at call time, like the tile
+   * renderer — so the preview matches the fractal on screen. `c` is an
+   * ordinary f64: Julia sets live within `|c| < 2`, far inside f64 precision,
+   * so the cursor's deep-zoom sub-pixel precision is not needed for the
+   * parameter. */
   async renderJulia(
     cRe: number,
     cIm: number,
     size: number,
-  ): Promise<Uint8Array> {
+    includeValues: boolean,
+  ): Promise<MandelbrotResponse> {
     const request: JuliaRequest = {
       type: "julia",
       payload: {
@@ -170,15 +174,14 @@ class RegionRenderer {
         imageWidth: size,
         imageHeight: size,
         smoothColoring: this.map.config.smoothColoring,
+        includeValues,
         coloring: coloringOptions(this.map.config),
       },
     };
 
-    const response = (await this.map.pool.queue((workerTask) =>
+    return (await this.map.pool.queue((workerTask) =>
       workerTask(request),
     )) as MandelbrotResponse;
-
-    return response.image;
   }
 
   /** Renders the region and returns the full worker response: the RGBA

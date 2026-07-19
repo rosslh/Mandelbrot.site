@@ -3780,6 +3780,11 @@ pub struct JuliaRenderOptions {
     image_width: usize,
     image_height: usize,
     smooth_coloring: bool,
+    /// Whether to return the per-pixel escape values alongside the image, so
+    /// the panel can refit the palette to the thumbnail's own iteration range
+    /// and recolor (auto palette mode); skipped otherwise to avoid the
+    /// transfer, as a tile render does.
+    include_values: bool,
     coloring: ColoringOptions,
 }
 
@@ -3790,7 +3795,8 @@ pub struct JuliaRenderOptions {
 /// appearance settings. Distance-estimate mode does not apply (it is a
 /// Mandelbrot-boundary technique), so the flag is ignored and escape-time
 /// coloring is always used. Returns the RGBA bytes plus iteration stats, like a
-/// tile render; the `values` buffer is unused by the panel and left empty.
+/// tile render; `include_values` additionally returns the per-pixel escape
+/// values for a recoloring pass.
 #[wasm_bindgen]
 pub fn render_julia(options: JsValue) -> Result<MandelbrotTile, JsValue> {
     let options: JuliaRenderOptions =
@@ -3815,7 +3821,10 @@ pub fn render_julia(options: JsValue) -> Result<MandelbrotTile, JsValue> {
         options.coloring.color_cycles.max(1),
     );
 
-    Ok(MandelbrotTile::from_rendered(rendered, false))
+    Ok(MandelbrotTile::from_rendered(
+        rendered,
+        options.include_values,
+    ))
 }
 
 /// Renders a Mandelbrot tile at any zoom depth (see `render_tile_precise`

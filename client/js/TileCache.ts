@@ -1,11 +1,11 @@
-import type { TileRect } from "./protocol";
+import type { MandelbrotResponse, TileRect } from "./protocol";
 
 // The x/y/z triple identifying a cached tile. Structurally satisfied by
 // Leaflet's `Coords` (the tile layer's case) and by plain objects (offscreen
 // consumers like the zoom animator's per-frame palette fit).
 type TilePositionKey = { x: number; y: number; z: number };
 
-type TileIterationRange = { min: number; max: number };
+export type TileIterationRange = { min: number; max: number };
 
 /** The center-weighted escape-value distribution of the visible pixels, plus
  * the aggregates that fall out of the same pass. `buckets` spans [min, max]
@@ -497,6 +497,49 @@ class TileCache {
   tilesAtZoom(zoom: number): CachedTile[] {
     return [...this.tiles.values()].filter((tile) => tile.zoom === zoom);
   }
+}
+
+/** The auto-palette range fit to a single offscreen render's escape values,
+ * or null when the render has none (all-interior, or values not requested). A
+ * throwaway cache holds the render as the single tile spanning [0,1) x [0,1)
+ * at zoom 0, so the unit viewport reproduces the map's on-screen fit exactly
+ * (center-weighted, neighbor-capped percentile clip). Shared by the zoom
+ * animator's per-frame fit and the Julia panel's thumbnail fit; the fit
+ * depends only on this render's values. */
+export function fittedRangeForRender(
+  response: MandelbrotResponse,
+  width: number,
+  height: number,
+): TileIterationRange | null {
+  if (
+    !response.values ||
+    response.minIter === null ||
+    response.maxIter === null
+  ) {
+    return null;
+  }
+
+  // The cache reads a tile's pixel dimensions off its canvas; the fit never
+  // touches the canvas pixels, so a blank one carries them.
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const fitCache = new TileCache();
+  fitCache.record(
+    { x: 0, y: 0, z: 0 },
+    response.minIter,
+    response.maxIter,
+    canvas,
+    response.values,
+    response.tier,
+  );
+  return fitCache.detectedRange({
+    xMin: 0,
+    xMax: 1,
+    yMin: 0,
+    yMax: 1,
+    zoom: 0,
+  });
 }
 
 export default TileCache;

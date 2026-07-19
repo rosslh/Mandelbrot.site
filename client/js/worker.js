@@ -202,12 +202,12 @@ const supportsRelaxedSimd = WebAssembly.validate(
 
     // Julia set thumbnail for the parameter c under the cursor (issue #12).
     // Reuses the tile struct (image + stats), so it frees the wasm-bindgen
-    // object the same way getTile does; the panel only needs the image.
+    // object the same way getTile does.
     const getJulia = (params) => {
       const tile = wasm.render_julia(params);
       const result = {
         image: tile.image,
-        values: null,
+        values: params.includeValues ? tile.values : null,
         minIter: tile.min_iter >= 0 ? tile.min_iter : null,
         maxIter: tile.max_iter >= 0 ? tile.max_iter : null,
         tier: tile.tier,

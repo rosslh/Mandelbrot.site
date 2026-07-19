@@ -82,6 +82,10 @@ export type JuliaRenderPayload = {
   imageWidth: number;
   imageHeight: number;
   smoothColoring: boolean;
+  // Whether to return the per-pixel escape values, so the panel can refit the
+  // palette to the thumbnail's own iteration range and recolor (auto palette
+  // mode); skipped otherwise to avoid the transfer.
+  includeValues: boolean;
   coloring: ColoringOptions;
 };
 export type JuliaRequest = {

@@ -1,6 +1,9 @@
 import * as L from "leaflet";
 import throttle from "lodash/throttle";
 import type MandelbrotMap from "./MandelbrotMap";
+import { fittedRangeForRender } from "./TileCache";
+import { coloringOptions } from "./config";
+import type { ColoringOptions } from "./protocol";
 
 // The thumbnail renders at its laid-out CSS size times the display's
 // devicePixelRatio (like the tile layer's high-resolution mode), so it is
@@ -19,6 +22,11 @@ const THUMBNAIL_MAX_DEVICE_PX = 800;
 // live instead of waiting for it to stop.
 const RENDER_THROTTLE_MS = 120;
 
+// The complex-plane width of the thumbnail's fixed view — [-2, 2] on each
+// axis, matching JULIA_VIEW_HALF_EXTENT in mandelbrot/src/lib.rs. One
+// thumbnail pixel spans JULIA_VIEW_EXTENT / size of the `c`-plane.
+const JULIA_VIEW_EXTENT = 4;
+
 /** The Julia set panel below the controls (issue #12): a thumbnail of the
  * filled Julia set for the parameter `c` under the cursor, iterating
  * `z -> z^exponent + c`. It follows the cursor over the map; when the cursor
@@ -28,7 +36,12 @@ const RENDER_THROTTLE_MS = 120;
  *
  * Renders through the same worker pool as the tile layer (a dedicated wasm
  * entrypoint, `render_julia`), throttled so cursor movement does not flood the
- * pool. */
+ * pool — and skipped entirely when `c` did not move enough to change the
+ * image, which is every cursor move once the view is deeply zoomed. The
+ * thumbnail runs its own palette auto-adjust, refitting the window to its own
+ * iteration range on every render (see thumbnailColoring): the map's window —
+ * auto-fit or manual — describes the view's iteration counts, not the Julia
+ * set's. */
 class JuliaPanel {
   private map: MandelbrotMap;
   private canvas: HTMLCanvasElement;
@@ -40,6 +53,17 @@ class JuliaPanel {
   // Increments per render so a stale in-flight result cannot paint over a
   // newer one that resolved first.
   private renderId = 0;
+  // What the last painted thumbnail showed, so render() can skip work when
+  // nothing perceptible changed. Zoomed in, the whole viewport spans a tiny
+  // window of the `c`-plane, so cursor movement sweeps `c` across distances
+  // far below what the thumbnail can resolve — without this, every cursor
+  // move at depth cost a render for a pixel-identical image.
+  private lastRender: {
+    re: number;
+    im: number;
+    size: number;
+    settingsKey: string;
+  } | null = null;
 
   constructor(map: MandelbrotMap) {
     this.map = map;
@@ -102,6 +126,40 @@ class JuliaPanel {
     return this.map.complexAtLatLngFloat(latLng);
   }
 
+  /** The coloring options the thumbnail's recolor pass uses: the map's
+   * appearance settings, minus everything tied to the map's view. The palette
+   * window is a placeholder — the thumbnail runs its own auto-adjust, fitting
+   * the window to its own iteration range on every render (the map's window
+   * describes the viewport's iteration counts, which at depth dwarf the Julia
+   * set's shallow ones and would clamp the whole thumbnail to one end of the
+   * gradient; that holds for the auto-fit and manual windows alike). The
+   * normalized modes (distance-estimate, atom-domain) are view techniques the
+   * escape-time thumbnail does not share, so their flags are dropped too. */
+  private thumbnailColoring(): ColoringOptions {
+    return {
+      ...coloringOptions(this.map.config),
+      paletteMinIter: 0,
+      paletteMaxIter: 0,
+      distanceEstimate: false,
+      atomDomain: false,
+    };
+  }
+
+  /** Fingerprint of every setting that affects the thumbnail's pixels, so
+   * render() can tell a settings change from a cursor move. Built from
+   * thumbnailColoring, so the settings the thumbnail ignores — above all the
+   * palette window, which the tile layer refits on every pan and zoom at
+   * depth — do not force renders that would repaint the same image. */
+  private settingsKey(): string {
+    const config = this.map.config;
+    return JSON.stringify({
+      coloring: this.thumbnailColoring(),
+      iterations: config.iterations,
+      exponent: config.exponent,
+      smoothColoring: config.smoothColoring,
+    });
+  }
+
   /** Renders the Julia thumbnail unless the panel is collapsed. Throttled so
    * cursor movement updates the preview live without flooding the pool. */
   private scheduleRender = throttle(() => {
@@ -124,9 +182,49 @@ class JuliaPanel {
     this.showCoordinates(re, im);
 
     const size = this.thumbnailSize();
+    const settingsKey = this.settingsKey();
+    // Skip the render when `c` moved less than 1/256 of a thumbnail pixel
+    // and nothing else changed: no feature of the set can shift visibly for a
+    // change that far below the pixel grid, so the image would be
+    // indistinguishable. Deliberately ultra-conservative — the payoff is at
+    // depth, where the whole viewport spans many orders of magnitude less
+    // than even this, so cursor tracking stops costing renders entirely; it
+    // also deduplicates the mousemove/moveend/zoomend triggers that land on
+    // the same `c`.
+    const last = this.lastRender;
+    const cEpsilon = JULIA_VIEW_EXTENT / size / 256;
+    if (
+      last &&
+      last.size === size &&
+      last.settingsKey === settingsKey &&
+      Math.hypot(re - last.re, im - last.im) < cEpsilon
+    ) {
+      return;
+    }
+
     const id = ++this.renderId;
     try {
-      const image = await this.map.regionRenderer.renderJulia(re, im, size);
+      const response = await this.map.regionRenderer.renderJulia(
+        re,
+        im,
+        size,
+        true,
+      );
+      // The thumbnail's own auto-adjust: fit the palette window to this
+      // render's iteration range (the same center-weighted percentile fit
+      // the tile layer applies to the view) and recolor to it. The fit can
+      // only miss for an all-interior render, which a Julia thumbnail never
+      // is (its [-2, 2] frame always includes escaping exterior); the plain
+      // config-palette image is the nominal fallback.
+      let image = response.image;
+      const range = fittedRangeForRender(response, size, size);
+      if (range && response.values) {
+        image = await this.map.regionRenderer.recolor(response.values, {
+          ...this.thumbnailColoring(),
+          paletteMinIter: range.min,
+          paletteMaxIter: range.max,
+        });
+      }
       // A newer render (or a pool re-creation that resolved out of order)
       // supersedes this one.
       if (id !== this.renderId || !this.ctx) {
@@ -144,6 +242,7 @@ class JuliaPanel {
         size,
       );
       this.ctx.putImageData(imageData, 0, 0);
+      this.lastRender = { re, im, size, settingsKey };
     } catch {
       // The pool was terminated by a re-render; the next scheduled render
       // retries against the fresh pool.

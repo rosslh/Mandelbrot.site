@@ -1,6 +1,6 @@
 import { saveAs } from "file-saver";
 import type MandelbrotMap from "./MandelbrotMap";
-import TileCache from "./TileCache";
+import { fittedRangeForRender } from "./TileCache";
 import { AnimationSpec, buildFrameRects, frameCount } from "./animationFrames";
 import { coloringOptions } from "./config";
 import type { TileRect } from "./protocol";
@@ -318,12 +318,8 @@ class ZoomAnimator {
   }
 
   /** Renders `rect` for its escape values and returns the auto-palette range
-   * fit to them, or null when the frame has no escaped pixels. A frame-local
-   * throwaway TileCache holds the frame as the single tile spanning
-   * [0,1) x [0,1) at zoom 0, so the unit viewport reproduces the map's
-   * on-screen fit exactly (center-weighted, neighbor-capped percentile clip).
-   * The cache is not shared across frames — that fit must depend only on this
-   * frame's values. */
+   * fit to them (see fittedRangeForRender), or null when the frame has no
+   * escaped pixels. */
   private async detectFrameRange(
     rect: TileRect,
     spec: AnimationSpec,
@@ -334,33 +330,7 @@ class ZoomAnimator {
       spec.height,
       true,
     );
-    if (
-      !response.values ||
-      response.minIter === null ||
-      response.maxIter === null
-    ) {
-      return null;
-    }
-
-    const canvas = document.createElement("canvas");
-    canvas.width = spec.width;
-    canvas.height = spec.height;
-    const fitCache = new TileCache();
-    fitCache.record(
-      { x: 0, y: 0, z: 0 },
-      response.minIter,
-      response.maxIter,
-      canvas,
-      response.values,
-      response.tier,
-    );
-    return fitCache.detectedRange({
-      xMin: 0,
-      xMax: 1,
-      yMin: 0,
-      yMax: 1,
-      zoom: 0,
-    });
+    return fittedRangeForRender(response, spec.width, spec.height);
   }
 
   /** Blits the pre-rendered frames onto a canvas that a `MediaRecorder` is
