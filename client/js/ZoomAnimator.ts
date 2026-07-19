@@ -22,6 +22,16 @@ const RECORDER_MIME_CANDIDATES = [
 // boundary detail survives compression at 1080p-ish resolutions.
 const VIDEO_BITS_PER_SECOND = 16_000_000;
 
+// Roughly how many frames each palette anchor covers when refitting the
+// auto-palette range across a zoom (see buildFrameRanges). Anchors are spaced
+// far enough apart that per-frame percentile-clip jitter averages out, yet
+// dense enough to track the genuine growth of the iteration range with depth.
+const FRAMES_PER_PALETTE_ANCHOR = 12;
+
+/** A palette's escaped-iteration window; structurally the same as TileCache's
+ * internal detected range. */
+type PaletteRange = { min: number; max: number };
+
 export type AnimationProgress = {
   // Which phase the run is in, for the modal's status label.
   phase: "rendering" | "encoding";
@@ -119,16 +129,27 @@ class ZoomAnimator {
     // Palette refitting: the config's palette range is auto-fit to the deep
     // target view, whose iteration counts dwarf a shallow frame's — rendering
     // every frame with it clamps most of the sweep to a single color. In auto
-    // palette mode each frame is instead refit to its own iteration range,
-    // matching what the live view shows at that depth (see renderFrame).
-    // Manual palette mode keeps the user's fixed range, also matching the live
-    // view; the distance-estimate and atom-domain modes normalize their values
-    // to a fixed 0..1 domain, so there is nothing to refit.
+    // palette mode the palette is instead refit per frame to the iteration
+    // range at that depth, matching what the live view shows there. Manual
+    // palette mode keeps the user's fixed range, also matching the live view;
+    // the distance-estimate and atom-domain modes normalize their values to a
+    // fixed 0..1 domain, so there is nothing to refit.
     const coloring = coloringOptions(this.map.config);
     const refitPalette =
       this.map.config.paletteAutoAdjust &&
       !coloring.distanceEstimate &&
       !coloring.atomDomain;
+
+    // Fitting each frame independently makes the palette window jump every
+    // frame — partly the genuine deepening trend, partly percentile-clip
+    // jitter — which reads as flashing. Instead sample the fitted range at a
+    // few anchor frames spread across the zoom and log-interpolate the window
+    // for the rest, so the colors drift smoothly with depth. Null entries
+    // (all-interior frames) fall back to the plain config-palette render.
+    const frameRanges = refitPalette
+      ? await this.buildFrameRanges(rects, spec, total)
+      : null;
+    this.throwIfCancelled();
 
     // Phase 1: render every frame off-screen, concurrently across the worker
     // pool (a frame is a single worker task, so sequential rendering would
@@ -155,7 +176,7 @@ class ZoomAnimator {
             frames[index] = await this.renderFrame(
               rects[index],
               spec,
-              refitPalette,
+              frameRanges ? frameRanges[index] : null,
             );
           } catch (error) {
             failure ??= error;
@@ -205,23 +226,20 @@ class ZoomAnimator {
     }
   }
 
-  /** Renders one animation frame to an ImageBitmap. With `refitPalette` (auto
-   * palette mode), the frame's palette range is refit to its own escaped-pixel
-   * values and the frame recolored accordingly; a frame-local throwaway
-   * TileCache holds the frame as a single full-viewport tile at the unit
-   * bounds below, which reproduces the map's on-screen fit exactly
-   * (center-weighted, neighbor-capped percentile clip). The fit depends only
-   * on this frame's values, and frames render concurrently, so the cache must
-   * not be shared — interleaved record/read pairs would fit one frame against
-   * another's values. An all-interior frame has no range to fit and stays as
-   * rendered (solid interior color either way). */
+  /** Renders one animation frame to an ImageBitmap. When `range` is given (auto
+   * palette mode), the frame is rendered for its escape values and recolored to
+   * that precomputed window — the smoothed per-frame range from
+   * buildFrameRanges rather than this frame's own fit, so the palette drifts
+   * smoothly across the sweep. A null `range` (manual palette, the normalized
+   * modes, or an all-interior frame) takes the plain render straight from the
+   * config palette. */
   private async renderFrame(
     rect: TileRect,
     spec: AnimationSpec,
-    refitPalette: boolean,
+    range: PaletteRange | null,
   ): Promise<ImageBitmap> {
     const renderer = this.map.regionRenderer;
-    if (!refitPalette) {
+    if (range === null) {
       const canvas = await renderer.renderToCanvas(
         rect,
         spec.width,
@@ -237,6 +255,15 @@ class ZoomAnimator {
       true,
     );
 
+    let image = response.image;
+    if (response.values) {
+      image = await renderer.recolor(response.values, {
+        ...coloringOptions(this.map.config),
+        paletteMinIter: range.min,
+        paletteMaxIter: range.max,
+      });
+    }
+
     const canvas = document.createElement("canvas");
     canvas.width = spec.width;
     canvas.height = spec.height;
@@ -244,46 +271,96 @@ class ZoomAnimator {
     if (!context) {
       throw new Error("Could not get canvas context.");
     }
-
-    let image = response.image;
-    if (
-      response.values &&
-      response.minIter !== null &&
-      response.maxIter !== null
-    ) {
-      // The whole frame recorded as the one tile spanning [0,1) x [0,1) at
-      // zoom 0, so the unit viewport below covers exactly its pixels.
-      const fitCache = new TileCache();
-      fitCache.record(
-        { x: 0, y: 0, z: 0 },
-        response.minIter,
-        response.maxIter,
-        canvas,
-        response.values,
-        response.tier,
-      );
-      const range = fitCache.detectedRange({
-        xMin: 0,
-        xMax: 1,
-        yMin: 0,
-        yMax: 1,
-        zoom: 0,
-      });
-      if (range) {
-        image = await renderer.recolor(response.values, {
-          ...coloringOptions(this.map.config),
-          paletteMinIter: range.min,
-          paletteMaxIter: range.max,
-        });
-      }
-    }
-
     context.putImageData(
       new ImageData(Uint8ClampedArray.from(image), spec.width, spec.height),
       0,
       0,
     );
     return createImageBitmap(canvas);
+  }
+
+  /** The smoothed auto-palette range for every frame. The fitted iteration
+   * range grows with zoom depth but a per-frame fit also jitters (the
+   * percentile clip lands in different histogram buckets frame to frame),
+   * which is what flashes. So the range is measured only at anchor frames
+   * spread across the sweep — far enough apart that jitter averages out — and
+   * log-interpolated between them (iteration counts grow geometrically with
+   * depth, so the window is smooth in log space). Frames are evenly spaced in
+   * log-magnification, so the frame index is a faithful interpolation axis.
+   * Entries are null where no anchor escaped (all-interior); renderFrame then
+   * falls back to the config palette, which is moot for a solid interior. */
+  private async buildFrameRanges(
+    rects: TileRect[],
+    spec: AnimationSpec,
+    total: number,
+  ): Promise<(PaletteRange | null)[]> {
+    const anchorIndices = anchorFrameIndices(total);
+    const anchors = await Promise.all(
+      anchorIndices.map(async (index) => ({
+        index,
+        range: await this.detectFrameRange(rects[index], spec),
+      })),
+    );
+
+    // Drop anchors with no escaped pixels; interpolate across what remains.
+    const fitted = anchors.filter(
+      (anchor): anchor is { index: number; range: PaletteRange } =>
+        anchor.range !== null,
+    );
+    const ranges: (PaletteRange | null)[] = new Array(total).fill(null);
+    if (fitted.length === 0) {
+      return ranges;
+    }
+    for (let index = 0; index < total; index++) {
+      ranges[index] = interpolatePaletteRange(fitted, index);
+    }
+    return ranges;
+  }
+
+  /** Renders `rect` for its escape values and returns the auto-palette range
+   * fit to them, or null when the frame has no escaped pixels. A frame-local
+   * throwaway TileCache holds the frame as the single tile spanning
+   * [0,1) x [0,1) at zoom 0, so the unit viewport reproduces the map's
+   * on-screen fit exactly (center-weighted, neighbor-capped percentile clip).
+   * The cache is not shared across frames — that fit must depend only on this
+   * frame's values. */
+  private async detectFrameRange(
+    rect: TileRect,
+    spec: AnimationSpec,
+  ): Promise<PaletteRange | null> {
+    const response = await this.map.regionRenderer.renderRegion(
+      rect,
+      spec.width,
+      spec.height,
+      true,
+    );
+    if (
+      !response.values ||
+      response.minIter === null ||
+      response.maxIter === null
+    ) {
+      return null;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = spec.width;
+    canvas.height = spec.height;
+    const fitCache = new TileCache();
+    fitCache.record(
+      { x: 0, y: 0, z: 0 },
+      response.minIter,
+      response.maxIter,
+      canvas,
+      response.values,
+      response.tier,
+    );
+    return fitCache.detectedRange({
+      xMin: 0,
+      xMax: 1,
+      yMin: 0,
+      yMax: 1,
+      zoom: 0,
+    });
   }
 
   /** Blits the pre-rendered frames onto a canvas that a `MediaRecorder` is
@@ -390,6 +467,67 @@ class ZoomAnimator {
       im,
     )}_z${zoom}_zoom.${extension}`;
   }
+}
+
+/** Evenly spaced frame indices to measure the palette range at, always
+ * including the first and last frame. The count scales with the frame total
+ * (about one anchor per FRAMES_PER_PALETTE_ANCHOR frames), floored at two so a
+ * multi-frame sweep always interpolates between endpoints. Rounding can
+ * collapse neighbours on short animations, so duplicates are dropped. */
+function anchorFrameIndices(total: number): number[] {
+  if (total <= 1) {
+    return [0];
+  }
+  const anchorCount = Math.min(
+    total,
+    Math.max(2, Math.round(total / FRAMES_PER_PALETTE_ANCHOR) + 1),
+  );
+  const indices: number[] = [];
+  for (let anchor = 0; anchor < anchorCount; anchor++) {
+    const index = Math.round((anchor * (total - 1)) / (anchorCount - 1));
+    if (indices[indices.length - 1] !== index) {
+      indices.push(index);
+    }
+  }
+  return indices;
+}
+
+/** The palette range for `index`, log-interpolated between the surrounding
+ * anchors (sorted ascending by frame index, at least one). Indices outside the
+ * anchored span clamp to the nearest anchor. Interpolating the log of the
+ * window matches how iteration counts grow geometrically with depth; the
+ * bounds are rounded back to whole iterations with max kept above min. */
+function interpolatePaletteRange(
+  anchors: { index: number; range: PaletteRange }[],
+  index: number,
+): PaletteRange {
+  if (index <= anchors[0].index) {
+    return { ...anchors[0].range };
+  }
+  const last = anchors[anchors.length - 1];
+  if (index >= last.index) {
+    return { ...last.range };
+  }
+
+  let upper = 1;
+  while (anchors[upper].index < index) {
+    upper++;
+  }
+  const lower = anchors[upper - 1];
+  const higher = anchors[upper];
+  const t = (index - lower.index) / (higher.index - lower.index);
+
+  const min = Math.round(logLerp(lower.range.min, higher.range.min, t));
+  const max = Math.round(logLerp(lower.range.max, higher.range.max, t));
+  return { min, max: Math.max(max, min + 1) };
+}
+
+/** Interpolates between two positive-ish iteration counts in log space. Values
+ * are floored at 1 before the log so a zero floor stays finite. */
+function logLerp(a: number, b: number, t: number): number {
+  const logA = Math.log(Math.max(a, 1));
+  const logB = Math.log(Math.max(b, 1));
+  return Math.exp(logA + (logB - logA) * t);
 }
 
 export default ZoomAnimator;
