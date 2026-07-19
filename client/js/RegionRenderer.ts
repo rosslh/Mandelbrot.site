@@ -16,6 +16,18 @@ import {
   TileRenderPayload,
 } from "./protocol";
 
+/** An explicit coordinate frame for a render: the world origin (as
+ * arbitrary-precision decimal strings) and deep-zoom offset the payload's tile
+ * bounds are relative to. Renders that target a fixed absolute region of the
+ * plane — like the minimap's full-set view — pass one instead of inheriting
+ * the map's frame, which wanders with the view and whose deep-zoom scaling
+ * would underflow a shallow region's coordinates. */
+export type RenderFrame = {
+  originRe: string;
+  originIm: string;
+  zoomOffset: number;
+};
+
 /** Renders regions of the current view through the worker pool — the shared
  * engine behind the visible tile layer and offscreen work (image export;
  * eventually zoom-animation frames and Julia previews). It reads the origin,
@@ -32,19 +44,22 @@ class RegionRenderer {
    * build time rather than when the pool gets to the task: auto palette
    * adjustment mutates the config as background tiles finish, and an export
    * whose columns straddle such a refit comes out with two different color
-   * mappings. */
+   * mappings. The optional `frame` pins the bounds to an explicit origin and
+   * zoom offset instead of the map's current ones; the appearance settings
+   * still come from the map either way. */
   buildPayload(
     bounds: TileRect,
     imageWidth: number,
     imageHeight: number,
     includeValues: boolean,
+    frame?: RenderFrame,
   ): TileRenderPayload {
     return {
       includeValues,
-      originRe: this.map.origin.re,
-      originIm: this.map.origin.im,
+      originRe: frame ? frame.originRe : this.map.origin.re,
+      originIm: frame ? frame.originIm : this.map.origin.im,
       bounds,
-      zoomOffset: this.map.zoomOffset,
+      zoomOffset: frame ? frame.zoomOffset : this.map.zoomOffset,
       iterations: this.map.config.iterations,
       exponent: this.map.config.exponent,
       imageWidth,
@@ -187,12 +202,14 @@ class RegionRenderer {
   /** Renders the region and returns the full worker response: the RGBA
    * image, the escaped-pixel iteration range, the precision tier, and (when
    * `includeValues` is set) the per-pixel smoothed escape values that
-   * recoloring consumes. */
+   * recoloring consumes. The optional `frame` pins the bounds to an explicit
+   * origin and zoom offset instead of the map's current ones. */
   async renderRegion(
     bounds: TileRect,
     imageWidth: number,
     imageHeight: number,
     includeValues: boolean,
+    frame?: RenderFrame,
   ): Promise<MandelbrotResponse> {
     const request: CalculateRequest = {
       type: "calculate",
@@ -201,6 +218,7 @@ class RegionRenderer {
         imageWidth,
         imageHeight,
         includeValues,
+        frame,
       ),
     };
 

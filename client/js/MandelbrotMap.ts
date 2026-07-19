@@ -6,7 +6,7 @@ import MandelbrotControls from "./MandelbrotControls";
 import ImageSaver from "./ImageSaver";
 import ZoomAnimator from "./ZoomAnimator";
 import PointTooltip from "./PointTooltip";
-import JuliaPanel from "./JuliaPanel";
+import NavigatorPanel from "./NavigatorPanel";
 import RegionRenderer from "./RegionRenderer";
 import TileCache, { CachedTile } from "./TileCache";
 import {
@@ -93,7 +93,7 @@ class MandelbrotMap extends L.Map {
   imageSaver: ImageSaver;
   zoomAnimator: ZoomAnimator;
   pointTooltip: PointTooltip;
-  juliaPanel: JuliaPanel;
+  navigatorPanel: NavigatorPanel;
   queuedTileTasks: QueuedTileTask[] = [];
   origin: { re: string; im: string };
   zoomOffset: number;
@@ -154,7 +154,7 @@ class MandelbrotMap extends L.Map {
     this.imageSaver = new ImageSaver(this);
     this.zoomAnimator = new ZoomAnimator(this);
     this.pointTooltip = new PointTooltip(this);
-    this.juliaPanel = new JuliaPanel(this);
+    this.navigatorPanel = new NavigatorPanel(this);
 
     // Anchor the world origin at the target coordinates (latLng (0, 0), the
     // center of Leaflet's tile universe) and set the initial view; for a
@@ -270,6 +270,15 @@ class MandelbrotMap extends L.Map {
   tileCoordinateOffset(value: number, zoom: number): number {
     const scaleFactor = this.mandelbrotLayer.getTileSize().x / 128;
     return (value / 2 ** (zoom - 2)) * scaleFactor - 4;
+  }
+
+  /** The tile coordinate at `zoom` whose `tileCoordinateOffset` is the given
+   * offset from the world origin — the inverse mapping, for callers that pin
+   * a region in complex-plane units (like the minimap's fixed window) and
+   * need its tile-space bounds. */
+  tileCoordinateForOffset(offset: number, zoom: number): number {
+    const scaleFactor = this.mandelbrotLayer.getTileSize().x / 128;
+    return ((offset + 4) / scaleFactor) * 2 ** (zoom - 2);
   }
 
   latLngToTilePosition(latLng: L.LatLng, z: number): TilePosition {
@@ -593,7 +602,7 @@ class MandelbrotMap extends L.Map {
     }
     this.recolorVisibleTiles();
     // The Julia thumbnail uses the same palette; keep it in step.
-    this.juliaPanel?.refresh();
+    this.navigatorPanel?.refresh();
   }
 
   /** Applies an explicit palette-range action (a reset, or enabling
@@ -608,7 +617,7 @@ class MandelbrotMap extends L.Map {
     // The refit moved the palette bounds; keep the histogram markers in step.
     this.controls?.refreshPaletteHistogram();
     // The Julia thumbnail maps its escape counts over the same palette range.
-    this.juliaPanel?.refresh();
+    this.navigatorPanel?.refresh();
   }
 
   /** Runs when every visible tile has finished rendering: fit the palette to

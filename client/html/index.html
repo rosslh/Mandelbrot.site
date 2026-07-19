@@ -464,9 +464,20 @@
 
       <details class="mobile-hidden" id="juliaSet">
         <summary>
-          <span>Julia set</span>
+          <span>Navigator</span>
         </summary>
         <div class="details-content">
+          <div class="input-wrapper">
+            <select
+              id="juliaPanelMode"
+              name="juliaPanelMode"
+              aria-label="Navigator view"
+              class="full-width"
+            >
+              <option value="julia">Julia set</option>
+              <option value="minimap">Minimap</option>
+            </select>
+          </div>
           <p class="secondary" id="juliaSetHint">
             The Julia set for the point under the cursor.
           </p>
