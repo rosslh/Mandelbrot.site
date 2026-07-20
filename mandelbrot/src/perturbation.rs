@@ -1730,6 +1730,45 @@ impl PerturbedFrame {
         self.use_float_exp && self.exponent == 2
     }
 
+    /// The iteration budget the kernels actually run: the requested budget
+    /// clamped to the stored orbit length.
+    ///
+    /// Past `MAX_ORBIT_LENGTH` iterations a pixel is forced to rebase at the
+    /// end of the stored orbit (`dz = z`). That step is algebraically exact,
+    /// but it desynchronizes the delta from the reference orbit's phase: the
+    /// delta becomes O(|Z|), and at the pixel's next close return to the
+    /// origin the reconstruction `z = Z + dz` cancels catastrophically — the
+    /// ~1e-16 relative rounding of the stored orbit values becomes a huge
+    /// *relative* error in the tiny true `z`, which the dynamics amplify
+    /// until the pixel spuriously escapes. Measured against exact 320-bit
+    /// arithmetic (2026-07-20, `orbit_clamp_post_wrap_trust_probe`): every
+    /// pixel whose true escape count exceeds the orbit length collapses onto
+    /// one corrupted trajectory and reports the same bogus finite count,
+    /// whether its true count is 1.2M, 9M, or interior-forever. Post-wrap
+    /// counts carry no information, so the budget stops where the math does:
+    /// pixels still alive here are reported as `max_iterations` ("did not
+    /// escape within budget" — the standard escape-time cap semantic) and
+    /// render as interior. Attracting-cycle interior detection as an
+    /// alternative was re-probed and re-refuted at these depths
+    /// (`orbit_clamp_ground_truth_probe`; the 2026-07-08 settled verdict's
+    /// false-retire mode reproduces verbatim via embedded-island corridors).
+    fn kernel_budget(&self) -> u32 {
+        self.max_iterations.min(MAX_ORBIT_LENGTH as u32)
+    }
+
+    /// Maps a kernel result at the clamped budget back to the caller's
+    /// budget semantics: a pixel alive at the clamp is "did not escape
+    /// within budget" and must report the requested `max_iterations` so
+    /// interior classification and coloring hold. Identity when the budget
+    /// fits the orbit (all pre-existing traffic).
+    fn report(&self, result: (u32, Complex64)) -> (u32, Complex64) {
+        if result.0 >= self.kernel_budget() {
+            (self.max_iterations, result.1)
+        } else {
+            result
+        }
+    }
+
     /// The pixel's perturbation delta from the reference point as a plain
     /// f64 (only meaningful on the f64-delta path).
     fn pixel_dc_f64(&self, column: usize, row: usize) -> Complex64 {
@@ -1761,10 +1800,13 @@ impl PerturbedFrame {
                 &self.orbit.values,
                 dc_of,
                 pixel_count,
-                self.max_iterations,
+                self.kernel_budget(),
                 self.escape_radius_squared,
                 &mut results,
             );
+            for result in results.iter_mut() {
+                *result = self.report(*result);
+            }
             return results;
         }
 
@@ -1793,11 +1835,16 @@ impl PerturbedFrame {
                             &self.orbit.coeff_table,
                             dc_of,
                             pixels.len(),
-                            self.max_iterations,
+                            self.kernel_budget(),
                             self.exponent,
                             self.escape_radius_squared,
                             wave_results,
                         );
+                        // Report budget-clamped survivors as interior before
+                        // the wave driver's ring-fill decisions read them.
+                        for result in wave_results.iter_mut() {
+                            *result = self.report(*result);
+                        }
                     },
                 );
             } else {
@@ -1808,11 +1855,14 @@ impl PerturbedFrame {
                     &self.orbit.coeff_table,
                     dc_of,
                     pixel_count,
-                    self.max_iterations,
+                    self.kernel_budget(),
                     self.exponent,
                     self.escape_radius_squared,
                     &mut results,
                 );
+                for result in results.iter_mut() {
+                    *result = self.report(*result);
+                }
             }
             return results;
         }
@@ -1837,14 +1887,14 @@ impl PerturbedFrame {
 
     /// Escape iterations and final value for the pixel at (column, row).
     pub fn escape_iterations(&self, column: usize, row: usize) -> (u32, Complex64) {
-        if self.use_float_exp {
+        let result = if self.use_float_exp {
             let re_offset = self.first_column_offset + self.column_step * column as f64;
             let im_offset = self.first_row_offset + self.row_step * row as f64;
             let dc = ComplexExp::new(re_offset, im_offset, -self.zoom_offset);
             perturbed_escape_iterations_float_exp(
                 &self.orbit.values,
                 dc,
-                self.max_iterations,
+                self.kernel_budget(),
                 self.exponent,
                 self.escape_radius_squared,
             )
@@ -1853,11 +1903,12 @@ impl PerturbedFrame {
             perturbed_escape_iterations_f64(
                 &self.orbit.values,
                 dc,
-                self.max_iterations,
+                self.kernel_budget(),
                 self.exponent,
                 self.escape_radius_squared,
             )
-        }
+        };
+        self.report(result)
     }
 
     /// Escape iterations for two pixels sharing one call, batched into SIMD
@@ -1877,13 +1928,13 @@ impl PerturbedFrame {
 
         let dc_first = self.pixel_dc_f64(first.0, first.1);
         let dc_second = self.pixel_dc_f64(second.0, second.1);
-        if self.exponent == 2 {
+        let pair = if self.exponent == 2 {
             perturbed_escape_iterations_f64_pair::<false>(
                 &self.orbit.values,
                 &self.orbit.coeff_table,
                 dc_first,
                 dc_second,
-                self.max_iterations,
+                self.kernel_budget(),
                 self.exponent,
                 self.escape_radius_squared,
             )
@@ -1893,11 +1944,12 @@ impl PerturbedFrame {
                 &self.orbit.coeff_table,
                 dc_first,
                 dc_second,
-                self.max_iterations,
+                self.kernel_budget(),
                 self.exponent,
                 self.escape_radius_squared,
             )
-        }
+        };
+        pair.map(|result| self.report(result))
     }
 
     #[cfg(not(target_arch = "wasm32"))]

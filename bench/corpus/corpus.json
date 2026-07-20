@@ -1204,6 +1204,32 @@
         "iterSum": 2222301,
         "valuesHash": "7c52f2cc"
       }
+    },
+    {
+      "id": "syn-z96-orbitclamp-minibrot",
+      "source": "synthetic",
+      "re": "-0.743643887037158529124262633840590589474343670625260499495284935007669060714154485652591430661801",
+      "im": "0.131825904205312534027373980876551122510476781672307528630636070697923286940995281450093585415491",
+      "zoom": 96,
+      "iterations": 50002400,
+      "tileSize": 64,
+      "note": "perturbation-f64/orbit-clamp regime: period-71856 minibrot (true cardioid half-width ~2e-29) at a budget past MAX_ORBIT_LENGTH. Guards the 2026-07-20 orbit-budget-clamp ship: pixels alive at the orbit length classify as interior (pre-clamp kernels reported corrupted post-wrap counts; see orbit_clamp_post_wrap_trust_probe), border_in_set/Mariani shortcuts re-engage. Hand-added; exact ground truth in perturbation_test.rs orbit_clamp_deep_minibrot_interior.",
+      "pinned": true,
+      "stats": {
+        "generator": "enrich-v1",
+        "date": "2026-07-20",
+        "sha": "49a9b0de",
+        "probeSize": 64,
+        "interior": 0.196,
+        "nearMax50": 0,
+        "nearMax90": 0,
+        "escMean": 493413,
+        "escP50": 458155.1,
+        "escP90": 658758.2,
+        "escP99": 919002.9,
+        "iterSum": 41776736063,
+        "valuesHash": "b8ec7dec"
+      }
     }
   ]
 }

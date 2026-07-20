@@ -2540,3 +2540,97 @@ kernel flips between the old rule (zoom >= 47) and the new spacing rule —
 none remain after the z46 → z45 nudge, and the kernels themselves are
 untouched, so all gated outputs are bit-identical to the pinned anchor
 (3517e56, 2026-07-10). The anchor stays valid; no re-pin.
+
+## 2026-07-20 — SHIPPED: orbit budget clamp (iteration budgets past MAX_ORBIT_LENGTH)
+
+Machine: mac arm64 (M-series), Chrome for Testing, macOS 14.
+Baseline: 49a9b0d (rebuilt via `build.mjs baseline --ref` from a worktree).
+
+**Problem (user report, 2026-07-19):** a 3e23-magnification view at a 50M
+iteration budget rendered a minibrot's interior as a flat indigo disc. Root
+cause proven with exact 320-bit arithmetic against a period-71,856 minibrot
+(nucleus committed in perturbation_test.rs): once a pixel outlives the
+stored reference orbit (MAX_ORBIT_LENGTH = 1M), the forced end-of-orbit
+rebase (`dz = z`) desynchronizes the delta from the reference phase; at the
+pixel's next close return the `z = Z + dz` reconstruction cancels
+catastrophically and the ~1e-16 rounding of the stored orbit values is
+amplified until the pixel spuriously escapes. Measured
+(`orbit_clamp_post_wrap_trust_probe`): every pixel whose exact escape count
+exceeds the orbit length collapses onto ONE corrupted trajectory and
+reports the same bogus finite count (1,039,019 at this view), whether exact
+says 1.2M, 9M, or interior-forever. Post-wrap counts carry zero
+information. Pre-wrap counts match exact (or deviate by rounding-class
+near the boundary: 407,860 vs 407,831 at one probed point).
+
+**Change (mandelbrot/src/perturbation.rs):** `PerturbedFrame::kernel_budget()`
+clamps the kernel-visible budget to `min(max_iterations, MAX_ORBIT_LENGTH)`
+at every perturbation call site (all exponents, pf64 and float-exp tiers);
+`report()` maps clamped survivors back to the caller's `max_iterations`
+("did not escape within budget" — standard cap semantics), so they classify
+and color as interior. No pixel ever reaches the corrupting wrap, and
+`border_in_set` / Mariani ring fills re-engage on deep high-budget tiles
+(pre-clamp, corrupted finite border counts blocked both). Identity for
+every budget <= 1M — i.e. all previously-trustworthy traffic. No kernel or
+SIMD code touched.
+
+**Interior detection re-refuted (do not re-ship without an oracle):** the
+first implementation attempt was attracting-cycle (multiplier) detection
+for clamped survivors. The 2026-07-08 settled negative holds at wrap depths
+via a new failure path, proven by exact arithmetic
+(`orbit_clamp_ground_truth_probe`, kept as an ignored probe): near an
+embedded minibrot every orbit shadows its host island's corridor (here
+period 998), and an approximate-return hunt at delta=1e-9 fires there with
+a one-period multiplier of 0.709 < 0.8 for exterior dust that provably
+escapes at ~170k-300k — false retire, flip-class. A stride-4 hunt cadence
+merely hides corridors with period % 4 != 0 while also hiding true periods
+% 4 != 0. Single-period contraction is not evidence of an attracting cycle;
+corridors contract transiently for many periods.
+
+**Numbers:**
+- New pinned corpus case syn-z96-orbitclamp-minibrot (interior-rich deep
+  minibrot, 50M budget, tileSize 64; 20% interior, escMean 493k): warm
+  67.3 s -> 56.6 s (−15.9%*), cold 124.6 s -> 105.8 s (−15.1%). The delta
+  equals the eliminated corrupted-iteration work; this minibrot's
+  corruption escapes early (~1.04M), so the win is bounded by the view's
+  genuine sub-1M dust (~44 s, unchanged, cache-bound at ~27 ns/iter
+  against the 16 MiB orbit table — a separate future target). Views whose
+  corruption escapes late (the user's 3e23 report showed fake counts of
+  20-40M) save proportionally more.
+- Fixed corpus: all 43 pre-existing cases byte-identical (pixel-check);
+  timing sweep (samples 3) direct +0.3%, pf64 −0.5%, float-exp −0.2% — all
+  noise.
+- e2e (real client builds, standard grid-regression suite): overall
+  geomean −0.2%; every case within noise warm and cold. No committed e2e
+  grid case: at real 200 px tiles ANY wrap-regime view costs minutes per
+  tile on pre-clamp builds (a single tile exceeds puppeteer's 180 s
+  protocol ceiling — measured twice), and interior tiles at the clamped
+  1M budget still cost ~27 s each post-clamp, so a permanent grid case
+  would burden every future experiment. Durable guards: the pinned wasm
+  corpus case + cargo test regression
+  (`orbit_clamp_deep_minibrot_interior`).
+- Holdout (seed 2026-07-20): output 80/80 byte-identical; timing direct
+  −0.1%, pf64 +0.0%, overall −0.1%.
+- Production wasm: fast lane 401.0 -> 400.0 KiB, fallback 398.9 -> 397.9
+  KiB (−1.0 KiB each).
+- New case blessed from the post-clamp build (its output change vs
+  baseline — 8,003/40,000 probe pixels — is the fix itself: corrupted
+  noise reclassified as interior).
+
+**Semantics note:** at perturbation depths the effective iteration budget
+now saturates at 1M. Raising the iterations control beyond that changes
+nothing at depth (previously it produced garbage and burned minutes); the
+direct (f64) tier is unaffected. Lifting the 1M wall for real would need
+exact orbit continuation (epoch recomputation, ~19 s of bigfloat per 1M
+iterations per view per worker) or higher-precision deltas — both
+traffic-gated; no real view in the export uses budgets near 1M. The
+palette auto-fit needed no change: TileCache.percentileClip already
+handles legitimate heavy tails, and the flat-palette symptom was purely
+the corrupted counts flooding the escaped histogram.
+
+**Harness observation (not this change):** user-z30-f8a50601's enrich
+hash flipped between two same-day probe runs of byte-identical builds
+(693532ad vs 6f67e811) — the direct-tier e6 multibrot on the relaxed-SIMD
+fast lane. Suspected Liftoff-vs-TurboFan lowering difference of relaxed
+FMA making the blessed hash tier-up-timing-dependent. Not re-blessed here
+(this ship's pixel-check shows the case byte-identical baseline vs post
+within each run); worth a dedicated look if it recurs.

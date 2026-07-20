@@ -1028,3 +1028,310 @@ fn deep_zoom_image_is_not_degenerate() {
     }
     assert!(colors.len() > 1, "deep zoom image is a single flat color");
 }
+
+// ---------------------------------------------------------------------------
+// Orbit budget clamp (2026-07-20): at budgets past MAX_ORBIT_LENGTH the
+// kernels stop — post-wrap results are provably noise. The probes below are
+// the evidence; the regression test pins the shipped semantics.
+// ---------------------------------------------------------------------------
+
+/// Nucleus of a period-71,856 minibrot (size estimate ~1.3e-26, true
+/// cardioid half-width ~2e-29) in the seahorse valley, found by Newton's
+/// method. Verified interior against exact 320-bit arithmetic on 2026-07-19:
+/// the plain f64 kernel under a 50M budget reported escape at iteration
+/// 1,039,019 while the exact orbit's |z|^2 never exceeded 1.06.
+const CLAMP_NUCLEUS_RE: &str = "-0.743643887037158529124262633840590589474343670625260499495284935007669060714154485652591430661801";
+const CLAMP_NUCLEUS_IM: &str = "0.131825904205312534027373980876551122510476781672307528630636070697923286940995281450093585415491";
+
+/// Frame centered on the nucleus at zoom 88, sized so the pixel grid lands
+/// exactly on the nucleus: with 101 pixels per side the tile-space offsets
+/// make pixel (44, 44) have dc == 0 (asserted in the test, not assumed).
+fn clamp_probe_frame(max_iterations: u32) -> PerturbedFrame {
+    let zoom = 88;
+    let zoom_offset = (zoom - 12).max(0) as u32;
+    let tile_zoom = zoom - zoom_offset as i32;
+    let v = (0.64 * f64::powi(2.0, tile_zoom)).floor();
+    PerturbedFrame::new(
+        CLAMP_NUCLEUS_RE,
+        CLAMP_NUCLEUS_IM,
+        v,
+        v + 1.0,
+        v,
+        v + 1.0,
+        tile_zoom,
+        zoom_offset,
+        101,
+        101,
+        max_iterations,
+        2,
+        3.0,
+    )
+    .unwrap()
+}
+
+#[test]
+fn orbit_clamp_deep_minibrot_interior() {
+    let max_iterations = 50_002_400;
+    let frame = clamp_probe_frame(max_iterations);
+    assert!(frame.kernel_budget() < max_iterations, "clamp must engage");
+    assert_eq!(frame.kernel_budget(), MAX_ORBIT_LENGTH as u32);
+
+    // Locate the pixel whose delta is exactly the nucleus.
+    let column = (-frame.first_column_offset / frame.column_step).round() as usize;
+    let row = (-frame.first_row_offset / frame.row_step).round() as usize;
+    let dc = frame.pixel_dc_f64(column, row);
+    assert!(
+        dc.norm_sqr() < 1e-60,
+        "expected a pixel on the nucleus, got dc {dc:?} at ({column}, {row})"
+    );
+
+    // The superstable nucleus is provably interior at any budget: its exact
+    // orbit returns to 0 every 71,856 iterations forever. Under the clamp it
+    // survives the kernel budget and must report the caller's budget.
+    let (iterations, _) = frame.escape_iterations(column, row);
+    assert_eq!(
+        iterations, max_iterations,
+        "nucleus pixel must classify interior under the orbit budget clamp"
+    );
+
+    // Document the failure mode the clamp exists for: driven past the stored
+    // orbit, the plain kernel corrupts the delta at the end-of-orbit rebase
+    // and reports a spurious finite escape shortly after the wrap. If this
+    // ever classifies interior instead (e.g. higher-precision deltas), the
+    // clamp deserves re-evaluation.
+    let (unclamped_iterations, _) = perturbed_escape_iterations_f64(
+        &frame.orbit.values,
+        dc,
+        max_iterations,
+        2,
+        frame.escape_radius_squared,
+    );
+    assert!(
+        unclamped_iterations > MAX_ORBIT_LENGTH as u32 && unclamped_iterations < max_iterations,
+        "expected the unclamped kernel's spurious post-wrap escape, got {unclamped_iterations}"
+    );
+
+    // Pixels that resolve within the orbit are untouched by the clamp:
+    // border pixels report exactly what the unclamped kernel reports.
+    for (column, row) in [(0, 0), (100, 0), (0, 100), (100, 100), (50, 0), (0, 50)] {
+        let dc = frame.pixel_dc_f64(column, row);
+        let reported = frame.escape_iterations(column, row);
+        let unclamped = perturbed_escape_iterations_f64(
+            &frame.orbit.values,
+            dc,
+            max_iterations,
+            2,
+            frame.escape_radius_squared,
+        );
+        assert!(
+            reported.0 < MAX_ORBIT_LENGTH as u32,
+            "border pixel ({column}, {row}) unexpectedly slow: {} iterations",
+            reported.0
+        );
+        assert_eq!(
+            reported, unclamped,
+            "clamp changed a sub-orbit-length result at ({column}, {row})"
+        );
+    }
+}
+
+/// Post-wrap counts carry no information — the evidence for the clamp.
+/// Exact 320-bit iteration vs the unclamped kernel near the component
+/// boundary (dc = numerator * 2^-100, exact in f64 and bigfloat): every
+/// pixel whose exact count exceeds the orbit length collapses onto one
+/// corrupted trajectory and reports the same bogus finite count (1,039,019
+/// at this precision), whether its true count is 1.2M, 9M, or
+/// interior-forever. Pre-wrap counts match exact (or deviate by
+/// rounding-class amounts near the boundary).
+///
+/// 2026-07-20 output:
+///   t 0.50000: exact  329509            unclamped  329509
+///   t 0.25000: exact  407860            unclamped  407831
+///   t 0.12500: exact  647799            unclamped  647799
+///   t 0.06250: exact 9002400 (interior) unclamped 1039019
+///   t 0.09375: exact 1146721            unclamped 1039019
+///   t 0.08984: exact 1218597            unclamped 1039019
+///   t 0.09766: exact 1325406            unclamped 1039019
+#[test]
+#[ignore = "oracle probe (minutes of bigfloat work), not a correctness test"]
+fn orbit_clamp_post_wrap_trust_probe() {
+    let cap = 9_002_400u32;
+    let frame = clamp_probe_frame(cap);
+    let nucleus_re = parse_decimal(CLAMP_NUCLEUS_RE, 320).unwrap();
+    let nucleus_im = parse_decimal(CLAMP_NUCLEUS_IM, 320).unwrap();
+
+    let probe = |numerator: i64| {
+        let dc = Complex64::new(numerator as f64 * f64::powi(2.0, -100), 0.0);
+        let offset = BigFloat::from_parts(IBig::from(numerator), -100)
+            .with_precision(320)
+            .value();
+        let c_re = &nucleus_re + offset;
+        let exact = direct_escape_iterations_big(&c_re, &nucleus_im, cap);
+        let unclamped = perturbed_escape_iterations_f64(
+            &frame.orbit.values,
+            dc,
+            cap,
+            2,
+            frame.escape_radius_squared,
+        );
+        println!(
+            "t {:>8.5}: exact {exact:>9}{}  unclamped {:>9}{}",
+            numerator as f64 / 256.0,
+            if exact >= cap { " (interior)" } else { "" },
+            unclamped.0,
+            if unclamped.0 >= cap {
+                " (interior)"
+            } else {
+                ""
+            },
+        );
+        (exact, unclamped.0)
+    };
+
+    let mut in_band = false;
+    let (mut lo, mut hi) = (0i64, 256i64);
+    for _ in 0..12 {
+        let mid = (lo + hi) / 2;
+        let (exact, unclamped) = probe(mid);
+        if (exact as usize) > MAX_ORBIT_LENGTH && exact < cap {
+            in_band = true;
+            assert_ne!(
+                exact, unclamped,
+                "post-wrap kernel count unexpectedly matches exact; \
+                 re-evaluate the clamp (see kernel_budget docs)"
+            );
+            probe(mid - 1);
+            probe(mid + 1);
+            break;
+        }
+        if exact >= cap {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+        if hi - lo <= 1 {
+            break;
+        }
+    }
+    assert!(in_band, "bisection never landed in the 1M..cap band");
+}
+
+/// Attracting-cycle (multiplier) interior detection, re-probed at wrap
+/// depths and re-refuted — the 2026-07-08 settled negative holds here too,
+/// via a different failure path: embedded-island corridors. Near this
+/// minibrot every orbit shadows its period-998 host island; an
+/// approximate-return hunt (|z - saved_z| < 1e-9, checked every iteration)
+/// fires at q=998 with a one-period multiplier of |m| ~ 0.709 < 0.8 for
+/// exterior dust that exact arithmetic proves escapes at ~170k-300k.
+/// A stride-4 hunt cadence merely hides the corridor (998 % 4 != 0) while
+/// also hiding true periods not divisible by 4. Single-period contraction
+/// estimates are not evidence of an attracting cycle; corridors can
+/// contract transiently for many periods. Do not re-ship detection without
+/// an oracle-class verification step.
+///
+/// 2026-07-20 output (dc = k * 2^-92, exact escape counts on the right):
+///   k  0: exact interior  detector retired (correct, by luck)
+///   k  1: exact   298526  detector retired (FALSE, q=998 |m|=0.709)
+///   k  2: exact   248674  detector retired (FALSE)   ... etc for all k
+#[test]
+#[ignore = "oracle probe documenting the refuted detector, not a correctness test"]
+fn orbit_clamp_ground_truth_probe() {
+    const RETURN_DISTANCE_SQ: f64 = 1e-18;
+    const MULTIPLIER_MARGIN_SQ: f64 = 0.64;
+
+    let cap = 5_002_400u32;
+    let frame = clamp_probe_frame(cap);
+    let nucleus_re = parse_decimal(CLAMP_NUCLEUS_RE, 320).unwrap();
+    let nucleus_im = parse_decimal(CLAMP_NUCLEUS_IM, 320).unwrap();
+    let orbit = &frame.orbit.values;
+
+    // The refuted detector, inlined: unclamped loop + every-iteration
+    // approximate-return hunt + one-period multiplier acceptance.
+    let detect = |dc: Complex64| -> (u32, bool, Option<(u32, f64)>) {
+        let last_index = orbit.len() - 1;
+        let mut reference_index: usize = 0;
+        let mut dz = Complex64::new(0.0, 0.0);
+        let mut z = Complex64::new(0.0, 0.0);
+        let mut wrapped = false;
+
+        let advance = |reference_index: &mut usize,
+                       dz: &mut Complex64,
+                       z: &mut Complex64,
+                       wrapped: &mut bool| {
+            let z_ref = orbit[*reference_index];
+            *dz = delta_step_f64(Complex64::new(z_ref.0, z_ref.1), *dz, 2) + dc;
+            *reference_index += 1;
+            let z_ref_next = orbit[*reference_index];
+            *z = Complex64::new(z_ref_next.0 + dz.re, z_ref_next.1 + dz.im);
+            if *reference_index == last_index || z.norm_sqr() < dz.norm_sqr() {
+                if *reference_index == last_index {
+                    *wrapped = true;
+                }
+                *dz = *z;
+                *reference_index = 0;
+            }
+        };
+
+        advance(&mut reference_index, &mut dz, &mut z, &mut wrapped);
+        let mut saved_z = z;
+        let mut saved_iteration = 0u32;
+        let mut next_save = PERIODICITY_FIRST_SAVE;
+        let mut phase_left = 0u32;
+        let mut candidate_q = 0u32;
+        let mut multiplier = Complex64::new(1.0, 0.0);
+
+        let mut iterations = 0;
+        while z.norm_sqr() < frame.escape_radius_squared && iterations < cap {
+            advance(&mut reference_index, &mut dz, &mut z, &mut wrapped);
+            iterations += 1;
+
+            if phase_left > 0 && !wrapped {
+                multiplier *= z * 2.0;
+                phase_left -= 1;
+                if phase_left == 0 {
+                    let m = multiplier.norm_sqr();
+                    if m.is_finite() && m < MULTIPLIER_MARGIN_SQ {
+                        return (cap, true, Some((candidate_q, m.sqrt())));
+                    }
+                }
+            } else if !wrapped && iterations > saved_iteration {
+                let d = (z - saved_z).norm_sqr();
+                if d < RETURN_DISTANCE_SQ {
+                    candidate_q = iterations - saved_iteration;
+                    phase_left = candidate_q;
+                    multiplier = Complex64::new(1.0, 0.0);
+                }
+            }
+            if iterations % PERIODICITY_CHECK_STRIDE == 0 && iterations == next_save {
+                saved_z = z;
+                saved_iteration = iterations;
+                next_save = next_save.saturating_mul(2);
+            }
+        }
+        (iterations, false, None)
+    };
+
+    let mut false_retires = 0usize;
+    for k in [0i64, 1, 2, 4, 8, 16, 32, 56] {
+        let dc = Complex64::new(k as f64 * f64::powi(2.0, -92), 0.0);
+        let offset = BigFloat::from_parts(IBig::from(k), -92)
+            .with_precision(320)
+            .value();
+        let c_re = &nucleus_re + offset;
+        let exact = direct_escape_iterations_big(&c_re, &nucleus_im, cap);
+        let (iterations, retired, evidence) = detect(dc);
+        let falsely = retired && exact < cap;
+        false_retires += falsely as usize;
+        println!(
+            "k {k:3}: exact {exact:>9}{}  detector {iterations:>9}{}{}  {evidence:?}",
+            if exact >= cap { " (interior)" } else { "" },
+            if retired { " (retired)" } else { "" },
+            if falsely { " FALSE" } else { "" },
+        );
+    }
+    assert!(
+        false_retires > 0,
+        "detector no longer false-retires here; if deliberately re-shipping \
+         detection, pair it with an oracle-class verification step"
+    );
+}
