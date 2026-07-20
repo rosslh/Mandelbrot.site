@@ -403,6 +403,59 @@
           </div>
         </div>
       </details>
+      <details class="mobile-hidden" id="juliaSet">
+        <summary>
+          <span>Navigator</span>
+        </summary>
+        <div class="details-content">
+          <div class="input-wrapper">
+            <select
+              id="juliaPanelMode"
+              name="juliaPanelMode"
+              aria-label="Navigator view"
+              class="full-width"
+            >
+              <option value="julia">Julia set</option>
+              <option value="minimap">Minimap</option>
+            </select>
+          </div>
+          <p class="secondary" id="juliaSetHint">
+            The Julia set for the point under the cursor.
+          </p>
+          <div id="juliaSetThumbnail">
+            <canvas
+              id="juliaSetCanvas"
+              aria-label="Julia set for the point under the cursor"
+            ></canvas>
+          </div>
+          <p class="secondary" id="juliaSetCoordinates"></p>
+        </div>
+      </details>
+      <details class="mobile-hidden" id="pinnedLocations">
+        <summary>
+          <span>Pinned locations</span>
+        </summary>
+        <div class="details-content">
+          <p class="secondary" id="pinnedLocationsEmpty">
+            Pin the current view with the share button
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="1em"
+              height="1em"
+              viewBox="0 0 16 16"
+              aria-hidden="true"
+            >
+              <path
+                fill="currentColor"
+                d="m12.596 11.596l-3.535 3.536a1.5 1.5 0 0 1-2.122 0l-3.535-3.536a6.5 6.5 0 1 1 9.192-9.193a6.5 6.5 0 0 1 0 9.193m-1.06-8.132a5 5 0 1 0-7.072 7.072L8 14.07l3.536-3.534a5 5 0 0 0 0-7.072M8 9a2 2 0 1 1-.001-3.999A2 2 0 0 1 8 9"
+              />
+            </svg>
+            to save it here.
+          </p>
+          <ul id="pinnedLocationsList"></ul>
+        </div>
+      </details>
+
       <details class="mobile-hidden" id="coordinates">
         <summary>
           <span>Coordinates</span>
@@ -435,59 +488,6 @@
             />
           </div>
           <p class="secondary" id="zoomScaleCaption" hidden></p>
-        </div>
-      </details>
-      <details class="mobile-hidden" id="pinnedLocations">
-        <summary>
-          <span>Pinned locations</span>
-        </summary>
-        <div class="details-content">
-          <p class="secondary" id="pinnedLocationsEmpty">
-            Pin the current view with the share button
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="1em"
-              height="1em"
-              viewBox="0 0 16 16"
-              aria-hidden="true"
-            >
-              <path
-                fill="currentColor"
-                d="m12.596 11.596l-3.535 3.536a1.5 1.5 0 0 1-2.122 0l-3.535-3.536a6.5 6.5 0 1 1 9.192-9.193a6.5 6.5 0 0 1 0 9.193m-1.06-8.132a5 5 0 1 0-7.072 7.072L8 14.07l3.536-3.534a5 5 0 0 0 0-7.072M8 9a2 2 0 1 1-.001-3.999A2 2 0 0 1 8 9"
-              />
-            </svg>
-            to save it here.
-          </p>
-          <ul id="pinnedLocationsList"></ul>
-        </div>
-      </details>
-
-      <details class="mobile-hidden" id="juliaSet">
-        <summary>
-          <span>Navigator</span>
-        </summary>
-        <div class="details-content">
-          <div class="input-wrapper">
-            <select
-              id="juliaPanelMode"
-              name="juliaPanelMode"
-              aria-label="Navigator view"
-              class="full-width"
-            >
-              <option value="julia">Julia set</option>
-              <option value="minimap">Minimap</option>
-            </select>
-          </div>
-          <p class="secondary" id="juliaSetHint">
-            The Julia set for the point under the cursor.
-          </p>
-          <div id="juliaSetThumbnail">
-            <canvas
-              id="juliaSetCanvas"
-              aria-label="Julia set for the point under the cursor"
-            ></canvas>
-          </div>
-          <p class="secondary" id="juliaSetCoordinates"></p>
         </div>
       </details>
 
