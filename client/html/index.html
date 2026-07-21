@@ -282,14 +282,17 @@
           </div>
         </div>
       </details>
+      <!-- The details id keeps its historical paletteRange name: the
+           open/closed persistence is keyed by it, and the section's range
+           controls still live here. -->
       <details class="mobile-hidden" id="paletteRange">
         <summary>
-          <span>Palette range</span>
+          <span>Color mapping</span>
           <button
             type="button"
             class="reset-button"
             id="resetPaletteRange"
-            title="Reset palette range"
+            title="Reset color mapping"
           >
             ↺
           </button>
@@ -298,12 +301,9 @@
           <div class="input-wrapper">
             <label
               for="histogramColoring"
-              title="How colors are distributed across the palette range. Linear (left): colors are spread evenly across the iteration range. Histogram (right): each color covers a similar share of the visible pixels — the classic histogram coloring, like Equalize in image editors. In-between positions blend the two."
-              class="label-with-subtitle"
+              title="How strongly colors are equalized to the view: at zero, colors spread evenly across the iteration range (the classic linear mapping); at full, each color covers a similar share of the visible pixels — histogram coloring, like Equalize in image editors. In-between positions blend the two."
+              >Histogram coloring</label
             >
-              <span>Color mapping</span>
-              <span class="secondary">Linear&nbsp;&ndash;&nbsp;histogram</span>
-            </label>
             <input
               type="range"
               id="histogramColoring"
@@ -321,7 +321,11 @@
               name="paletteAutoAdjust"
               checked
             />
-            <label for="paletteAutoAdjust">Auto-adjust</label>
+            <label
+              for="paletteAutoAdjust"
+              title="Fit the palette range to the escape times visible in the current view as you pan and zoom. Dragging the histogram markers sets the range by hand and turns this off."
+              >Auto-fit range</label
+            >
           </div>
           <div id="paletteHistogram">
             <p id="paletteHistogramEmpty" class="secondary" hidden></p>
