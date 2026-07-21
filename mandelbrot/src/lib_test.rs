@@ -737,6 +737,7 @@ mod lib_test {
             palette_start,
             palette_end,
             None,
+            0.0,
         );
 
         assert_eq!(
@@ -817,6 +818,7 @@ mod lib_test {
             0.0,
             crate::ValidColorSpace::Hsl,
             1,
+            0.0,
         );
 
         assert_eq!(
@@ -988,6 +990,7 @@ mod lib_test {
             0.0,
             crate::ValidColorSpace::Hsl,
             1,
+            0.0,
         );
 
         assert_eq!(
@@ -1084,6 +1087,7 @@ mod lib_test {
             200,
             1,
             None,
+            0.0,
         );
 
         assert_eq!(
@@ -1152,6 +1156,7 @@ mod lib_test {
             150,
             1,
             None,
+            0.0,
         );
 
         for row in 0..size {
@@ -1801,23 +1806,109 @@ mod lib_test {
     #[test]
     fn test_apply_color_cycles() {
         // One cycle is the identity, cyclic or not
-        assert_eq!(super::apply_color_cycles(0.75, 1, false), 0.75);
-        assert_eq!(super::apply_color_cycles(0.75, 1, true), 0.75);
+        assert_eq!(super::apply_color_cycles(0.75, 1, false, 0.0), 0.75);
+        assert_eq!(super::apply_color_cycles(0.75, 1, true, 0.0), 0.75);
 
         // Cyclic palettes wrap: 3 cycles tile [0,1) three times
-        assert_eq!(super::apply_color_cycles(0.0, 3, true), 0.0);
-        assert!((super::apply_color_cycles(0.5, 3, true) - 0.5).abs() < 1e-12);
-        assert!((super::apply_color_cycles(0.4, 3, true) - 0.2).abs() < 1e-12);
+        assert_eq!(super::apply_color_cycles(0.0, 3, true, 0.0), 0.0);
+        assert!((super::apply_color_cycles(0.5, 3, true, 0.0) - 0.5).abs() < 1e-12);
+        assert!((super::apply_color_cycles(0.4, 3, true, 0.0) - 0.2).abs() < 1e-12);
         // The top of the range lands back on the (identical) start color
-        assert_eq!(super::apply_color_cycles(1.0, 3, true), 0.0);
+        assert_eq!(super::apply_color_cycles(1.0, 3, true, 0.0), 0.0);
 
         // Non-cyclic palettes boomerang: the second pass runs backward
-        assert_eq!(super::apply_color_cycles(0.25, 2, false), 0.5);
-        assert_eq!(super::apply_color_cycles(0.5, 2, false), 1.0);
-        assert_eq!(super::apply_color_cycles(0.75, 2, false), 0.5);
-        assert_eq!(super::apply_color_cycles(1.0, 2, false), 0.0);
+        assert_eq!(super::apply_color_cycles(0.25, 2, false, 0.0), 0.5);
+        assert_eq!(super::apply_color_cycles(0.5, 2, false, 0.0), 1.0);
+        assert_eq!(super::apply_color_cycles(0.75, 2, false, 0.0), 0.5);
+        assert_eq!(super::apply_color_cycles(1.0, 2, false, 0.0), 0.0);
         // Odd cycle counts end on the palette's far end
-        assert_eq!(super::apply_color_cycles(1.0, 3, false), 1.0);
+        assert_eq!(super::apply_color_cycles(1.0, 3, false, 0.0), 1.0);
+    }
+
+    #[test]
+    fn test_apply_color_cycles_palette_offset() {
+        // Cyclic palettes rotate seamlessly at any cycle count.
+        assert!((super::apply_color_cycles(0.5, 1, true, 0.25) - 0.75).abs() < 1e-12);
+        assert!((super::apply_color_cycles(0.9, 1, true, 0.25) - 0.15).abs() < 1e-12);
+
+        // With two or more cycles a non-cyclical palette phase-shifts: the
+        // band pattern glides. Two cycles at offset 0.25: the triangle wave
+        // T(2·norm + 0.25).
+        assert!((super::apply_color_cycles(0.0, 2, false, 0.25) - 0.25).abs() < 1e-12);
+        assert!((super::apply_color_cycles(0.375, 2, false, 0.25) - 1.0).abs() < 1e-12);
+        assert!((super::apply_color_cycles(0.875, 2, false, 0.25) - 0.0).abs() < 1e-12);
+        assert!((super::apply_color_cycles(1.0, 2, false, 0.25) - 0.25).abs() < 1e-12);
+
+        // Seamless: in the phase regime no two nearby positions may land on
+        // opposite palette ends, at any offset and any cycle count >= 2 —
+        // even and odd alike.
+        for &cycles in &[2u32, 3, 4, 7] {
+            for &offset in &[0.1, 0.5, 0.9, 1.0] {
+                let mut previous = super::apply_color_cycles(0.0, cycles, false, offset);
+                for step in 1..=2000 {
+                    let norm = f64::from(step) / 2000.0;
+                    let mapped = super::apply_color_cycles(norm, cycles, false, offset);
+                    // The steepest slope is the cycle count; allow slack
+                    // over one step.
+                    assert!(
+                        (mapped - previous).abs() <= f64::from(cycles) / 2000.0 + 1e-9,
+                        "jump at norm {norm} (cycles {cycles}, offset {offset})"
+                    );
+                    previous = mapped;
+                }
+            }
+        }
+
+        // A single pass rotates instead: an honest seam where the palette's
+        // ends meet, with full coverage on both sides of it.
+        assert!((super::apply_color_cycles(0.25, 1, false, 0.5) - 0.75).abs() < 1e-12);
+        assert!((super::apply_color_cycles(0.75, 1, false, 0.5) - 0.25).abs() < 1e-12);
+        let epsilon = 1e-6;
+        for &offset in &[0.1, 0.5, 0.9] {
+            let seam = 1.0 - offset;
+            let below = super::apply_color_cycles(seam - epsilon, 1, false, offset);
+            let above = super::apply_color_cycles(seam + epsilon, 1, false, offset);
+            assert!(below > 1.0 - 1e-5, "below the seam maps to the palette end");
+            assert!(above < 1e-5, "above the seam wraps to the palette start");
+        }
+    }
+
+    #[test]
+    fn test_palette_offset_wraps_and_keeps_coverage() {
+        // Rotation is periodic: a full turn is the identity byte-for-byte
+        // (effective_palette_offset wraps 1.0 to 0), with no degenerate
+        // behavior at the window clamps or the interior sentinel.
+        let values: Vec<f32> = vec![0.0, 10.0, 50.0, 120.5, 199.0, 200.0, 250.0, f32::INFINITY];
+        let mut full_turn = coloring_options("inferno", 10, 200);
+        full_turn.palette_offset = 1.0;
+        assert_eq!(
+            super::recolor_values(&values, &full_turn),
+            super::recolor_values(&values, &coloring_options("inferno", 10, 200)),
+        );
+
+        // A partial rotation genuinely moves the colors off the unshifted
+        // output...
+        let mut partial = coloring_options("inferno", 10, 200);
+        partial.palette_offset = 0.25;
+        assert_ne!(
+            super::recolor_values(&values, &partial),
+            super::recolor_values(&values, &coloring_options("inferno", 10, 200)),
+        );
+
+        // ...without truncating the palette: values just below the seam get
+        // the colors the unshifted mapping paints at the window's top, and
+        // values just above it get the unshifted window-bottom colors. Every
+        // color stays in use; it has merely moved.
+        let plain = coloring_options("inferno", 0, 100);
+        let mut rotated = coloring_options("inferno", 0, 100);
+        rotated.palette_offset = 0.3;
+        // The seam sits where norm + 0.3 crosses 1, i.e. at value 70.
+        let probe = |options: &super::ColoringOptions, value: f32| {
+            let img = super::recolor_values(&[value], options);
+            [img[0], img[1], img[2]]
+        };
+        assert_eq!(probe(&rotated, 69.9), probe(&plain, 99.9));
+        assert_eq!(probe(&rotated, 70.1), probe(&plain, 0.1));
     }
 
     #[test]
@@ -1893,6 +1984,7 @@ mod lib_test {
                 0.0,
                 100.0,
                 table,
+                0.0,
             )
         };
 
@@ -2509,8 +2601,9 @@ mod lib_test {
 
     /// Default-orientation coloring settings (no transforms, Hsl space),
     /// matching what the recolor tests previously passed positionally.
-    /// `palette_cdf` stays `None` (the linear mapping); tests exercising
-    /// histogram equalization set it on the returned value.
+    /// `palette_cdf` stays `None` (the linear mapping) and `palette_offset`
+    /// 0 (unshifted); tests exercising histogram equalization or the offset
+    /// set them on the returned value.
     fn coloring_options(
         scheme: &str,
         palette_min: i32,
@@ -2529,6 +2622,7 @@ mod lib_test {
             distance_estimate: false,
             atom_domain: false,
             palette_cdf: None,
+            palette_offset: 0.0,
         }
     }
 
@@ -2723,6 +2817,7 @@ mod lib_test {
                 as_i32(max_iterations),
                 1,
                 table,
+                0.0,
             )
         };
 

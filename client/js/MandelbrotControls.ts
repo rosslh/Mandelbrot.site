@@ -102,6 +102,7 @@ class MandelbrotControls {
         configKeys: [
           "colorScheme",
           "colorCycles",
+          "paletteOffset",
           "reverseColors",
           "smoothColoring",
         ],

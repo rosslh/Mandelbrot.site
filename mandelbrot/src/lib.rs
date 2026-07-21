@@ -307,7 +307,10 @@ static COLOR_PALETTES: Lazy<HashMap<String, Palette>> = Lazy::new(|| {
     map.insert("brownGreen".to_string(), Original(colorous::BROWN_GREEN));
     map.insert("cool".to_string(), Original(colorous::COOL));
     map.insert("purpleGreen".to_string(), Original(colorous::PURPLE_GREEN));
-    map.insert("purpleOrange".to_string(), Original(colorous::PURPLE_ORANGE));
+    map.insert(
+        "purpleOrange".to_string(),
+        Original(colorous::PURPLE_ORANGE),
+    );
     map.insert("rainbow".to_string(), Original(colorous::RAINBOW));
     map.insert("redBlue".to_string(), Original(colorous::RED_BLUE));
     map.insert("redGrey".to_string(), Original(colorous::RED_GREY));
@@ -2351,27 +2354,57 @@ fn apply_palette_cdf(norm: f64, cdf: &[f32]) -> f64 {
     (start + (end - start) * fraction).clamp(0.0, 1.0)
 }
 
+/// A triangle wave over palette positions: ascend through the palette, then
+/// descend, with period 2 (in palette lengths). Continuous everywhere — the
+/// folds are reflections, not jumps — which is what makes repeated
+/// non-cyclical palettes join without seams.
+fn palette_triangle(position: f64) -> f64 {
+    let phase = position % 2.0;
+    if phase <= 1.0 {
+        phase
+    } else {
+        2.0 - phase
+    }
+}
+
 /// Remaps a normalized gradient position so the palette repeats
-/// `color_cycles` times across the [0, 1] range. Cyclical palettes wrap
-/// (their endpoints already match); non-cyclical ones boomerang, alternating
-/// forward and backward passes so consecutive repetitions join without a
-/// seam.
-fn apply_color_cycles(norm: f64, color_cycles: u32, palette_is_cyclic: bool) -> f64 {
-    if color_cycles <= 1 {
-        return norm;
+/// `color_cycles` times across the [0, 1] range, shifted by
+/// `palette_offset` palette lengths.
+///
+/// The offset's semantics follow from how much pattern there is to shift:
+/// - Cyclical palettes rotate, seamlessly at any cycle count (their
+///   endpoints share a color, so wrapping is invisible).
+/// - Non-cyclical palettes with two or more cycles phase-shift the
+///   boomerang: the band pattern glides, seamless at every offset (the
+///   sweep spans at least one full out-and-back period, so every color
+///   also stays in use — exactly so at even counts, within one band at
+///   odd ones).
+/// - A single pass has no whole pattern to slide — a phase shift would
+///   push part of the palette out of the sweep entirely — so it rotates
+///   instead (classic palette rotation, modulo 1): every color stays in
+///   use, at the cost of an honest seam where the palette's ends meet. A
+///   full turn wraps to the identity.
+fn apply_color_cycles(
+    norm: f64,
+    color_cycles: u32,
+    palette_is_cyclic: bool,
+    palette_offset: f64,
+) -> f64 {
+    if palette_is_cyclic {
+        return (norm * f64::from(color_cycles.max(1)) + palette_offset).fract();
     }
 
-    let scaled = norm * f64::from(color_cycles);
-    if palette_is_cyclic {
-        scaled.fract()
-    } else {
-        let phase = scaled % 2.0;
-        if phase <= 1.0 {
-            phase
-        } else {
-            2.0 - phase
-        }
+    if color_cycles >= 2 {
+        return palette_triangle(norm * f64::from(color_cycles) + palette_offset);
     }
+
+    // Rotation is periodic: wrap the offset so a full turn is exactly the
+    // identity instead of a single-point flip at the window's ceiling.
+    let rotation = palette_offset.rem_euclid(1.0);
+    if rotation <= 0.0 {
+        return norm;
+    }
+    (norm + rotation).fract()
 }
 
 /// Calculates the color for a given point in the Mandelbrot set.
@@ -2473,6 +2506,7 @@ fn color_from_smoothed_value(
     min_iterations_threshold: f64,
     max_iterations_threshold: f64,
     palette_cdf: Option<&[f32]>,
+    palette_offset: f64,
 ) -> RgbColor {
     if !smoothed_value.is_finite() {
         return [0, 0, 0];
@@ -2495,7 +2529,7 @@ fn color_from_smoothed_value(
         norm = apply_palette_cdf(norm, cdf);
     }
 
-    norm = apply_color_cycles(norm, color_cycles, palette_is_cyclic);
+    norm = apply_color_cycles(norm, color_cycles, palette_is_cyclic, palette_offset);
 
     if should_reverse_colors {
         norm = 1.0 - norm;
@@ -2551,6 +2585,7 @@ fn color_from_escape_result(
         min_iterations_threshold,
         max_iterations_threshold,
         None,
+        0.0,
     )
 }
 
@@ -2599,6 +2634,7 @@ fn render_mandelbrot_set(
     palette_min_iter: i32,
     palette_max_iter: i32,
     palette_cdf: Option<&[f32]>,
+    palette_offset: f64,
 ) -> RenderedTile {
     let output_size: usize = image_width * image_height * NUM_COLOR_CHANNELS;
     let mut img: Vec<u8> = vec![0; output_size];
@@ -2641,6 +2677,7 @@ fn render_mandelbrot_set(
             min_iterations_threshold,
             max_iterations_threshold,
             palette_cdf,
+            palette_offset,
         );
 
         let index = pixel_index * NUM_COLOR_CHANNELS;
@@ -2753,6 +2790,7 @@ fn generate_mandelbrot_set_image(
     palette_max_iter: i32,
     color_cycles: u32,
     palette_cdf: Option<&[f32]>,
+    palette_offset: f64,
 ) -> RenderedTile {
     let (palette, should_reverse_colors, palette_is_cyclic) =
         get_color_palette(color_scheme, reverse_colors);
@@ -2783,6 +2821,7 @@ fn generate_mandelbrot_set_image(
         palette_min_iter,
         palette_max_iter,
         palette_cdf,
+        palette_offset,
     )
 }
 
@@ -2820,6 +2859,7 @@ fn generate_distance_estimate_image(
     lighten_amount: f32,
     color_space: ValidColorSpace,
     color_cycles: u32,
+    palette_offset: f64,
 ) -> RenderedTile {
     let (palette, should_reverse_colors, palette_is_cyclic) =
         get_color_palette(color_scheme, reverse_colors);
@@ -2874,6 +2914,7 @@ fn generate_distance_estimate_image(
                 0.0,
                 1.0,
                 None,
+                palette_offset,
             );
 
             let index = pixel_index * NUM_COLOR_CHANNELS;
@@ -2929,6 +2970,7 @@ fn generate_atom_domain_image(
     lighten_amount: f32,
     color_space: ValidColorSpace,
     color_cycles: u32,
+    palette_offset: f64,
 ) -> RenderedTile {
     let (palette, should_reverse_colors, palette_is_cyclic) =
         get_color_palette(color_scheme, reverse_colors);
@@ -2981,6 +3023,7 @@ fn generate_atom_domain_image(
                 0.0,
                 1.0,
                 None,
+                palette_offset,
             );
 
             let index = pixel_index * NUM_COLOR_CHANNELS;
@@ -3039,6 +3082,7 @@ fn generate_julia_image(
     palette_max_iter: i32,
     color_cycles: u32,
     palette_cdf: Option<&[f32]>,
+    palette_offset: f64,
 ) -> RenderedTile {
     let (palette, should_reverse_colors, palette_is_cyclic) =
         get_color_palette(color_scheme, reverse_colors);
@@ -3104,6 +3148,7 @@ fn generate_julia_image(
                 min_iterations_threshold,
                 max_iterations_threshold,
                 palette_cdf,
+                palette_offset,
             );
 
             let index = pixel_index * NUM_COLOR_CHANNELS;
@@ -3162,8 +3207,10 @@ pub fn get_mandelbrot_set_image(
         // Signature predates the color-cycles control; a single palette pass
         // matches its historical output.
         1,
-        // Frozen signature: no histogram equalization, linear mapping.
+        // Frozen signature: no histogram equalization, linear mapping, no
+        // palette offset.
         None,
+        0.0,
     )
     .image
 }
@@ -3218,6 +3265,10 @@ fn render_tile_precise(
     // escape-time paths consume it — the fixed-palette modes (distance
     // estimate, atom domains) ignore it.
     palette_cdf: Option<&[f32]>,
+    // Palette shift in palette lengths (see `apply_color_cycles`).
+    // Unlike the equalization table it applies in every mode — the
+    // fixed-palette modes repeat and shift their palette the same way.
+    palette_offset: f64,
 ) -> RenderedTile {
     let pixel_spacing =
         perturbation::pixel_spacing(tile_x_min, tile_x_max, tile_zoom, zoom_offset, image_width)
@@ -3268,6 +3319,7 @@ fn render_tile_precise(
                 lighten_amount,
                 color_space,
                 color_cycles,
+                palette_offset,
             );
         }
 
@@ -3287,6 +3339,7 @@ fn render_tile_precise(
                 lighten_amount,
                 color_space,
                 color_cycles,
+                palette_offset,
             );
         }
 
@@ -3310,6 +3363,7 @@ fn render_tile_precise(
             palette_max_iter,
             color_cycles,
             palette_cdf,
+            palette_offset,
         );
     }
 
@@ -3393,6 +3447,7 @@ fn render_tile_precise(
             min_iterations_threshold,
             max_iterations_threshold,
             palette_cdf,
+            palette_offset,
         );
 
         let index = pixel_index * NUM_COLOR_CHANNELS;
@@ -3474,8 +3529,10 @@ pub fn get_mandelbrot_image_precise(
         // The bench harness only measures escape-time rendering.
         false,
         false,
-        // Frozen signature: no histogram equalization, linear mapping.
+        // Frozen signature: no histogram equalization, linear mapping, no
+        // palette offset.
         None,
+        0.0,
     )
     .image
 }
@@ -3575,6 +3632,15 @@ pub struct ColoringOptions {
     /// — the exact linear mapping this option predates.
     #[serde(default)]
     pub palette_cdf: Option<Vec<f32>>,
+    /// Palette shift in palette lengths, 0..1 (see `apply_color_cycles`):
+    /// phase-shifts the pattern seamlessly with two or more cycles (or on a
+    /// cyclical palette); a single pass rotates modulo 1 instead, keeping
+    /// every color in use at the cost of a seam where the palette's ends
+    /// meet. Applies in every render mode — like `color_cycles`, the
+    /// fixed-palette modes honor it over their `0..1` domain. Defaults to 0
+    /// so payloads that omit it render unshifted.
+    #[serde(default)]
+    pub palette_offset: f64,
 }
 
 impl ColoringOptions {
@@ -3613,6 +3679,20 @@ impl ColoringOptions {
             None
         } else {
             self.palette_cdf.as_deref()
+        }
+    }
+
+    /// The palette offset, sanitized to [0, 1]. Clamped rather than wrapped:
+    /// in the phase-shift regime a full palette length is a meaningful,
+    /// distinct shift (the single-pass rotation branch wraps internally,
+    /// where a full turn is the identity — see `apply_color_cycles`). The
+    /// payload is untrusted at this boundary, so non-finite values drop to
+    /// 0 rather than letting a NaN propagate into every pixel's position.
+    fn effective_palette_offset(&self) -> f64 {
+        if self.palette_offset.is_finite() {
+            self.palette_offset.clamp(0.0, 1.0)
+        } else {
+            0.0
         }
     }
 }
@@ -3692,6 +3772,7 @@ pub fn render_tile(options: JsValue) -> Result<MandelbrotTile, JsValue> {
         options.distance_estimate(),
         options.atom_domain(),
         options.coloring.effective_palette_cdf(),
+        options.coloring.effective_palette_offset(),
     );
 
     Ok(MandelbrotTile::from_rendered(
@@ -3759,6 +3840,7 @@ pub fn render_julia(options: JsValue) -> Result<MandelbrotTile, JsValue> {
         options.coloring.palette_max_iter,
         options.coloring.color_cycles.max(1),
         options.coloring.effective_palette_cdf(),
+        options.coloring.effective_palette_offset(),
     );
 
     Ok(MandelbrotTile::from_rendered(
@@ -3832,8 +3914,10 @@ pub fn get_mandelbrot_tile_precise(
         // Frozen positional signature (bench harness): escape-time only.
         false,
         false,
-        // Frozen positional signature: no histogram equalization.
+        // Frozen positional signature: no histogram equalization, no
+        // palette offset.
         None,
+        0.0,
     );
 
     MandelbrotTile::from_rendered(rendered, include_values)
@@ -3943,6 +4027,7 @@ pub fn recolor_values(values: &[f32], options: &ColoringOptions) -> Vec<u8> {
 
     let (min_iterations_threshold, max_iterations_threshold) = options.palette_thresholds();
     let palette_cdf = options.effective_palette_cdf();
+    let palette_offset = options.effective_palette_offset();
 
     let mut img: Vec<u8> = vec![0; values.len() * NUM_COLOR_CHANNELS];
 
@@ -3960,6 +4045,7 @@ pub fn recolor_values(values: &[f32], options: &ColoringOptions) -> Vec<u8> {
             min_iterations_threshold,
             max_iterations_threshold,
             palette_cdf,
+            palette_offset,
         );
 
         let index = pixel_index * NUM_COLOR_CHANNELS;

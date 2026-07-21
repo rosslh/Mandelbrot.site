@@ -32,6 +32,12 @@ export type ColoringOptions = {
   // How many times the palette repeats across the palette range; cyclical
   // palettes wrap, others boomerang (alternate direction) to stay seamless.
   colorCycles: number;
+  // Palette shift in palette lengths, 0..1. With two or more cycles (or on
+  // a cyclical palette) the pattern phase-shifts seamlessly; a single pass
+  // rotates modulo 1 instead, keeping every color in use at the cost of a
+  // seam where the palette's ends meet. Like colorCycles it applies in
+  // every render mode, including the fixed-palette ones.
+  paletteOffset: number;
   // Distance-estimate rendering mode (issue #46): the cached values are a
   // palette-independent brightness in [0, 1] rather than iteration counts, so
   // the palette maps them over the fixed 0..1 range and the min/max iteration

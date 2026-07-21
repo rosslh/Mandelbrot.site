@@ -16,6 +16,14 @@ export type MandelbrotConfig = {
   // How many times the palette repeats across the palette range; cyclical
   // palettes wrap, others boomerang (alternate direction) to stay seamless.
   colorCycles: number;
+  // Slides the palette along the range, as a 0–100 slider spanning one
+  // palette length. With two or more color cycles (or a cyclical palette)
+  // the band pattern phase-shifts and glides seamlessly; a single pass has
+  // no whole pattern to slide, so it rotates instead (modulo 1), keeping
+  // every color in use at the cost of a seam where the palette's ends meet
+  // — the honest trade, since the seamless alternative would truncate part
+  // of the palette. Like colorCycles it applies in every render mode.
+  paletteOffset: number;
   lightenAmount: number;
   saturateAmount: number;
   shiftHueAmount: number;
@@ -71,6 +79,7 @@ export const defaultConfig: MandelbrotConfig = {
   exponent: 2,
   colorScheme: "turbo",
   colorCycles: 1,
+  paletteOffset: 0,
   lightenAmount: 0,
   saturateAmount: 0,
   shiftHueAmount: 0,
@@ -262,6 +271,15 @@ export const settingsSchema: SettingSpec[] = [
     min: 1,
     max: 100,
   },
+  // Palette offset: a phase shift of the palette along the range (0–100% of
+  // one palette length). Recolor-only, like the other palette-application
+  // settings; parseShareParams clamps its "po" parameter below.
+  {
+    key: "paletteOffset",
+    control: "slider",
+    urlParam: "po",
+    effect: "recolor",
+  },
   {
     key: "reverseColors",
     control: "checkbox",
@@ -357,6 +375,9 @@ export function coloringOptions(
     paletteMinIter: config.paletteMinIter,
     paletteMaxIter: config.paletteMaxIter,
     colorCycles: config.colorCycles,
+    // The config stores the offset as a 0–100 percentage of one palette
+    // length; the wasm consumes it as 0..1.
+    paletteOffset: config.paletteOffset / 100,
     // The worker protocol (and the Rust struct behind it) carries the two
     // modes as independent flags; the single-select mode guarantees at most
     // one is set.
@@ -506,6 +527,10 @@ export function parseShareParams(search: string): Partial<MandelbrotConfig> {
       0,
       100,
     );
+  }
+  // The palette offset ("po") is likewise a slider with no range metadata.
+  if (typeof parsed.paletteOffset === "number") {
+    parsed.paletteOffset = clamp(Math.round(parsed.paletteOffset), 0, 100);
   }
   // Legacy share URLs carried the render modes as two boolean params.
   // Distance estimate wins when both are set, matching the renderer's

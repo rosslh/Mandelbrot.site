@@ -272,6 +272,22 @@
               required
             />
           </div>
+          <div class="input-wrapper">
+            <label
+              for="paletteOffset"
+              title="Slides the palette along the range, choosing which color the range starts on. With two or more color cycles (or a cyclical palette) the pattern glides seamlessly; a single pass wraps instead, showing a seam where the palette's ends meet. Every color stays in use either way."
+              >Palette offset</label
+            >
+            <input
+              type="range"
+              id="paletteOffset"
+              name="paletteOffset"
+              min="0"
+              max="100"
+              step="1"
+              class="full-width"
+            />
+          </div>
           <div class="checkbox-wrapper">
             <input type="checkbox" id="reverseColors" name="reverseColors" />
             <label for="reverseColors">Reverse colors</label>
