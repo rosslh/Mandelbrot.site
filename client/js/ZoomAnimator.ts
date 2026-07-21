@@ -1,6 +1,6 @@
 import { saveAs } from "file-saver";
 import type MandelbrotMap from "./MandelbrotMap";
-import { fittedRangeForRender } from "./TileCache";
+import { fittedCdfForRender, fittedRangeForRender } from "./TileCache";
 import { AnimationSpec, buildFrameRects, frameCount } from "./animationFrames";
 import { coloringOptions } from "./config";
 import type { TileRect } from "./protocol";
@@ -135,10 +135,30 @@ class ZoomAnimator {
     // the distance-estimate and atom-domain modes normalize their values to a
     // fixed 0..1 domain, so there is nothing to refit.
     const coloring = coloringOptions(this.map.config);
-    const refitPalette =
-      this.map.config.paletteAutoAdjust &&
-      !coloring.distanceEstimate &&
-      !coloring.atomDomain;
+    const standardPalette = !coloring.distanceEstimate && !coloring.atomDomain;
+    const refitPalette = this.map.config.paletteAutoAdjust && standardPalette;
+
+    // Histogram coloring (the color-mapping slider): each standard-mode frame
+    // is equalized against its own escape-value distribution over its
+    // effective window — the smoothed auto-fit window when refitting, else the
+    // user's fixed manual window — exactly as the live view rebuilds its CDF
+    // for whatever it currently shows at that depth (it does so per moveend in
+    // manual-window mode too, not just when auto-fitting). The strength (0
+    // linear .. 1 fully equalized) blends the per-frame table toward the
+    // identity; the fixed-palette modes normalize to a fixed 0..1 domain and
+    // are never equalized. A per-frame table rather than an anchor-interpolated
+    // one is correct here and does not flash: the anchoring that smooths the
+    // window fit guards against the percentile clip snapping to bucket edges
+    // frame to frame, but the CDF is a smooth cumulative integral of the whole
+    // distribution with sub-bucket interpolation and no such threshold, so
+    // near-identical adjacent frames yield near-identical tables — and the one
+    // input that did jitter, the window, is still supplied by the smoothed
+    // anchor fit. It also needs no extra renders: the frame is already
+    // rendered for its values to recolor to its window.
+    const equalizeStrength =
+      standardPalette && this.map.config.histogramColoring > 0
+        ? this.map.config.histogramColoring / 100
+        : 0;
 
     // Fitting each frame independently makes the palette window jump every
     // frame — partly the genuine deepening trend, partly percentile-clip
@@ -177,6 +197,7 @@ class ZoomAnimator {
               rects[index],
               spec,
               frameRanges ? frameRanges[index] : null,
+              equalizeStrength,
             );
           } catch (error) {
             failure ??= error;
@@ -226,41 +247,81 @@ class ZoomAnimator {
     }
   }
 
-  /** Renders one animation frame to an ImageBitmap. When `range` is given (auto
-   * palette mode), the frame is rendered for its escape values and recolored to
-   * that precomputed window — the smoothed per-frame range from
-   * buildFrameRanges rather than this frame's own fit, so the palette drifts
-   * smoothly across the sweep. A null `range` (manual palette, the normalized
-   * modes, or an all-interior frame) takes the plain render straight from the
-   * config palette. */
+  /** Renders one animation frame to an ImageBitmap.
+   *
+   * A frame that neither refits the palette window nor equalizes (manual
+   * palette at linear strength, or a normalized fixed-palette mode) takes the
+   * plain render straight from the config palette. The coloring is passed
+   * explicitly rather than inherited so the frame never picks up the map's
+   * viewport-global equalization table: that table is fit to the on-screen
+   * target view and would miscolor every shallower frame.
+   *
+   * Otherwise the frame is rendered for its escape values and recolored over
+   * its effective window: the smoothed per-frame range from buildFrameRanges
+   * (auto palette) or the user's fixed manual window (manual palette). When
+   * `strength` is above 0 the recolor also carries a histogram-equalization
+   * table built from this frame's own values over that window, so recorded
+   * frames equalize per depth exactly like the live view — see
+   * `equalizeStrength` in generate for why a per-frame table is used. */
   private async renderFrame(
     rect: TileRect,
     spec: AnimationSpec,
     range: PaletteRange | null,
+    strength: number,
   ): Promise<ImageBitmap> {
     const renderer = this.map.regionRenderer;
-    if (range === null) {
+    const config = this.map.config;
+    const equalize = strength > 0;
+
+    if (range === null && !equalize) {
       const canvas = await renderer.renderToCanvas(
         rect,
         spec.width,
         spec.height,
+        coloringOptions(config),
       );
       return createImageBitmap(canvas);
     }
 
+    // Render for escape values so the frame can be recolored to its own
+    // window and distribution. The render's provisional coloring is passed
+    // explicitly (config palette, no viewport table) so that even if a render
+    // somehow returns no values, the fallback image below never inherits the
+    // map's table.
     const response = await renderer.renderRegion(
       rect,
       spec.width,
       spec.height,
       true,
+      undefined,
+      coloringOptions(config),
     );
 
     let image = response.image;
     if (response.values) {
+      // The window this frame colors over: the smoothed auto-fit range when
+      // refitting, else the user's fixed manual window.
+      const window = range ?? {
+        min: config.paletteMinIter,
+        max: config.paletteMaxIter,
+      };
+      // Histogram coloring: equalize against this frame's own escape-value
+      // distribution over that window, blended toward linear by `strength`
+      // (see fittedCdfForRender / buildPaletteCdf). Null (linear, no table) at
+      // strength 0 or when the frame has no escaped mass in the window.
+      const cdf = equalize
+        ? fittedCdfForRender(
+            response,
+            spec.width,
+            spec.height,
+            window,
+            strength,
+          )
+        : null;
       image = await renderer.recolor(response.values, {
-        ...coloringOptions(this.map.config),
-        paletteMinIter: range.min,
-        paletteMaxIter: range.max,
+        ...coloringOptions(config, cdf),
+        paletteMinIter: window.min,
+        paletteMaxIter: window.max,
       });
     }
 

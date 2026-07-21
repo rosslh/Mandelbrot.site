@@ -1,7 +1,11 @@
 import throttle from "lodash/throttle";
 import type MandelbrotMap from "./MandelbrotMap";
 import type { ViewHistogram } from "./TileCache";
-import { isFixedPaletteMode, syncInputToConfig } from "./config";
+import {
+  coloringOptions,
+  isFixedPaletteMode,
+  syncInputToConfig,
+} from "./config";
 
 // The histogram redraw scans every visible pixel (via TileCache.viewStats),
 // so it is throttled to keep view moves and tile loads cheap; the memoized
@@ -48,7 +52,16 @@ function formatCount(value: number): string {
  * The distribution comes from TileCache.viewStats — the same scan auto-fit
  * uses — so drawing it makes the fit's behavior visible. Dragging a marker
  * sets that palette bound manually (leaving auto-adjust, since the user is
- * overriding the fit) and recolors in place. */
+ * overriding the fit) and recolors in place.
+ *
+ * Bars inside the palette window are tinted with the palette color their
+ * bucket maps to (bars clipped outside stay gray), so the panel shows how
+ * the palette is spent on the visible mass: under linear mapping the colors
+ * spread evenly between the markers, and raising the color-mapping slider
+ * visibly stretches them across the dense mass. The tints come from the
+ * worker's recolor path with the live coloring options (window, equalization
+ * table, cycles, reversal, adjustments), so they can never drift from the
+ * colors on screen. */
 class PaletteHistogram {
   private map: MandelbrotMap;
   private container: HTMLElement;
@@ -67,6 +80,14 @@ class PaletteHistogram {
   private lastStats: ViewHistogram | null = null;
   // The bound currently being dragged, or null.
   private dragging: "min" | "max" | null = null;
+  // Per-bucket palette tints (RGBA, one pixel per bucket) with the
+  // settings+domain fingerprint they were sampled for, plus the fingerprint
+  // of the fetch in flight — so a redraw neither refetches unchanged colors
+  // nor stacks duplicate fetches. Stale tints keep drawing until the fresh
+  // ones land; a repaint follows.
+  private barColors: Uint8Array | null = null;
+  private barColorsKey: string | null = null;
+  private barColorsFetchKey: string | null = null;
 
   constructor(map: MandelbrotMap) {
     this.map = map;
@@ -211,6 +232,12 @@ class PaletteHistogram {
     const n = buckets.length;
     const minFrac = this.valueToFraction(this.map.config.paletteMinIter, stats);
     const maxFrac = this.valueToFraction(this.map.config.paletteMaxIter, stats);
+    // Palette tints for the in-window bars, fetched asynchronously; until
+    // they land (or while a settings change refreshes them) the last set
+    // keeps drawing, falling back to the plain bright gray on first paint.
+    const tints =
+      this.barColors && this.barColors.length === n * 4 ? this.barColors : null;
+    this.ensureBarColors(stats);
 
     for (let i = 0; i < n; i++) {
       const h = barHeight(buckets[i], stats.peak);
@@ -220,10 +247,16 @@ class PaletteHistogram {
       const x0 = Math.floor((i / n) * width);
       const x1 = Math.ceil(((i + 1) / n) * width);
       // The bucket's center in [0, 1] of the domain; bars inside the palette
-      // range are drawn bright, those clipped outside it dimmed.
+      // range are tinted with the palette color they map to, those clipped
+      // outside it dimmed.
       const center = (i + 0.5) / n;
-      ctx.fillStyle =
-        center >= minFrac && center <= maxFrac ? barColor : dimColor;
+      if (center >= minFrac && center <= maxFrac) {
+        ctx.fillStyle = tints
+          ? `rgb(${tints[i * 4]}, ${tints[i * 4 + 1]}, ${tints[i * 4 + 2]})`
+          : barColor;
+      } else {
+        ctx.fillStyle = dimColor;
+      }
       ctx.fillRect(x0, height - h, Math.max(1, x1 - x0), h);
     }
 
@@ -239,6 +272,56 @@ class PaletteHistogram {
         height,
       );
     }
+  }
+
+  /** Fingerprint of everything the bar tints depend on: the full coloring
+   * options — including the equalization table, so a CDF rebuild (pan,
+   * slider, marker drag) refreshes the tints — plus the histogram domain the
+   * buckets span. */
+  private barColorsFingerprint(stats: ViewHistogram): string {
+    return JSON.stringify({
+      coloring: coloringOptions(this.map.config, this.map.paletteCdf),
+      min: stats.min,
+      max: stats.max,
+      buckets: stats.buckets.length,
+    });
+  }
+
+  /** Fetches the per-bucket palette tints through the worker's recolor path —
+   * one sample at each bucket's center value, colored by the same code the
+   * tiles use — and repaints when they land. No-op while the cached tints (or
+   * a fetch already in flight) match the current settings. */
+  private ensureBarColors(stats: ViewHistogram) {
+    const key = this.barColorsFingerprint(stats);
+    if (key === this.barColorsKey || key === this.barColorsFetchKey) {
+      return;
+    }
+    this.barColorsFetchKey = key;
+
+    const n = stats.buckets.length;
+    const values = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      values[i] = stats.min + ((i + 0.5) * (stats.max - stats.min)) / n;
+    }
+
+    this.map.regionRenderer
+      .recolor(values, coloringOptions(this.map.config, this.map.paletteCdf))
+      .then((image) => {
+        // A newer fetch supersedes this one.
+        if (this.barColorsFetchKey !== key) {
+          return;
+        }
+        this.barColorsFetchKey = null;
+        this.barColors = Uint8Array.from(image);
+        this.barColorsKey = key;
+        if (this.lastStats) {
+          this.render(this.lastStats);
+        }
+      })
+      .catch(() => {
+        // The pool was terminated by a re-render; the next redraw retries.
+        this.barColorsFetchKey = null;
+      });
   }
 
   /** Maps an iteration value to its horizontal position in [0, 1] across the
@@ -333,7 +416,9 @@ class PaletteHistogram {
     }
 
     this.map.controls.notifyPaletteBoundsChanged();
-    this.map.applyColorSettings();
+    // The window moved, so histogram coloring's CDF must rebuild before
+    // the repaint (it spans exactly the window).
+    this.map.applyPaletteWindowChange();
     // Repaint the markers immediately; the recolor lands asynchronously.
     this.render(stats);
   }

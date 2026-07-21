@@ -1,6 +1,6 @@
 import type MandelbrotMap from "./MandelbrotMap";
 import type { RenderFrame } from "./RegionRenderer";
-import { fittedRangeForRender } from "./TileCache";
+import { fittedCdfForRender, fittedRangeForRender } from "./TileCache";
 import { coloringOptions } from "./config";
 import type { ColoringOptions, TileRect } from "./protocol";
 import { FULL_SET_ZOOM } from "./magnification";
@@ -154,20 +154,27 @@ class MinimapView {
    * match the on-screen rendering mode. Zeroing the window in all modes also
    * keeps it out of the settings fingerprint, which is what makes the tile
    * layer's per-pan window refits free for the minimap. */
-  private minimapColoring(): ColoringOptions {
+  private minimapColoring(
+    paletteCdf: Float32Array | null = null,
+  ): ColoringOptions {
     return {
-      ...coloringOptions(this.map.config),
+      ...coloringOptions(this.map.config, paletteCdf),
       paletteMinIter: 0,
       paletteMaxIter: 0,
     };
   }
 
   /** Fingerprint of every setting that affects the minimap's pixels, so a
-   * refresh can tell a real settings change from a palette-window refit. */
+   * refresh can tell a real settings change from a palette-window refit. The
+   * color-mapping strength rides separately: like the window, the
+   * equalization table is private to the minimap (built from its own render,
+   * not the map's viewport table), but moving the slider changes its
+   * pixels. */
   private settingsKey(): string {
     const config = this.map.config;
     return JSON.stringify({
       coloring: this.minimapColoring(),
+      histogramColoring: config.histogramColoring,
       iterations: config.iterations,
       exponent: config.exponent,
       smoothColoring: config.smoothColoring,
@@ -206,13 +213,23 @@ class MinimapView {
       // window the tile layer fits to the view, over the minimap's pixels.
       // It can only miss for an all-interior render, which the full-set
       // framing never is; the plain config-palette image is the nominal
-      // fallback.
+      // fallback. At any nonzero color-mapping strength the minimap likewise
+      // builds its own equalization CDF from this render over the fitted
+      // window — the map's viewport-global table describes the view's
+      // distribution, not the full set's.
       let image = response.image;
       if (standardMode && response.values) {
         const range = fittedRangeForRender(response, size, size);
         if (range) {
+          const cdf = fittedCdfForRender(
+            response,
+            size,
+            size,
+            range,
+            this.map.config.histogramColoring / 100,
+          );
           image = await this.map.regionRenderer.recolor(response.values, {
-            ...this.minimapColoring(),
+            ...this.minimapColoring(cdf),
             paletteMinIter: range.min,
             paletteMaxIter: range.max,
           });

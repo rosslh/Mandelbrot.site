@@ -117,19 +117,26 @@ class MandelbrotControls {
       },
       {
         buttonId: "resetPaletteRange",
-        configKeys: ["paletteMinIter", "paletteAutoAdjust"],
+        configKeys: [
+          "paletteMinIter",
+          "paletteAutoAdjust",
+          "histogramColoring",
+        ],
         specialHandling: () => {
           // Reset paletteMaxIter based on current iterations
           this.map.config.paletteMaxIter = this.map.config.iterations;
           syncInputToConfig(this.map.config, "paletteMaxIter");
         },
         // The range only affects coloring: fit (auto) or apply the reset
-        // values (manual) via an in-place repaint.
+        // values (manual) via an in-place repaint. The fit also rebuilds the
+        // equalization CDF, so a restored mapping strength takes effect.
         apply: () => this.map.refitPaletteAndRecolor(),
         checkDiff: () => {
           if (
             this.map.config.paletteAutoAdjust !==
-            this.map.initialConfig.paletteAutoAdjust
+              this.map.initialConfig.paletteAutoAdjust ||
+            this.map.config.histogramColoring !==
+              this.map.initialConfig.histogramColoring
           ) {
             return true;
           }
@@ -477,6 +484,13 @@ class MandelbrotControls {
     slider.oninput = debounce(() => {
       this.map.config[spec.key] = Number.parseFloat(slider.value);
       this.updateResetButtonsVisibility();
+      // The color-mapping strength reshapes the equalization table, which
+      // needs a CDF rebuild before the repaint — not a plain recolor (the
+      // setting's effect is "none").
+      if (spec.key === "histogramColoring") {
+        this.map.applyPaletteWindowChange();
+        return;
+      }
       this.applySettingEffect(spec);
     }, 300);
   }
@@ -578,14 +592,21 @@ class MandelbrotControls {
 
   /** The palette range only applies to escape-time coloring; the fixed-range
    * modes (distance estimate, atom domains) ignore it, so hide the panel's
-   * auto-adjust checkbox while one is active, leaving just the histogram's
-   * explanatory note. */
+   * color-mapping slider and auto-adjust checkbox while one is active,
+   * leaving just the histogram's explanatory note. */
   syncPaletteRangeAvailability() {
-    const wrapper = document
+    const hidden = isFixedPaletteMode(this.map.config);
+    const autoAdjustWrapper = document
       .getElementById("paletteAutoAdjust")
       ?.closest(".checkbox-wrapper") as HTMLElement | null;
-    if (wrapper) {
-      wrapper.hidden = isFixedPaletteMode(this.map.config);
+    if (autoAdjustWrapper) {
+      autoAdjustWrapper.hidden = hidden;
+    }
+    const mappingWrapper = document
+      .getElementById("histogramColoring")
+      ?.closest(".input-wrapper") as HTMLElement | null;
+    if (mappingWrapper) {
+      mappingWrapper.hidden = hidden;
     }
   }
 

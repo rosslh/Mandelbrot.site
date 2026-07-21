@@ -43,6 +43,15 @@ export type ColoringOptions = {
   // the palette maps them over the fixed 0..1 range and the min/max iteration
   // thresholds are ignored.
   atomDomain: boolean;
+  // Histogram-coloring equalization lookup table: a
+  // monotone CDF over the palette window, sampled uniformly across [0, 1]
+  // (built client-side from the visible escape-value distribution, see
+  // buildPaletteCdf in TileCache.ts). Riding here means renders and recolors
+  // share the same table, keeping the two byte-identical and every tile on
+  // one viewport-global mapping. Absent means the linear mapping — exactly
+  // the behavior this option predates. The fixed-palette modes (distance
+  // estimate, atom domains) ignore it.
+  paletteCdf?: number[];
 };
 
 // Everything a tile render needs, as one object handed through the worker

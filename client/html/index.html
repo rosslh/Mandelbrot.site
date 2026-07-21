@@ -295,6 +295,25 @@
           </button>
         </summary>
         <div class="details-content">
+          <div class="input-wrapper">
+            <label
+              for="histogramColoring"
+              title="How colors are distributed across the palette range. Linear (left): colors are spread evenly across the iteration range. Histogram (right): each color covers a similar share of the visible pixels — the classic histogram coloring, like Equalize in image editors. In-between positions blend the two."
+              class="label-with-subtitle"
+            >
+              <span>Color mapping</span>
+              <span class="secondary">Linear&nbsp;&ndash;&nbsp;histogram</span>
+            </label>
+            <input
+              type="range"
+              id="histogramColoring"
+              name="histogramColoring"
+              min="0"
+              max="100"
+              step="1"
+              class="full-width"
+            />
+          </div>
           <div class="checkbox-wrapper">
             <input
               type="checkbox"
@@ -309,8 +328,8 @@
             <div id="paletteHistogramCanvasWrap">
               <canvas
                 id="paletteHistogramCanvas"
-                title="Distribution of escape times in view. Drag the red markers to set the palette range."
-                aria-label="Histogram of escape times in the current view"
+                title="Distribution of escape times in view, with each bar inside the palette range tinted by the color it maps to. Drag the red markers to set the palette range."
+                aria-label="Histogram of escape times in the current view, with bars tinted by their mapped palette color"
               ></canvas>
               <div
                 id="paletteHistogramSpinner"

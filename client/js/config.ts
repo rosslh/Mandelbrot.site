@@ -38,6 +38,21 @@ export type MandelbrotConfig = {
   // (zoomed) tiles fall back to escape-time coloring. They also fix the
   // palette domain, ignoring the palette range.
   renderMode: string;
+  // How the palette is distributed inside the palette window, as a 0–100
+  // slider blending between the two classic mappings:
+  // - 0 ("Linear"): colors spread evenly across the iteration range.
+  // - 100 ("Histogram"): histogram coloring — the fractal-renderer name for
+  //   histogram equalization (image editors call it "Equalize"). The
+  //   normalized position is remapped through a CDF of the visible
+  //   escape-value distribution, so each palette color covers roughly equal
+  //   visible pixel mass (and color cycles become mass-uniform).
+  // Intermediate values interpolate the two (the equalization table is
+  // blended toward the identity client-side; see buildPaletteCdf). Defaults
+  // to 0 — the app's historical linear behavior. The window itself
+  // (paletteMinIter/paletteMaxIter) keeps its meaning at every strength:
+  // values below the min clamp to the palette start, above the max to the
+  // palette end.
+  histogramColoring: number;
   paletteMinIter: number;
   paletteMaxIter: number;
   // When enabled the palette range fits itself to the on-screen tiles and
@@ -65,6 +80,7 @@ export const defaultConfig: MandelbrotConfig = {
   showTierOverlay: false,
   smoothColoring: true,
   renderMode: "standard",
+  histogramColoring: 0,
   paletteMinIter: 0,
   paletteMaxIter: 200,
   paletteAutoAdjust: true,
@@ -282,6 +298,20 @@ export const settingsSchema: SettingSpec[] = [
   // boolean; see buildShareUrl/parseShareParams). The bounds have no sidebar
   // inputs — they are set by dragging the histogram markers or by the auto
   // fit — but keep their share-URL parameters.
+  //
+  // Color mapping: how strongly the palette is equalized to the visible
+  // distribution inside the window (0 linear .. 100 histogram coloring).
+  // Effect "none": a change reshapes the equalization table, which the
+  // wiring applies via an explicit CDF rebuild + recolor
+  // (applyPaletteWindowChange), not a plain recolor. Share URLs that predate
+  // the parameter omit it and keep the linear default, so old links render
+  // unchanged.
+  {
+    key: "histogramColoring",
+    control: "slider",
+    urlParam: "pmap",
+    effect: "none",
+  },
   {
     key: "paletteMinIter",
     control: "virtualNumber",
@@ -307,9 +337,17 @@ export const settingsSchema: SettingSpec[] = [
 ];
 
 /** The subset of the config the wasm coloring code consumes, in the shape
- * the worker protocol (and the Rust `ColoringOptions` struct) expects. */
-export function coloringOptions(config: MandelbrotConfig): ColoringOptions {
-  return {
+ * the worker protocol (and the Rust `ColoringOptions` struct) expects.
+ *
+ * `paletteCdf` is the equalization table for histogram coloring — viewport
+ * state rather than a config value, so callers that own one (the map's
+ * viewport-global table, a thumbnail's private fit) pass it explicitly;
+ * omitting it yields the linear mapping. */
+export function coloringOptions(
+  config: MandelbrotConfig,
+  paletteCdf?: Float32Array | null,
+): ColoringOptions {
+  const options: ColoringOptions = {
     colorScheme: config.colorScheme,
     reverseColors: config.reverseColors,
     shiftHueAmount: config.shiftHueAmount,
@@ -325,6 +363,14 @@ export function coloringOptions(config: MandelbrotConfig): ColoringOptions {
     distanceEstimate: config.renderMode === "distanceEstimate",
     atomDomain: config.renderMode === "atomDomain",
   };
+
+  if (paletteCdf && paletteCdf.length > 0) {
+    // A plain array (not the Float32Array itself) so the payload stays a
+    // simple JSON-shaped object for the worker's serde deserialization.
+    options.paletteCdf = Array.from(paletteCdf);
+  }
+
+  return options;
 }
 
 /** The shared parameters for the given config as a plain object keyed by URL
@@ -449,6 +495,17 @@ export function parseShareParams(search: string): Partial<MandelbrotConfig> {
     !(RENDER_MODES as readonly string[]).includes(parsed.renderMode)
   ) {
     delete parsed.renderMode;
+  }
+
+  // The generic slider parse above has no range metadata, so clamp "pmap"
+  // to the slider's range here; malformed or absent values fall back to the
+  // linear default by omission.
+  if (typeof parsed.histogramColoring === "number") {
+    parsed.histogramColoring = clamp(
+      Math.round(parsed.histogramColoring),
+      0,
+      100,
+    );
   }
   // Legacy share URLs carried the render modes as two boolean params.
   // Distance estimate wins when both are set, matching the renderer's

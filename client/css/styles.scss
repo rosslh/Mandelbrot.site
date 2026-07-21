@@ -366,6 +366,12 @@ datalist {
   flex-wrap: wrap;
   gap: var(--space-8);
 
+  // The display above would defeat the hidden attribute
+  // syncPaletteRangeAvailability toggles the color-mapping slider with.
+  &[hidden] {
+    display: none;
+  }
+
   > * {
     display: block;
   }
@@ -384,6 +390,12 @@ datalist {
     option {
       width: 100%;
     }
+  }
+
+  // A full-width slider wraps below its label onto its own row (the wrapper
+  // flex-wraps), giving the drag the whole panel width of travel.
+  > input.full-width {
+    width: 100%;
   }
 
   &.align-start {

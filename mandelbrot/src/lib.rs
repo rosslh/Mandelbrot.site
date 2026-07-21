@@ -2466,6 +2466,29 @@ fn get_color_palette(color_scheme: &str, reverse_colors: bool) -> (&'static Pale
     (palette, should_reverse_colors, is_cyclic)
 }
 
+/// Remaps a normalized palette position through a histogram-equalization
+/// lookup table (a monotone CDF over the palette window, sampled uniformly
+/// across [0, 1]) with linear interpolation between entries. The client
+/// builds one table per viewport from the visible escape-value distribution,
+/// so equal palette spans cover equal visible pixel mass (histogram
+/// coloring). Runs after the linear min/max normalization and before
+/// `apply_color_cycles`, so the palette window keeps its clamping meaning and
+/// color cycles become mass-uniform. Tables with fewer than two entries
+/// cannot be interpolated and fall back to the identity (linear) mapping.
+fn apply_palette_cdf(norm: f64, cdf: &[f32]) -> f64 {
+    if cdf.len() < 2 {
+        return norm;
+    }
+
+    let position = norm.clamp(0.0, 1.0) * (cdf.len() - 1) as f64;
+    let index = (position as usize).min(cdf.len() - 2);
+    let fraction = position - index as f64;
+    let start = f64::from(cdf[index]);
+    let end = f64::from(cdf[index + 1]);
+
+    (start + (end - start) * fraction).clamp(0.0, 1.0)
+}
+
 /// Remaps a normalized gradient position so the palette repeats
 /// `color_cycles` times across the [0, 1] range. Cyclical palettes wrap
 /// (their endpoints already match); non-cyclical ones boomerang, alternating
@@ -2587,6 +2610,7 @@ fn color_from_smoothed_value(
     lighten_amount: f32,
     min_iterations_threshold: f64,
     max_iterations_threshold: f64,
+    palette_cdf: Option<&[f32]>,
 ) -> RgbColor {
     if !smoothed_value.is_finite() {
         return [0, 0, 0];
@@ -2601,6 +2625,13 @@ fn color_from_smoothed_value(
         (smoothed_value - min_iterations_threshold)
             / (max_iterations_threshold - min_iterations_threshold)
     };
+
+    // Histogram coloring (histogram equalization): remap the position
+    // within the palette window so equal palette spans cover equal visible
+    // pixel mass. Absent (None) means the linear mapping above stands.
+    if let Some(cdf) = palette_cdf {
+        norm = apply_palette_cdf(norm, cdf);
+    }
 
     norm = apply_color_cycles(norm, color_cycles, palette_is_cyclic);
 
@@ -2657,6 +2688,7 @@ fn color_from_escape_result(
         lighten_amount,
         min_iterations_threshold,
         max_iterations_threshold,
+        None,
     )
 }
 
@@ -2680,6 +2712,8 @@ fn color_from_escape_result(
 /// - `smooth_coloring`: Whether to use smooth coloring.
 /// - `palette_min_iter`: The minimum iteration count for the color palette range.
 /// - `palette_max_iter`: The maximum iteration count for the color palette range.
+/// - `palette_cdf`: Optional histogram-equalization lookup table (see
+///   `apply_palette_cdf`); `None` keeps the linear mapping.
 ///
 /// # Returns
 /// The rendered tile: RGBA bytes, per-pixel smoothed escape values, and the
@@ -2702,6 +2736,7 @@ fn render_mandelbrot_set(
     smooth_coloring: bool,
     palette_min_iter: i32,
     palette_max_iter: i32,
+    palette_cdf: Option<&[f32]>,
 ) -> RenderedTile {
     let output_size: usize = image_width * image_height * NUM_COLOR_CHANNELS;
     let mut img: Vec<u8> = vec![0; output_size];
@@ -2743,6 +2778,7 @@ fn render_mandelbrot_set(
             lighten_amount,
             min_iterations_threshold,
             max_iterations_threshold,
+            palette_cdf,
         );
 
         let index = pixel_index * NUM_COLOR_CHANNELS;
@@ -2854,6 +2890,7 @@ fn generate_mandelbrot_set_image(
     palette_min_iter: i32,
     palette_max_iter: i32,
     color_cycles: u32,
+    palette_cdf: Option<&[f32]>,
 ) -> RenderedTile {
     let (palette, should_reverse_colors, palette_is_cyclic) =
         get_color_palette(color_scheme, reverse_colors);
@@ -2883,6 +2920,7 @@ fn generate_mandelbrot_set_image(
         smooth_coloring,
         palette_min_iter,
         palette_max_iter,
+        palette_cdf,
     )
 }
 
@@ -2960,6 +2998,7 @@ fn generate_distance_estimate_image(
 
             // DE brightness is already normalized to [0, 1]; the palette maps
             // it over that fixed range (interior/INFINITY renders black).
+            // Fixed-palette mode: histogram equalization does not apply.
             let pixel = color_from_smoothed_value(
                 brightness,
                 palette,
@@ -2972,6 +3011,7 @@ fn generate_distance_estimate_image(
                 lighten_amount,
                 0.0,
                 1.0,
+                None,
             );
 
             let index = pixel_index * NUM_COLOR_CHANNELS;
@@ -3064,7 +3104,8 @@ fn generate_atom_domain_image(
             values[pixel_index] = value as f32;
 
             // The atom-domain value is already in [0, 1); the palette maps it
-            // over that fixed range.
+            // over that fixed range. Fixed-palette mode: histogram
+            // equalization does not apply.
             let pixel = color_from_smoothed_value(
                 value,
                 palette,
@@ -3077,6 +3118,7 @@ fn generate_atom_domain_image(
                 lighten_amount,
                 0.0,
                 1.0,
+                None,
             );
 
             let index = pixel_index * NUM_COLOR_CHANNELS;
@@ -3134,6 +3176,7 @@ fn generate_julia_image(
     palette_min_iter: i32,
     palette_max_iter: i32,
     color_cycles: u32,
+    palette_cdf: Option<&[f32]>,
 ) -> RenderedTile {
     let (palette, should_reverse_colors, palette_is_cyclic) =
         get_color_palette(color_scheme, reverse_colors);
@@ -3198,6 +3241,7 @@ fn generate_julia_image(
                 lighten_amount,
                 min_iterations_threshold,
                 max_iterations_threshold,
+                palette_cdf,
             );
 
             let index = pixel_index * NUM_COLOR_CHANNELS;
@@ -3256,6 +3300,8 @@ pub fn get_mandelbrot_set_image(
         // Signature predates the color-cycles control; a single palette pass
         // matches its historical output.
         1,
+        // Frozen signature: no histogram equalization, linear mapping.
+        None,
     )
     .image
 }
@@ -3305,6 +3351,11 @@ fn render_tile_precise(
     // and gated to shallow views by the client; deeper tiles fall back to
     // escape-time coloring.
     atom_domain: bool,
+    // Optional histogram-equalization lookup table over the palette window
+    // (see `apply_palette_cdf`); `None` keeps the linear mapping. Only the
+    // escape-time paths consume it — the fixed-palette modes (distance
+    // estimate, atom domains) ignore it.
+    palette_cdf: Option<&[f32]>,
 ) -> RenderedTile {
     let pixel_spacing =
         perturbation::pixel_spacing(tile_x_min, tile_x_max, tile_zoom, zoom_offset, image_width)
@@ -3396,6 +3447,7 @@ fn render_tile_precise(
             palette_min_iter,
             palette_max_iter,
             color_cycles,
+            palette_cdf,
         );
     }
 
@@ -3478,6 +3530,7 @@ fn render_tile_precise(
             lighten_amount,
             min_iterations_threshold,
             max_iterations_threshold,
+            palette_cdf,
         );
 
         let index = pixel_index * NUM_COLOR_CHANNELS;
@@ -3559,6 +3612,8 @@ pub fn get_mandelbrot_image_precise(
         // The bench harness only measures escape-time rendering.
         false,
         false,
+        // Frozen signature: no histogram equalization, linear mapping.
+        None,
     )
     .image
 }
@@ -3649,6 +3704,15 @@ pub struct ColoringOptions {
     /// false so escape-time payloads that omit it still parse.
     #[serde(default)]
     pub atom_domain: bool,
+    /// Optional histogram-coloring equalization lookup table: a monotone CDF
+    /// over the palette window, sampled uniformly
+    /// across [0, 1] (see `apply_palette_cdf`). The client builds one per
+    /// viewport from the visible escape-value distribution and sends the same
+    /// table to renders and recolors, so the two stay byte-identical and
+    /// tiles share one viewport-global mapping (no seams). Defaults to `None`
+    /// — the exact linear mapping this option predates.
+    #[serde(default)]
+    pub palette_cdf: Option<Vec<f32>>,
 }
 
 impl ColoringOptions {
@@ -3675,6 +3739,18 @@ impl ColoringOptions {
             3 => ValidColorSpace::Okhsl,
             // 2 is the client default; unknown values fall back to it.
             _ => ValidColorSpace::Lch,
+        }
+    }
+
+    /// The histogram-equalization table to color with, or `None` for the
+    /// linear mapping. The fixed-palette modes (distance estimate, atom
+    /// domains) always map linearly over their fixed `0..1` domain, so a
+    /// stray table is ignored there.
+    fn effective_palette_cdf(&self) -> Option<&[f32]> {
+        if self.distance_estimate || self.atom_domain {
+            None
+        } else {
+            self.palette_cdf.as_deref()
         }
     }
 }
@@ -3753,6 +3829,7 @@ pub fn render_tile(options: JsValue) -> Result<MandelbrotTile, JsValue> {
         options.coloring.color_cycles.max(1),
         options.distance_estimate(),
         options.atom_domain(),
+        options.coloring.effective_palette_cdf(),
     );
 
     Ok(MandelbrotTile::from_rendered(
@@ -3819,6 +3896,7 @@ pub fn render_julia(options: JsValue) -> Result<MandelbrotTile, JsValue> {
         options.coloring.palette_min_iter,
         options.coloring.palette_max_iter,
         options.coloring.color_cycles.max(1),
+        options.coloring.effective_palette_cdf(),
     );
 
     Ok(MandelbrotTile::from_rendered(
@@ -3892,6 +3970,8 @@ pub fn get_mandelbrot_tile_precise(
         // Frozen positional signature (bench harness): escape-time only.
         false,
         false,
+        // Frozen positional signature: no histogram equalization.
+        None,
     );
 
     MandelbrotTile::from_rendered(rendered, include_values)
@@ -4000,6 +4080,7 @@ pub fn recolor_values(values: &[f32], options: &ColoringOptions) -> Vec<u8> {
     let color_space = options.color_space();
 
     let (min_iterations_threshold, max_iterations_threshold) = options.palette_thresholds();
+    let palette_cdf = options.effective_palette_cdf();
 
     let mut img: Vec<u8> = vec![0; values.len() * NUM_COLOR_CHANNELS];
 
@@ -4016,6 +4097,7 @@ pub fn recolor_values(values: &[f32], options: &ColoringOptions) -> Vec<u8> {
             options.lighten_amount,
             min_iterations_threshold,
             max_iterations_threshold,
+            palette_cdf,
         );
 
         let index = pixel_index * NUM_COLOR_CHANNELS;

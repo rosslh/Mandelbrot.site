@@ -2,7 +2,7 @@ import * as L from "leaflet";
 import throttle from "lodash/throttle";
 import type MandelbrotMap from "./MandelbrotMap";
 import MinimapView, { thumbnailRenderSize } from "./MinimapView";
-import { fittedRangeForRender } from "./TileCache";
+import { fittedCdfForRender, fittedRangeForRender } from "./TileCache";
 import { coloringOptions } from "./config";
 import type { ColoringOptions } from "./protocol";
 
@@ -147,7 +147,11 @@ class NavigatorPanel {
     panel?.addEventListener("toggle", () => this.renderCurrentMode());
 
     this.applyModeUi();
-    this.renderCurrentMode();
+    // The panel is constructed before the map's initial goToCoordinates, and
+    // a Julia render reads the view center (the cursor's off-map fallback) —
+    // getCenter() throws until the view exists. whenReady defers the first
+    // render to the initial view; later renders are event-driven.
+    map.whenReady(() => this.renderCurrentMode());
   }
 
   /** Re-renders the active view with the current settings. Called after a
@@ -234,11 +238,16 @@ class NavigatorPanel {
    * describes the viewport's iteration counts, which at depth dwarf the Julia
    * set's shallow ones and would clamp the whole thumbnail to one end of the
    * gradient; that holds for the auto-fit and manual windows alike). The
-   * normalized modes (distance-estimate, atom-domain) are view techniques the
-   * escape-time thumbnail does not share, so their flags are dropped too. */
-  private thumbnailColoring(): ColoringOptions {
+   * same goes for histogram coloring's equalization table: the map's is
+   * built from the viewport's distribution, so the thumbnail passes its own
+   * (`paletteCdf`, from its private fit) or none. The normalized modes
+   * (distance-estimate, atom-domain) are view techniques the escape-time
+   * thumbnail does not share, so their flags are dropped too. */
+  private thumbnailColoring(
+    paletteCdf: Float32Array | null = null,
+  ): ColoringOptions {
     return {
-      ...coloringOptions(this.map.config),
+      ...coloringOptions(this.map.config, paletteCdf),
       paletteMinIter: 0,
       paletteMaxIter: 0,
       distanceEstimate: false,
@@ -250,11 +259,15 @@ class NavigatorPanel {
    * render() can tell a settings change from a cursor move. Built from
    * thumbnailColoring, so the settings the thumbnail ignores — above all the
    * palette window, which the tile layer refits on every pan and zoom at
-   * depth — do not force renders that would repaint the same image. */
+   * depth — do not force renders that would repaint the same image. The
+   * color-mapping strength rides separately: the thumbnail builds its own
+   * equalization CDF (its private fit, not the map's table), but moving the
+   * slider still changes its pixels. */
   private settingsKey(): string {
     const config = this.map.config;
     return JSON.stringify({
       coloring: this.thumbnailColoring(),
+      histogramColoring: config.histogramColoring,
       iterations: config.iterations,
       exponent: config.exponent,
       smoothColoring: config.smoothColoring,
@@ -309,12 +322,23 @@ class NavigatorPanel {
       // the tile layer applies to the view) and recolor to it. The fit can
       // only miss for an all-interior render, which a Julia thumbnail never
       // is (its [-2, 2] frame always includes escaping exterior); the plain
-      // config-palette image is the nominal fallback.
+      // config-palette image is the nominal fallback. At any nonzero
+      // color-mapping strength the thumbnail likewise builds its own
+      // equalization CDF from this render's values over the fitted window —
+      // the map's viewport-global table describes the view's distribution,
+      // not the Julia set's.
       let image = response.image;
       const range = fittedRangeForRender(response, size, size);
       if (range && response.values) {
+        const cdf = fittedCdfForRender(
+          response,
+          size,
+          size,
+          range,
+          this.map.config.histogramColoring / 100,
+        );
         image = await this.map.regionRenderer.recolor(response.values, {
-          ...this.thumbnailColoring(),
+          ...this.thumbnailColoring(cdf),
           paletteMinIter: range.min,
           paletteMaxIter: range.max,
         });

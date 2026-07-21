@@ -499,6 +499,138 @@ class TileCache {
   }
 }
 
+// Entries in a histogram-equalization lookup table (see buildPaletteCdf):
+// enough that the lerp between entries is far below a visible color step,
+// small enough that every worker payload carries it for free.
+const PALETTE_CDF_SIZE = 256;
+
+/** The equalization lookup table for histogram coloring:
+ * a monotone Float32Array of PALETTE_CDF_SIZE entries where entry k holds the
+ * cumulative visible-pixel mass (0..1) below the value k/(size-1) of the way
+ * through the palette window. The wasm coloring path remaps each pixel's
+ * linear window position through it (with linear interpolation), so equal
+ * palette spans cover equal visible mass.
+ *
+ * The CDF spans exactly the window [min, max], renormalized between the
+ * cumulative mass at the window's ends — so a manually narrowed window spends
+ * the whole palette on that slice of the distribution. The mass comes from
+ * the same center-weighted, neighbor-capped histogram the auto-fit uses, with
+ * sub-bucket linear interpolation so the table is smooth at any window size.
+ *
+ * `strength` (0..1) blends the table toward the identity, turning the
+ * mapping into a slider between linear (0) and fully equalized (1): each
+ * entry is (1 - strength) * linear + strength * cdf. Both endpoints of the
+ * blend are monotone maps fixing 0 and 1, so every strength is too — the
+ * wasm side applies whatever table it gets and needs no strength of its own.
+ *
+ * Returns null — meaning the exact linear mapping (no table sent) — at
+ * strength 0, when the window is degenerate, or when it contains no visible
+ * escaped mass (there is no distribution to equalize to). */
+export function buildPaletteCdf(
+  stats: ViewHistogram,
+  window: TileIterationRange,
+  strength = 1,
+): Float32Array | null {
+  const { min, max, buckets } = stats;
+  if (
+    strength <= 0 ||
+    window.max <= window.min ||
+    stats.escapedMass <= 0 ||
+    max <= min
+  ) {
+    return null;
+  }
+  const blend = Math.min(1, strength);
+
+  const bucketCount = buckets.length;
+  // cumulative[i] is the mass of buckets [0, i).
+  const cumulative = new Float64Array(bucketCount + 1);
+  for (let i = 0; i < bucketCount; i++) {
+    cumulative[i + 1] = cumulative[i] + buckets[i];
+  }
+
+  // Cumulative mass below an escape value, interpolated within its bucket;
+  // values outside the histogram domain clamp to its ends.
+  const massBelow = (value: number): number => {
+    const position = ((value - min) / (max - min)) * bucketCount;
+    if (position <= 0) {
+      return 0;
+    }
+    if (position >= bucketCount) {
+      return cumulative[bucketCount];
+    }
+    const bucket = Math.floor(position);
+    return cumulative[bucket] + (position - bucket) * buckets[bucket];
+  };
+
+  const low = massBelow(window.min);
+  const span = massBelow(window.max) - low;
+  if (span <= 0) {
+    return null;
+  }
+
+  const cdf = new Float32Array(PALETTE_CDF_SIZE);
+  const windowSpan = window.max - window.min;
+  for (let k = 0; k < PALETTE_CDF_SIZE; k++) {
+    const linear = k / (PALETTE_CDF_SIZE - 1);
+    const value = window.min + windowSpan * linear;
+    const equalized = (massBelow(value) - low) / span;
+    cdf[k] = (1 - blend) * linear + blend * equalized;
+  }
+  // massBelow is monotone and the division and identity blend preserve that,
+  // so the table is nondecreasing by construction; pin the ends exactly so
+  // window clamps land on the palette's true endpoints.
+  cdf[0] = 0;
+  cdf[PALETTE_CDF_SIZE - 1] = 1;
+
+  return cdf;
+}
+
+/** The equalization table fit to a single offscreen render's own escape
+ * values over the given palette window, at the given blend strength (0..1;
+ * see buildPaletteCdf) — the CDF counterpart of `fittedRangeForRender`, for
+ * consumers with a private palette fit (the Navigator panel's Julia
+ * thumbnail and minimap). Uses the same throwaway single-tile cache, so the
+ * histogram matches the map's on-screen scan exactly. Returns null (linear)
+ * at strength 0 or when the render has no escape values. */
+export function fittedCdfForRender(
+  response: MandelbrotResponse,
+  width: number,
+  height: number,
+  window: TileIterationRange,
+  strength = 1,
+): Float32Array | null {
+  if (
+    !response.values ||
+    response.minIter === null ||
+    response.maxIter === null
+  ) {
+    return null;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const fitCache = new TileCache();
+  fitCache.record(
+    { x: 0, y: 0, z: 0 },
+    response.minIter,
+    response.maxIter,
+    canvas,
+    response.values,
+    response.tier,
+  );
+  const stats = fitCache.viewStats({
+    xMin: 0,
+    xMax: 1,
+    yMin: 0,
+    yMax: 1,
+    zoom: 0,
+  });
+
+  return stats ? buildPaletteCdf(stats, window, strength) : null;
+}
+
 /** The auto-palette range fit to a single offscreen render's escape values,
  * or null when the render has none (all-interior, or values not requested). A
  * throwaway cache holds the render as the single tile spanning [0,1) x [0,1)

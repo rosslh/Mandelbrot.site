@@ -736,6 +736,7 @@ mod lib_test {
             smooth_coloring,
             palette_start,
             palette_end,
+            None,
         );
 
         assert_eq!(
@@ -1082,6 +1083,7 @@ mod lib_test {
             0,
             200,
             1,
+            None,
         );
 
         assert_eq!(
@@ -1149,6 +1151,7 @@ mod lib_test {
             0,
             150,
             1,
+            None,
         );
 
         for row in 0..size {
@@ -1851,6 +1854,94 @@ mod lib_test {
     }
 
     #[test]
+    fn test_apply_palette_cdf_lookup() {
+        // Degenerate tables (too short to interpolate) are the identity
+        assert_eq!(super::apply_palette_cdf(0.3, &[]), 0.3);
+        assert_eq!(super::apply_palette_cdf(0.3, &[0.5]), 0.3);
+
+        // An identity table maps every position to itself (up to f32
+        // narrowing of the table entries, which are exact here)
+        let identity: Vec<f32> = (0..=8).map(|i| i as f32 / 8.0).collect();
+        for &norm in &[0.0, 0.125, 0.3, 0.5, 0.99, 1.0] {
+            assert!(
+                (super::apply_palette_cdf(norm, &identity) - norm).abs() < 1e-7,
+                "identity table moved {norm}"
+            );
+        }
+
+        // Linear interpolation between entries: a two-entry table [0, 1] is
+        // exactly linear, and a bent table lands halfway between neighbors
+        assert_eq!(super::apply_palette_cdf(0.37, &[0.0, 1.0]), 0.37);
+        let bent = [0.0_f32, 0.8, 1.0];
+        // norm 0.25 sits halfway between entries 0 and 1
+        assert!((super::apply_palette_cdf(0.25, &bent) - 0.4).abs() < 1e-7);
+        // norm 0.75 sits halfway between entries 1 and 2
+        assert!((super::apply_palette_cdf(0.75, &bent) - 0.9).abs() < 1e-7);
+
+        // Endpoints hit the table's ends exactly, and out-of-range positions
+        // clamp to them (values outside the palette window keep clamping to
+        // the palette's start and end colors)
+        assert_eq!(super::apply_palette_cdf(0.0, &bent), 0.0);
+        assert_eq!(super::apply_palette_cdf(1.0, &bent), 1.0);
+        assert_eq!(super::apply_palette_cdf(-0.5, &bent), 0.0);
+        assert_eq!(super::apply_palette_cdf(1.5, &bent), 1.0);
+
+        // A monotone table yields a monotone mapping, flat segments included
+        let plateau = [0.0_f32, 0.6, 0.6, 0.6, 1.0];
+        let mut previous = 0.0;
+        for step in 0..=1000 {
+            let norm = step as f64 / 1000.0;
+            let mapped = super::apply_palette_cdf(norm, &plateau);
+            assert!(
+                mapped >= previous,
+                "mapping decreased at {norm}: {mapped} < {previous}"
+            );
+            assert!((0.0..=1.0).contains(&mapped));
+            previous = mapped;
+        }
+    }
+
+    #[test]
+    fn test_color_cycles_apply_after_palette_cdf() {
+        // The CDF remaps the position inside the palette window; cycles then
+        // repeat the palette over the *remapped* position (mass-uniform
+        // cycles). So a value whose window position t remaps to g(t) must
+        // color exactly like a CDF-less value sitting at position g(t), for
+        // the same cycle count.
+        let (palette, reverse, cyclic) = super::get_color_palette("turbo", false);
+        let color_space = super::ValidColorSpace::Hsl;
+        // Window 0..100; g bends the midpoint down to 0.25
+        let cdf = [0.0_f32, 0.25, 1.0];
+        let color = |value: f64, cycles: u32, table: Option<&[f32]>| {
+            super::color_from_smoothed_value(
+                value,
+                palette,
+                reverse,
+                cyclic,
+                cycles,
+                &color_space,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                100.0,
+                table,
+            )
+        };
+
+        for cycles in [1, 2, 5] {
+            // value 50 -> t = 0.5 -> g(t) = 0.25 -> same color as value 25
+            // without a table
+            assert_eq!(color(50.0, cycles, Some(&cdf)), color(25.0, cycles, None));
+        }
+        // And the remap genuinely changes the output against linear
+        assert_ne!(color(50.0, 1, Some(&cdf)), color(50.0, 1, None));
+
+        // Interior pixels stay black regardless of the table
+        assert_eq!(color(f64::INFINITY, 2, Some(&cdf)), [0, 0, 0]);
+    }
+
+    #[test]
     fn test_color_palettes_initialization() {
         // Test that all palettes are properly initialized
         assert!(super::COLOR_PALETTES.contains_key("turbo"));
@@ -2451,6 +2542,8 @@ mod lib_test {
 
     /// Default-orientation coloring settings (no transforms, Hsl space),
     /// matching what the recolor tests previously passed positionally.
+    /// `palette_cdf` stays `None` (the linear mapping); tests exercising
+    /// histogram equalization set it on the returned value.
     fn coloring_options(
         scheme: &str,
         palette_min: i32,
@@ -2468,6 +2561,7 @@ mod lib_test {
             color_cycles: 1,
             distance_estimate: false,
             atom_domain: false,
+            palette_cdf: None,
         }
     }
 
@@ -2629,6 +2723,89 @@ mod lib_test {
             "Recolor with a new range must match a full re-render"
         );
         assert_ne!(refit, tile.image, "The narrowed range changes the output");
+    }
+
+    #[test]
+    fn test_recolor_with_cdf_matches_render() {
+        // The equalization table rides ColoringOptions so renders and
+        // recolors share it: rendering with a CDF attached and recoloring the
+        // cached values with the same CDF must agree byte-for-byte (smooth
+        // coloring off, so the f32-cached values are exact) — the same
+        // recolor-matches-render guarantee the linear path has.
+        let max_iterations = 200;
+        // A monotone, deliberately non-identity table (a sqrt bend).
+        let cdf: Vec<f32> = (0..=63).map(|i| (i as f32 / 63.0).sqrt()).collect();
+        let render = |table: Option<&[f32]>| {
+            super::generate_mandelbrot_set_image(
+                -2.0,
+                1.0,
+                -1.2,
+                1.2,
+                max_iterations,
+                2,
+                32,
+                32,
+                "inferno",
+                false,
+                0.0,
+                0.0,
+                0.0,
+                crate::ValidColorSpace::Hsl,
+                false,
+                0,
+                as_i32(max_iterations),
+                1,
+                table,
+            )
+        };
+
+        let rendered = render(Some(&cdf));
+        let mut coloring = coloring_options("inferno", 0, as_i32(max_iterations));
+        coloring.palette_cdf = Some(cdf.clone());
+        let recolored = super::recolor_values(&rendered.values, &coloring);
+        assert_eq!(
+            recolored, rendered.image,
+            "Recolor with the render's CDF must match the render"
+        );
+
+        // The table genuinely changes the output, and dropping it from the
+        // recolor reproduces the linear render exactly.
+        let linear = render(None);
+        assert_ne!(rendered.image, linear.image);
+        let linear_recolor = super::recolor_values(
+            &rendered.values,
+            &coloring_options("inferno", 0, as_i32(max_iterations)),
+        );
+        assert_eq!(
+            linear_recolor, linear.image,
+            "No CDF must reproduce the linear render byte-for-byte"
+        );
+    }
+
+    #[test]
+    fn test_fixed_palette_modes_ignore_cdf() {
+        // Distance-estimate and atom-domain values are already normalized to
+        // a fixed 0..1 palette domain; a stray equalization table must not
+        // distort them.
+        let values: Vec<f32> = (0..64).map(|i| i as f32 / 63.0).collect();
+        for mode in ["distanceEstimate", "atomDomain"] {
+            let mut with_cdf = coloring_options("turbo", 0, 200);
+            let mut without_cdf = coloring_options("turbo", 0, 200);
+            if mode == "distanceEstimate" {
+                with_cdf.distance_estimate = true;
+                without_cdf.distance_estimate = true;
+            } else {
+                with_cdf.atom_domain = true;
+                without_cdf.atom_domain = true;
+            }
+            with_cdf.palette_cdf = Some(vec![0.0, 0.9, 1.0]);
+
+            assert_eq!(
+                super::recolor_values(&values, &with_cdf),
+                super::recolor_values(&values, &without_cdf),
+                "{mode} mode must ignore the CDF"
+            );
+        }
     }
 
     #[test]

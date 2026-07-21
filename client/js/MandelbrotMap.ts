@@ -8,10 +8,11 @@ import ZoomAnimator from "./ZoomAnimator";
 import PointTooltip from "./PointTooltip";
 import NavigatorPanel from "./NavigatorPanel";
 import RegionRenderer from "./RegionRenderer";
-import TileCache, { CachedTile } from "./TileCache";
+import TileCache, { buildPaletteCdf, CachedTile } from "./TileCache";
 import {
   buildShareUrl,
   coloringOptions,
+  isFixedPaletteMode,
   MandelbrotConfig,
   parseShareParams,
 } from "./config";
@@ -98,6 +99,12 @@ class MandelbrotMap extends L.Map {
   origin: { re: string; im: string };
   zoomOffset: number;
   tileCache = new TileCache();
+  // The viewport-global equalization table for histogram coloring, or null
+  // for the linear mapping. Built from the visible escape-value distribution
+  // over the current palette window (rebuildPaletteCdf) and passed to every
+  // tile render and recolor, so the two stay byte-identical and tiles share
+  // one mapping (no seams).
+  paletteCdf: Float32Array | null = null;
   // Increments whenever a recolor pass or full re-render starts, so stale
   // in-flight recolor results are dropped instead of painting mixed palettes.
   private recolorGeneration = 0;
@@ -377,37 +384,87 @@ class MandelbrotMap extends L.Map {
     };
   }
 
-  /** In auto palette mode, applies the iteration range detected from the
-   * visible pixels (center-weighted) to the config and inputs, so the next
-   * render or recolor uses it. Only fits from a settled view: while tiles
-   * are still rendering the cache is a biased sample (fast-escaping exterior
-   * tiles land first), so mid-load callers keep the last settled fit and the
-   * load handler — which runs after the loading flag clears — applies the
-   * complete one. Returns whether the applied values changed. */
+  /** Fits the palette mapping to the visible pixels: in auto palette mode
+   * the window bounds (center-weighted detected range) are applied to the
+   * config and inputs, and under histogram coloring the equalization CDF is
+   * rebuilt over the (possibly updated) window in both auto and manual
+   * window modes — a pan changes the visible distribution, and with it the
+   * CDF, even when the bounds are the user's. Only fits from a settled view:
+   * while tiles are still rendering the cache is a biased sample
+   * (fast-escaping exterior tiles land first), so mid-load callers keep the
+   * last settled fit and the load handler — which runs after the loading
+   * flag clears — applies the complete one. Returns whether anything the
+   * coloring depends on (bounds or CDF) changed, so callers know a recolor
+   * is needed even when the bounds alone didn't move. */
   applyDetectedPaletteRange(): boolean {
-    if (!this.config.paletteAutoAdjust || this.layerLoading) {
+    if (this.layerLoading) {
       return false;
     }
 
-    const range = this.tileCache.detectedRange(this.mapBoundsInTileSpace);
-    if (!range) {
+    let changed = false;
+
+    if (this.config.paletteAutoAdjust) {
+      const range = this.tileCache.detectedRange(this.mapBoundsInTileSpace);
+      if (range) {
+        changed =
+          this.config.paletteMinIter !== range.min ||
+          this.config.paletteMaxIter !== range.max;
+
+        this.config.paletteMinIter = range.min;
+        this.config.paletteMaxIter = range.max;
+        if (changed) {
+          // The histogram's bound markers track the config, so the fit
+          // moving the bounds must repaint them. Optional-chained: the fit
+          // can run before the controls (which own the histogram) are
+          // constructed.
+          this.controls?.refreshPaletteHistogram();
+        }
+      }
+    }
+
+    return this.rebuildPaletteCdf() || changed;
+  }
+
+  /** Rebuilds the viewport-global equalization CDF from the visible
+   * histogram and the current palette window, blended toward the identity by
+   * the color-mapping slider (histogramColoring); cleared at strength 0 (fully
+   * linear) and in the fixed-palette render modes (which ignore the window).
+   * With no visible histogram to build from (all tiles interior, or none
+   * reporting — e.g. right after leaving a fixed-palette mode) the previous
+   * table is kept as the provisional mapping, exactly like the window bounds
+   * are. Returns whether the table changed, which requires a recolor even
+   * when the window bounds didn't move. */
+  private rebuildPaletteCdf(): boolean {
+    if (this.config.histogramColoring <= 0 || isFixedPaletteMode(this.config)) {
+      const changed = this.paletteCdf !== null;
+      this.paletteCdf = null;
+      return changed;
+    }
+
+    const stats = this.tileCache.viewStats(this.mapBoundsInTileSpace);
+    if (!stats) {
       return false;
     }
 
-    const changed =
-      this.config.paletteMinIter !== range.min ||
-      this.config.paletteMaxIter !== range.max;
+    const cdf = buildPaletteCdf(
+      stats,
+      {
+        min: this.config.paletteMinIter,
+        max: this.config.paletteMaxIter,
+      },
+      this.config.histogramColoring / 100,
+    );
 
-    this.config.paletteMinIter = range.min;
-    this.config.paletteMaxIter = range.max;
-    if (changed) {
-      // The histogram's bound markers track the config, so the fit moving
-      // the bounds must repaint them. Optional-chained: the fit can run
-      // before the controls (which own the histogram) are constructed.
-      this.controls?.refreshPaletteHistogram();
-    }
+    const previous = this.paletteCdf;
+    const unchanged =
+      (cdf === null && previous === null) ||
+      (cdf !== null &&
+        previous !== null &&
+        cdf.length === previous.length &&
+        cdf.every((entry, index) => entry === previous[index]));
 
-    return changed;
+    this.paletteCdf = cdf;
+    return !unchanged;
   }
 
   /** Draws the precision-tier diagnostics overlay (issue #50) on a tile
@@ -467,7 +524,7 @@ class MandelbrotMap extends L.Map {
           type: "recolor",
           payload: {
             values: tile.values,
-            coloring: coloringOptions(this.config),
+            coloring: coloringOptions(this.config, this.paletteCdf),
           },
         };
 
@@ -603,6 +660,28 @@ class MandelbrotMap extends L.Map {
     this.recolorVisibleTiles();
     // The Julia thumbnail uses the same palette; keep it in step.
     this.navigatorPanel?.refresh();
+    // The histogram panel's palette strip shows these same colors.
+    this.controls?.refreshPaletteHistogram();
+  }
+
+  /** Applies an explicit palette-window or color-mapping change (a marker
+   * drag, the Color mapping select) without re-rendering: rebuild the
+   * equalization CDF for the new window — under histogram coloring it spans
+   * exactly the window, so moving a bound reshapes the table — then repaint
+   * in place. Unlike the settle-time fits this skips the mid-load guard: the
+   * user is acting on the histogram they can see, so the rebuild uses the
+   * same (possibly still-loading) data; the load handler's full fit follows
+   * as usual. */
+  applyPaletteWindowChange() {
+    if (this.mandelbrotLayer.isLoading()) {
+      this.recolorPendingOnLoad = true;
+    }
+    this.rebuildPaletteCdf();
+    this.recolorVisibleTiles();
+    // The Julia thumbnail follows the same color-mapping setting.
+    this.navigatorPanel?.refresh();
+    // The histogram panel's palette strip warps with the mapping.
+    this.controls?.refreshPaletteHistogram();
   }
 
   /** Applies an explicit palette-range action (a reset, or enabling

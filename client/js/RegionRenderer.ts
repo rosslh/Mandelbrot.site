@@ -46,13 +46,19 @@ class RegionRenderer {
    * whose columns straddle such a refit comes out with two different color
    * mappings. The optional `frame` pins the bounds to an explicit origin and
    * zoom offset instead of the map's current ones; the appearance settings
-   * still come from the map either way. */
+   * still come from the map either way. The optional `coloring` overrides the
+   * palette mapping entirely: consumers that manage their own per-render
+   * palette (the zoom animator, which colors each frame to its own window and
+   * equalization table) pass one so the render does not inherit the map's
+   * viewport-global table, which is fit to the on-screen view rather than the
+   * off-screen region being rendered. */
   buildPayload(
     bounds: TileRect,
     imageWidth: number,
     imageHeight: number,
     includeValues: boolean,
     frame?: RenderFrame,
+    coloring?: ColoringOptions,
   ): TileRenderPayload {
     return {
       includeValues,
@@ -65,7 +71,12 @@ class RegionRenderer {
       imageWidth,
       imageHeight,
       smoothColoring: this.map.config.smoothColoring,
-      coloring: coloringOptions(this.map.config),
+      // By default the viewport's equalization table rides along (histogram
+      // coloring), so a fresh render matches a recolor of cached values
+      // byte-for-byte and all tiles share one viewport-global mapping. An
+      // explicit `coloring` opts out of that shared table (see above).
+      coloring:
+        coloring ?? coloringOptions(this.map.config, this.map.paletteCdf),
     };
   }
 
@@ -203,13 +214,16 @@ class RegionRenderer {
    * image, the escaped-pixel iteration range, the precision tier, and (when
    * `includeValues` is set) the per-pixel smoothed escape values that
    * recoloring consumes. The optional `frame` pins the bounds to an explicit
-   * origin and zoom offset instead of the map's current ones. */
+   * origin and zoom offset instead of the map's current ones; the optional
+   * `coloring` overrides the palette mapping instead of inheriting the map's
+   * viewport-global one (see buildPayload). */
   async renderRegion(
     bounds: TileRect,
     imageWidth: number,
     imageHeight: number,
     includeValues: boolean,
     frame?: RenderFrame,
+    coloring?: ColoringOptions,
   ): Promise<MandelbrotResponse> {
     const request: CalculateRequest = {
       type: "calculate",
@@ -219,6 +233,7 @@ class RegionRenderer {
         imageHeight,
         includeValues,
         frame,
+        coloring,
       ),
     };
 
@@ -269,11 +284,14 @@ class RegionRenderer {
   }
 
   /** Renders the region to an offscreen canvas (no escape values, no tile
-   * cache entry — pure pixels for export-style consumers). */
+   * cache entry — pure pixels for export-style consumers). The optional
+   * `coloring` overrides the palette mapping instead of inheriting the map's
+   * viewport-global one (see buildPayload). */
   async renderToCanvas(
     bounds: TileRect,
     imageWidth: number,
     imageHeight: number,
+    coloring?: ColoringOptions,
   ): Promise<HTMLCanvasElement> {
     const canvas = document.createElement("canvas");
     const context = canvas.getContext("2d");
@@ -290,6 +308,8 @@ class RegionRenderer {
       imageWidth,
       imageHeight,
       false,
+      undefined,
+      coloring,
     );
 
     const imageData = new ImageData(
