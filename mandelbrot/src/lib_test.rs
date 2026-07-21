@@ -1787,39 +1787,6 @@ mod lib_test {
     }
 
     #[test]
-    fn test_palettes_span_wide_lightness_range() {
-        use palette::{FromColor, Okhsl, Srgb};
-
-        for name in super::COLOR_PALETTES
-            .keys()
-            .chain(super::REVERSE_COLOR_PALETTES.keys())
-        {
-            let (palette, _, _) = super::get_color_palette(name, false);
-            let (min, max) = (0..=255)
-                .map(|i| {
-                    let color = palette.eval_continuous(f64::from(i) / 255.0);
-                    Okhsl::from_color(Srgb::new(
-                        f32::from(color.r) / 255.0,
-                        f32::from(color.g) / 255.0,
-                        f32::from(color.b) / 255.0,
-                    ))
-                    .lightness
-                })
-                .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), l| {
-                    (min.min(l), max.max(l))
-                });
-
-            // Guards against palettes washing out fractal detail: before the
-            // contrast stretch (see `stretch_palette_contrast`) some palettes
-            // spanned barely half the lightness range.
-            assert!(
-                max - min >= 0.65,
-                "palette {name} spans too little lightness: {min} to {max}"
-            );
-        }
-    }
-
-    #[test]
     fn test_cyclical_palettes_wrap_seamlessly() {
         for name in ["rainbow", "sinebow"] {
             let (palette, _, _) = super::get_color_palette(name, false);
