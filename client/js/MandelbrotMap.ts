@@ -113,9 +113,6 @@ class MandelbrotMap extends L.Map {
   // paint, but their escape data describes superseded settings and must not
   // enter the cache, where it would skew palette detection.
   renderGeneration = 0;
-  // Set when a color setting changes while tiles are still rendering: those
-  // tiles were requested with the old colors, so repaint once they all land.
-  private recolorPendingOnLoad = false;
   // Drives the loading spinner beneath the zoom control: visible while the
   // layer is rendering tiles or any recolor pass is repainting them.
   private loadingSpinner: HTMLElement | null = null;
@@ -655,11 +652,9 @@ class MandelbrotMap extends L.Map {
    * lightness sliders, color space) by recoloring the on-screen tiles in
    * place — these settings don't affect escape values, so no re-render is
    * needed in either palette mode. Tiles still rendering were requested with
-   * the old colors; they are repainted when the layer finishes loading. */
+   * the old colors; the tile layer rewrites each of them with the live
+   * settings when its escape values arrive. */
   applyColorSettings() {
-    if (this.mandelbrotLayer.isLoading()) {
-      this.recolorPendingOnLoad = true;
-    }
     this.recolorVisibleTiles();
     // The Julia thumbnail uses the same palette; keep it in step.
     this.navigatorPanel?.refresh();
@@ -676,9 +671,6 @@ class MandelbrotMap extends L.Map {
    * same (possibly still-loading) data; the load handler's full fit follows
    * as usual. */
   applyPaletteWindowChange() {
-    if (this.mandelbrotLayer.isLoading()) {
-      this.recolorPendingOnLoad = true;
-    }
     this.rebuildPaletteCdf();
     this.recolorVisibleTiles();
     // The Julia thumbnail follows the same color-mapping setting.
@@ -691,9 +683,6 @@ class MandelbrotMap extends L.Map {
    * auto-adjust) without re-rendering: in auto mode fit to the on-screen
    * tiles, then repaint in place. */
   refitPaletteAndRecolor() {
-    if (this.mandelbrotLayer.isLoading()) {
-      this.recolorPendingOnLoad = true;
-    }
     this.applyDetectedPaletteRange();
     this.recolorVisibleTiles();
     // The refit moved the palette bounds; keep the histogram markers in step.
@@ -703,14 +692,13 @@ class MandelbrotMap extends L.Map {
   }
 
   /** Runs when every visible tile has finished rendering: fit the palette to
-   * the complete view (auto mode), and repaint tiles that landed with
-   * out-of-date colors after a mid-load color change. */
+   * the complete view (auto mode) and repaint if the fit moved anything.
+   * Mid-load color changes need no handling here — each arriving tile
+   * rewrites itself with the live settings (see MandelbrotLayer). */
   private handleTilesLoaded() {
-    const rangeChanged = this.applyDetectedPaletteRange();
-    if (rangeChanged || this.recolorPendingOnLoad) {
+    if (this.applyDetectedPaletteRange()) {
       this.recolorVisibleTiles();
     }
-    this.recolorPendingOnLoad = false;
   }
 
   private handleMapClick = (e: L.LeafletMouseEvent) => {
@@ -832,7 +820,6 @@ class MandelbrotMap extends L.Map {
     // must not paint over the fresh tiles.
     this.invalidateTileCache();
     this.recolorGeneration += 1;
-    this.recolorPendingOnLoad = false;
     await this.createPool();
     if (resetView) {
       this.goToCoordinates(

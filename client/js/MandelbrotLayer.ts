@@ -1,8 +1,13 @@
 import debounce from "lodash/debounce";
 import * as L from "leaflet";
 import type MandelbrotMap from "./MandelbrotMap";
-import { MandelbrotResponse, TileRect, WorkerRequest } from "./protocol";
-import { supersamplingFactor } from "./config";
+import {
+  MandelbrotResponse,
+  RecolorResponse,
+  TileRect,
+  WorkerRequest,
+} from "./protocol";
+import { coloringOptions, supersamplingFactor } from "./config";
 import { drawTierOverlay } from "./tierOverlay";
 
 type Done = (error: null, tile: HTMLCanvasElement) => void;
@@ -149,21 +154,11 @@ class MandelbrotLayer extends L.GridLayer {
       };
       const response = (await workerTask(request)) as MandelbrotResponse;
 
-      const imageData = new ImageData(
-        Uint8ClampedArray.from(response.image),
-        scaledTileSize,
-        scaledTileSize,
-      );
-      context.putImageData(imageData, 0, 0);
-      // Diagnostics: tint the tile by the precision tier that rendered it
-      // (issue #50). Drawn on top of the pixels; a later toggle repaints from
-      // the cached escape values, so it never has to be "undrawn".
-      if (this._map.config.showTierOverlay) {
-        drawTierOverlay(canvas, response.tier);
-      }
       // A generation bump mid-flight means this tile's escape data describes
       // superseded render parameters: still paint it (its neighbors look the
-      // same), but keep it out of the cache.
+      // same), but keep it out of the cache. Recorded before the first paint
+      // so a recolor pass that starts while this tile is being rewritten
+      // below already sees it.
       if (response.values && generation === this._map.renderGeneration) {
         this._map.tileCache.record(
           tilePosition,
@@ -173,6 +168,50 @@ class MandelbrotLayer extends L.GridLayer {
           response.values,
           response.tier,
         );
+      }
+
+      // The returned image was colored with the settings snapshotted at
+      // pickup, and color/mapping settings can change while the worker
+      // computes — painting that image next to already-recolored neighbors
+      // leaves a mixed-palette view. Rewrite the pixels from the escape
+      // values with the settings current *now*, repeating if they change
+      // again mid-recolor, so the tile always lands painted with the live
+      // settings.
+      let image: Uint8Array = response.image;
+      let paintedColoring = JSON.stringify(request.payload.coloring);
+      while (response.values) {
+        const currentColoring = coloringOptions(
+          this._map.config,
+          this._map.paletteCdf,
+        );
+        const currentKey = JSON.stringify(currentColoring);
+        if (currentKey === paintedColoring) {
+          break;
+        }
+        try {
+          image = (await workerTask({
+            type: "recolor",
+            payload: { values: response.values, coloring: currentColoring },
+          })) as RecolorResponse;
+        } catch {
+          // The pool was terminated by a full re-render, which replaces
+          // this tile anyway; paint what we have so the tile still loads.
+          break;
+        }
+        paintedColoring = currentKey;
+      }
+
+      const imageData = new ImageData(
+        Uint8ClampedArray.from(image),
+        scaledTileSize,
+        scaledTileSize,
+      );
+      context.putImageData(imageData, 0, 0);
+      // Diagnostics: tint the tile by the precision tier that rendered it
+      // (issue #50). Drawn on top of the pixels; a later toggle repaints from
+      // the cached escape values, so it never has to be "undrawn".
+      if (this._map.config.showTierOverlay) {
+        drawTierOverlay(canvas, response.tier);
       }
       announceFirstTileRendered();
       this._map.queuedTileTasks = this._map.queuedTileTasks.filter(
