@@ -2610,7 +2610,7 @@ mod lib_test {
         palette_max: i32,
     ) -> super::ColoringOptions {
         super::ColoringOptions {
-            color_scheme: scheme.to_string(),
+            palette: scheme.to_string(),
             reverse_colors: false,
             shift_hue_amount: 0.0,
             saturate_amount: 0.0,
@@ -2618,7 +2618,7 @@ mod lib_test {
             color_space: 0, // Hsl
             palette_min_iter: palette_min,
             palette_max_iter: palette_max,
-            color_cycles: 1,
+            color_density: 1,
             distance_estimate: false,
             atom_domain: false,
             palette_cdf: None,

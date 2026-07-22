@@ -12,7 +12,7 @@ import TileCache, { buildPaletteCdf, CachedTile } from "./TileCache";
 import {
   buildShareUrl,
   coloringOptions,
-  isFixedPaletteMode,
+  isFixedPaletteMethod,
   MandelbrotConfig,
   parseShareParams,
 } from "./config";
@@ -147,7 +147,7 @@ class MandelbrotMap extends L.Map {
     this.config = { ...initialConfig };
     // Apply any share-URL parameters before the pool spawns or any tile is
     // requested: the spawn warmups are chosen by the view's depth and
-    // exponent, and the first (and only) tile batch should be the target
+    // power, and the first (and only) tile batch should be the target
     // view. The previous order spawned a pool against the default view, let
     // setView request throwaway default-view tiles, then terminated that
     // pool and spawned a second one once the URL was parsed — two full
@@ -403,7 +403,7 @@ class MandelbrotMap extends L.Map {
 
     let changed = false;
 
-    if (this.config.paletteAutoAdjust) {
+    if (this.config.paletteAutoFit) {
       const range = this.tileCache.detectedRange(this.mapBoundsInTileSpace);
       if (range) {
         changed =
@@ -435,7 +435,10 @@ class MandelbrotMap extends L.Map {
    * are. Returns whether the table changed, which requires a recolor even
    * when the window bounds didn't move. */
   private rebuildPaletteCdf(): boolean {
-    if (this.config.histogramColoring <= 0 || isFixedPaletteMode(this.config)) {
+    if (
+      this.config.histogramColoring <= 0 ||
+      isFixedPaletteMethod(this.config)
+    ) {
       const changed = this.paletteCdf !== null;
       this.paletteCdf = null;
       return changed;
@@ -779,10 +782,8 @@ class MandelbrotMap extends L.Map {
     // never render under Liftoff. Direct-depth multibrot views render every
     // tile through the direct general stream kernel and deep ones through
     // the general perturbation kernel, so the two warmups are exclusive.
-    // Exponent-2 loads skip both entirely (see worker.js).
-    const isMultibrot = Boolean(
-      this.config?.exponent && this.config.exponent !== 2,
-    );
+    // Power-2 loads skip both entirely (see worker.js).
+    const isMultibrot = Boolean(this.config?.power && this.config.power !== 2);
     const initialZoom = this.config?.zoom ?? 0;
     const warmGeneralKernel = isMultibrot && initialZoom >= DEEP_ZOOM_THRESHOLD;
     const warmGeneralDirectKernel =

@@ -51,15 +51,15 @@ const supportsRelaxedSimd = WebAssembly.validate(
             smoothColoring: true,
             includeValues: false,
             coloring: {
-              colorScheme: "turbo",
-              colorCycles: 1,
+              palette: "turbo",
+              colorDensity: 1,
               reverseColors: false,
               shiftHueAmount: 0,
               saturateAmount: 0,
               lightenAmount: 0,
               colorSpace: 2,
               paletteMinIter: 0,
-              paletteMaxIter: view.iterations,
+              paletteMaxIter: view.maxIterations,
             },
             ...view,
           }).free();
@@ -83,8 +83,8 @@ const supportsRelaxedSimd = WebAssembly.validate(
       originIm: "0.1318259042053119",
       bounds: { xMin: 655, xMax: 656, yMin: 655, yMax: 656, zoom: 10 },
       zoomOffset: 0,
-      iterations: 1000,
-      exponent: 2,
+      maxIterations: 1000,
+      power: 2,
       imageWidth: 64,
       imageHeight: 64,
     });
@@ -94,7 +94,7 @@ const supportsRelaxedSimd = WebAssembly.validate(
     // above never tiers it up and deep multibrot tiles would run it at
     // Liftoff speed (measured: only -8% instead of -45% end-to-end on the
     // e52 view, bench/LOG.md 2026-07-08). The pool requests this extra
-    // warmup at spawn only when the current view uses exponent != 2, so
+    // warmup at spawn only when the current view uses power != 2, so
     // ordinary loads pay nothing (the unconditional version cost every
     // light page load ~70 ms). Two tiny low-budget renders of a deep
     // exponent-52 boundary view (5% interior, escapers mean ~140
@@ -106,8 +106,8 @@ const supportsRelaxedSimd = WebAssembly.validate(
         originIm: "-0.7341970302369814",
         bounds: { xMin: 2621, xMax: 2622, yMin: 2621, yMax: 2622, zoom: 12 },
         zoomOffset: 38,
-        iterations: 300,
-        exponent: 52,
+        maxIterations: 300,
+        power: 52,
         imageWidth: 32,
         imageHeight: 32,
       });
@@ -118,7 +118,7 @@ const supportsRelaxedSimd = WebAssembly.validate(
     // general perturbation kernel above — so direct multibrot first tiles
     // would render at Liftoff speed for their entire duration (the stream
     // kernel is one call per wave). The pool requests this warmup at spawn
-    // only when the current view uses exponent != 2 at direct depth.
+    // only when the current view uses power != 2 at direct depth.
     // Boundary-rich view just past the degree-6 multibrot cusp (~82%
     // escapers at ~27 iterations mean, probed 2026-07-10), 128px for
     // execution volume; the kernel instantiation is shared by all
@@ -129,8 +129,8 @@ const supportsRelaxedSimd = WebAssembly.validate(
         originIm: "0",
         bounds: { xMin: 655, xMax: 656, yMin: 655, yMax: 656, zoom: 10 },
         zoomOffset: 0,
-        iterations: 2000,
-        exponent: 6,
+        maxIterations: 2000,
+        power: 6,
         imageWidth: 128,
         imageHeight: 128,
       });
@@ -154,8 +154,8 @@ const supportsRelaxedSimd = WebAssembly.validate(
         originIm: "1",
         bounds: { xMin: 2621, xMax: 2622, yMin: 2621, yMax: 2622, zoom: 12 },
         zoomOffset: 36,
-        iterations: 2000,
-        exponent: 2,
+        maxIterations: 2000,
+        power: 2,
         imageWidth: 256,
         imageHeight: 256,
       });
@@ -176,8 +176,8 @@ const supportsRelaxedSimd = WebAssembly.validate(
         originIm: "1",
         bounds: { xMin: 2621, xMax: 2622, yMin: 2621, yMax: 2622, zoom: 12 },
         zoomOffset: 248,
-        iterations: 1500,
-        exponent: 2,
+        maxIterations: 1500,
+        power: 2,
         imageWidth: 128,
         imageHeight: 128,
       });

@@ -134,26 +134,39 @@
         </summary>
         <div class="details-content">
           <div class="input-wrapper align-start">
-            <label for="iterations" class="label-with-subtitle">
+            <label for="maxIterations" class="label-with-subtitle">
               <span>Max iterations</span>
               <span class="secondary">Detail level</span>
             </label>
-            <input type="number" required id="iterations" name="iterations" />
+            <input
+              type="number"
+              required
+              id="maxIterations"
+              name="maxIterations"
+            />
           </div>
           <div class="iteration-buttons">
-            <button type="button" id="iterationsMul2" class="underline-button">
+            <button
+              type="button"
+              id="maxIterationsMul2"
+              class="underline-button"
+            >
               &times;2
             </button>
-            <button type="button" id="iterationsDiv2" class="underline-button">
+            <button
+              type="button"
+              id="maxIterationsDiv2"
+              class="underline-button"
+            >
               &divide;2
             </button>
           </div>
           <div class="input-wrapper mobile-hidden">
-            <label for="exponent" class="label-with-subtitle">
+            <label for="power" class="label-with-subtitle">
               <span>Power</span>
               <span class="secondary">Multibrot order</span>
             </label>
-            <input type="number" required id="exponent" name="exponent" />
+            <input type="number" required id="power" name="power" />
           </div>
           <div class="input-wrapper mobile-hidden">
             <label
@@ -186,11 +199,11 @@
       </details>
       <details class="mobile-hidden" id="colorPalette">
         <summary>
-          <label for="colorScheme">Color palette</label>
+          <label for="palette">Color palette</label>
           <button
             type="button"
             class="reset-button"
-            id="resetColorScheme"
+            id="resetColorPalette"
             title="Reset color palette"
           >
             ↺
@@ -198,12 +211,7 @@
         </summary>
         <div class="details-content">
           <div class="input-wrapper">
-            <select
-              id="colorScheme"
-              name="colorScheme"
-              required
-              class="full-width"
-            >
+            <select id="palette" name="palette" required class="full-width">
               <optgroup label="Sequential (Multi-Hue)">
                 <option value="cividis">Cividis</option>
                 <option value="cool">Cool</option>
@@ -253,14 +261,14 @@
           </div>
           <div class="input-wrapper">
             <label
-              for="colorCycles"
+              for="colorDensity"
               title="How many times the palette repeats across the palette range. Non-cyclical palettes alternate direction on each repeat so the colors stay seamless."
               >Color density</label
             >
             <input
               type="number"
-              id="colorCycles"
-              name="colorCycles"
+              id="colorDensity"
+              name="colorDensity"
               min="1"
               max="100"
               step="1"
@@ -298,7 +306,7 @@
           <button
             type="button"
             class="reset-button"
-            id="resetPaletteRange"
+            id="resetColorMapping"
             title="Reset color mapping"
           >
             ↺
@@ -307,11 +315,11 @@
         <div class="details-content">
           <div class="input-wrapper">
             <label
-              for="renderMode"
+              for="coloringMethod"
               title="How pixels are colored. Standard: escape time. Distance estimate: distance to the set boundary, for a crisp image. Atom domains: the period of the pixel's atom domain on a categorical palette. The non-standard modes are available at shallow zoom (direct f64) only."
               >Coloring method</label
             >
-            <select id="renderMode" name="renderMode" required>
+            <select id="coloringMethod" name="coloringMethod" required>
               <option value="standard">Standard</option>
               <option value="distanceEstimate">Distance estimate</option>
               <option value="atomDomain">Atom domains</option>
@@ -340,12 +348,12 @@
           <div class="checkbox-wrapper">
             <input
               type="checkbox"
-              id="paletteAutoAdjust"
-              name="paletteAutoAdjust"
+              id="paletteAutoFit"
+              name="paletteAutoFit"
               checked
             />
             <label
-              for="paletteAutoAdjust"
+              for="paletteAutoFit"
               title="Fit the palette range to the escape times visible in the current view as you pan and zoom. Dragging the histogram markers sets the range by hand and turns this off."
               >Auto-fit range</label
             >
@@ -448,6 +456,9 @@
           </div>
         </div>
       </details>
+      <!-- The details id keeps its historical juliaSet name: the open/closed
+           persistence is keyed by it. The elements inside use navigator* ids
+           matching the panel's title. -->
       <details class="mobile-hidden" id="juliaSet">
         <summary>
           <span>Navigator</span>
@@ -455,8 +466,8 @@
         <div class="details-content">
           <div class="input-wrapper">
             <select
-              id="juliaPanelMode"
-              name="juliaPanelMode"
+              id="navigatorViewMode"
+              name="navigatorViewMode"
               aria-label="Navigator view"
               class="full-width"
             >
@@ -464,16 +475,16 @@
               <option value="julia">Julia set</option>
             </select>
           </div>
-          <p class="secondary" id="juliaSetHint">
+          <p class="secondary" id="navigatorHint">
             Where the current view sits in the Mandelbrot set.
           </p>
-          <div id="juliaSetThumbnail">
+          <div id="navigatorThumbnail">
             <canvas
-              id="juliaSetCanvas"
+              id="navigatorCanvas"
               aria-label="Minimap of the Mandelbrot set with the current view marked"
             ></canvas>
           </div>
-          <p class="secondary" id="juliaSetCoordinates"></p>
+          <p class="secondary" id="navigatorCoordinates"></p>
         </div>
       </details>
       <details class="mobile-hidden" id="pinnedLocations">
@@ -510,7 +521,7 @@
           <button
             type="button"
             class="reset-button"
-            id="resetCoordinates"
+            id="resetLocation"
             title="Reset location"
           >
             ↺
@@ -763,20 +774,16 @@
         </div>
       </form>
     </dialog>
-    <dialog id="changeExponentModal" class="overlay form-modal">
-      <form id="changeExponentForm">
+    <dialog id="changePowerModal" class="overlay form-modal">
+      <form id="changePowerForm">
         <strong>Change power?</strong>
         <p>
           Changing the power renders a different fractal and resets the view to
           its starting position.
         </p>
         <div class="submit-or-cancel">
-          <button type="submit" id="changeExponentSubmit">Change</button>
-          <button
-            type="button"
-            id="changeExponentCancel"
-            class="underline-button"
-          >
+          <button type="submit" id="changePowerSubmit">Change</button>
+          <button type="button" id="changePowerCancel" class="underline-button">
             Cancel
           </button>
         </div>

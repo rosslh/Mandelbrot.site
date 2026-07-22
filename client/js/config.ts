@@ -10,19 +10,20 @@ import { isValidDecimalCoordinate } from "./highPrecision";
 import { formatMagnification } from "./magnification";
 
 export type MandelbrotConfig = {
-  iterations: number;
-  exponent: number;
-  colorScheme: string;
+  maxIterations: number;
+  power: number;
+  palette: string;
   // How many times the palette repeats across the palette range; cyclical
   // palettes wrap, others boomerang (alternate direction) to stay seamless.
-  colorCycles: number;
+  colorDensity: number;
   // Slides the palette along the range, as a 0–100 slider spanning one
-  // palette length. With two or more color cycles (or a cyclical palette)
+  // palette length. With a color density of two or more (or a cyclical
+  // palette)
   // the band pattern phase-shifts and glides seamlessly; a single pass has
   // no whole pattern to slide, so it rotates instead (modulo 1), keeping
   // every color in use at the cost of a seam where the palette's ends meet
   // — the honest trade, since the seamless alternative would truncate part
-  // of the palette. Like colorCycles it applies in every render mode.
+  // of the palette. Like colorDensity it applies in every coloring method.
   paletteOffset: number;
   lightenAmount: number;
   saturateAmount: number;
@@ -39,7 +40,7 @@ export type MandelbrotConfig = {
   // perturbation f64 / hybrid float-exp) that rendered it (issue #50).
   showTierOverlay: boolean;
   smoothColoring: boolean;
-  // What each pixel's color encodes — one of RENDER_MODES:
+  // What each pixel's color encodes — one of COLORING_METHODS:
   // - "standard": escape time (the classic coloring).
   // - "distanceEstimate" (issue #46): distance to the set boundary, for
   //   crisp boundary images.
@@ -47,10 +48,10 @@ export type MandelbrotConfig = {
   //   domain (the iteration index of the orbit's nearest approach to the
   //   origin) on a categorical palette, visualizing where the set's
   //   components of each period live.
-  // The non-standard modes render on the direct f64 path only; deeper
+  // The non-standard methods render on the direct f64 path only; deeper
   // (zoomed) tiles fall back to escape-time coloring. They also fix the
   // palette domain, ignoring the palette range.
-  renderMode: string;
+  coloringMethod: string;
   // How the palette is distributed inside the palette window, as a 0–100
   // slider blending between the two classic mappings:
   // - 0 ("Linear"): colors spread evenly across the iteration range.
@@ -71,7 +72,7 @@ export type MandelbrotConfig = {
   // When enabled the palette range fits itself to the on-screen tiles and
   // the min/max inputs become read-only displays; when disabled they are
   // the user's to edit.
-  paletteAutoAdjust: boolean;
+  paletteAutoFit: boolean;
 
   // Coordinates are decimal strings because deep zooms exceed f64 precision.
   re: string;
@@ -80,10 +81,10 @@ export type MandelbrotConfig = {
 };
 
 export const defaultConfig: MandelbrotConfig = {
-  iterations: 200,
-  exponent: 2,
-  colorScheme: "turbo",
-  colorCycles: 1,
+  maxIterations: 200,
+  power: 2,
+  palette: "turbo",
+  colorDensity: 1,
   paletteOffset: 0,
   lightenAmount: 0,
   saturateAmount: 0,
@@ -93,28 +94,28 @@ export const defaultConfig: MandelbrotConfig = {
   supersampling: "fast",
   showTierOverlay: false,
   smoothColoring: true,
-  renderMode: "standard",
+  coloringMethod: "standard",
   histogramColoring: 0,
   paletteMinIter: 0,
   paletteMaxIter: 200,
-  paletteAutoAdjust: true,
+  paletteAutoFit: true,
 
   re: "-0.5",
   im: "0",
   zoom: 3,
 };
 
-export const RENDER_MODES = [
+export const COLORING_METHODS = [
   "standard",
   "distanceEstimate",
   "atomDomain",
 ] as const;
 
-/** Whether the config's render mode fixes the palette domain (the
- * distance-estimate and atom-domain modes), making the palette range
+/** Whether the config's coloring method fixes the palette domain (the
+ * distance-estimate and atom-domain methods), making the palette range
  * inapplicable. */
-export function isFixedPaletteMode(config: MandelbrotConfig): boolean {
-  return config.renderMode !== "standard";
+export function isFixedPaletteMethod(config: MandelbrotConfig): boolean {
+  return config.coloringMethod !== "standard";
 }
 
 // Ceiling on the tile-resolution multiplier: a dpr-3 phone at "4" would
@@ -160,7 +161,7 @@ type BooleanConfigKey = {
 // - "rerender": affects the escape values (or the tiles' pixel density), so
 //   every tile re-renders.
 // - "none": the change itself repaints nothing; its wiring applies any
-//   visual effect explicitly (paletteAutoAdjust refits only when enabled).
+//   visual effect explicitly (paletteAutoFit refits only when enabled).
 export type SettingEffect = "recolor" | "rerender" | "none";
 
 type BaseSpec = {
@@ -179,7 +180,7 @@ export type NumberSpec = BaseSpec & {
   max: number;
   allowFraction?: boolean;
   // Changing this setting moves the map back to the initial view (the
-  // exponent picks a different fractal, so the old position is meaningless).
+  // power picks a different fractal, so the old position is meaningless).
   resetView?: boolean;
 };
 // A numeric setting with no sidebar input: it is set programmatically (the
@@ -196,7 +197,7 @@ export type SliderSpec = BaseSpec & {
   control: "slider";
 };
 export type SelectSpec = BaseSpec & {
-  key: "colorScheme" | "renderMode" | "supersampling";
+  key: "palette" | "coloringMethod" | "supersampling";
   control: "select";
 };
 export type SelectNumberSpec = BaseSpec & {
@@ -263,7 +264,7 @@ export const settingsSchema: SettingSpec[] = [
   },
   // Render settings
   {
-    key: "iterations",
+    key: "maxIterations",
     control: "number",
     urlParam: "i",
     effect: "rerender",
@@ -271,7 +272,7 @@ export const settingsSchema: SettingSpec[] = [
     max: 10 ** 9,
   },
   {
-    key: "exponent",
+    key: "power",
     control: "number",
     urlParam: "e",
     effect: "rerender",
@@ -279,12 +280,12 @@ export const settingsSchema: SettingSpec[] = [
     max: 10 ** 9,
     resetView: true,
   },
-  // Render mode: what the cached per-pixel values encode (escape time,
+  // Coloring method: what the cached per-pixel values encode (escape time,
   // boundary distance, or atom-domain period), so switching re-renders.
-  // Legacy share URLs carried the modes as the "de"/"ad" boolean params;
+  // Legacy share URLs carried the methods as the "de"/"ad" boolean params;
   // parseShareParams still honors those.
   {
-    key: "renderMode",
+    key: "coloringMethod",
     control: "select",
     urlParam: "m",
     effect: "rerender",
@@ -295,9 +296,9 @@ export const settingsSchema: SettingSpec[] = [
   // repaints the on-screen tiles explicitly (see wireCheckboxInput).
   { key: "showTierOverlay", control: "checkbox", effect: "none" },
   // Color scheme
-  { key: "colorScheme", control: "select", urlParam: "c", effect: "recolor" },
+  { key: "palette", control: "select", urlParam: "c", effect: "recolor" },
   {
-    key: "colorCycles",
+    key: "colorDensity",
     control: "number",
     urlParam: "cc",
     effect: "recolor",
@@ -380,7 +381,7 @@ export const settingsSchema: SettingSpec[] = [
     max: 10 ** 9,
   },
   {
-    key: "paletteAutoAdjust",
+    key: "paletteAutoFit",
     control: "checkbox",
     urlParam: "pm",
     effect: "none",
@@ -399,7 +400,7 @@ export function coloringOptions(
   paletteCdf?: Float32Array | null,
 ): ColoringOptions {
   const options: ColoringOptions = {
-    colorScheme: config.colorScheme,
+    palette: config.palette,
     reverseColors: config.reverseColors,
     shiftHueAmount: config.shiftHueAmount,
     saturateAmount: config.saturateAmount,
@@ -407,15 +408,15 @@ export function coloringOptions(
     colorSpace: config.colorSpace,
     paletteMinIter: config.paletteMinIter,
     paletteMaxIter: config.paletteMaxIter,
-    colorCycles: config.colorCycles,
+    colorDensity: config.colorDensity,
     // The config stores the offset as a 0–100 percentage of one palette
     // length; the wasm consumes it as 0..1.
     paletteOffset: config.paletteOffset / 100,
     // The worker protocol (and the Rust struct behind it) carries the two
-    // modes as independent flags; the single-select mode guarantees at most
-    // one is set.
-    distanceEstimate: config.renderMode === "distanceEstimate",
-    atomDomain: config.renderMode === "atomDomain",
+    // methods as independent flags; the single-select method guarantees at
+    // most one is set.
+    distanceEstimate: config.coloringMethod === "distanceEstimate",
+    atomDomain: config.coloringMethod === "atomDomain",
   };
 
   if (paletteCdf && paletteCdf.length > 0) {
@@ -440,8 +441,8 @@ export function buildShareParams(
       continue;
     }
     params[spec.urlParam] =
-      spec.key === "paletteAutoAdjust"
-        ? config.paletteAutoAdjust
+      spec.key === "paletteAutoFit"
+        ? config.paletteAutoFit
           ? "auto"
           : "manual"
         : String(config[spec.key]);
@@ -499,7 +500,7 @@ export function parseShareParams(search: string): Partial<MandelbrotConfig> {
       spec.key === "re" ||
       spec.key === "im" ||
       spec.key === "zoom" ||
-      spec.key === "paletteAutoAdjust"
+      spec.key === "paletteAutoFit"
     ) {
       continue;
     }
@@ -536,19 +537,19 @@ export function parseShareParams(search: string): Partial<MandelbrotConfig> {
 
   const paletteMode = params.get("pm");
   if (paletteMode === "auto" || paletteMode === "manual") {
-    parsed.paletteAutoAdjust = paletteMode === "auto";
+    parsed.paletteAutoFit = paletteMode === "auto";
   } else if (params.get("pmin") || params.get("pmax")) {
-    // Legacy share URLs predate auto-adjust; explicit palette values imply
-    // the sender tuned them by hand, so preserve that appearance.
-    parsed.paletteAutoAdjust = false;
+    // Legacy share URLs predate the auto-fit setting; explicit palette values
+    // imply the sender tuned them by hand, so preserve that appearance.
+    parsed.paletteAutoFit = false;
   }
 
-  // An unknown mode value falls back to the default by omission.
+  // An unknown method value falls back to the default by omission.
   if (
-    parsed.renderMode !== undefined &&
-    !(RENDER_MODES as readonly string[]).includes(parsed.renderMode)
+    parsed.coloringMethod !== undefined &&
+    !(COLORING_METHODS as readonly string[]).includes(parsed.coloringMethod)
   ) {
-    delete parsed.renderMode;
+    delete parsed.coloringMethod;
   }
 
   // The generic slider parse above has no range metadata, so clamp "pmap"
@@ -565,14 +566,14 @@ export function parseShareParams(search: string): Partial<MandelbrotConfig> {
   if (typeof parsed.paletteOffset === "number") {
     parsed.paletteOffset = clamp(Math.round(parsed.paletteOffset), 0, 100);
   }
-  // Legacy share URLs carried the render modes as two boolean params.
+  // Legacy share URLs carried the coloring methods as two boolean params.
   // Distance estimate wins when both are set, matching the renderer's
   // precedence back then.
-  if (parsed.renderMode === undefined) {
+  if (parsed.coloringMethod === undefined) {
     if (params.get("de") === "true") {
-      parsed.renderMode = "distanceEstimate";
+      parsed.coloringMethod = "distanceEstimate";
     } else if (params.get("ad") === "true") {
-      parsed.renderMode = "atomDomain";
+      parsed.coloringMethod = "atomDomain";
     }
   }
 

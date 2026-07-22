@@ -21,7 +21,7 @@ export type TileRect = {
 // recoloring. None of these affect escape values, so any change to them can
 // be applied by recoloring cached tiles instead of re-rendering.
 export type ColoringOptions = {
-  colorScheme: string;
+  palette: string;
   reverseColors: boolean;
   shiftHueAmount: number;
   saturateAmount: number;
@@ -31,19 +31,19 @@ export type ColoringOptions = {
   paletteMaxIter: number;
   // How many times the palette repeats across the palette range; cyclical
   // palettes wrap, others boomerang (alternate direction) to stay seamless.
-  colorCycles: number;
+  colorDensity: number;
   // Palette shift in palette lengths, 0..1. With two or more cycles (or on
   // a cyclical palette) the pattern phase-shifts seamlessly; a single pass
   // rotates modulo 1 instead, keeping every color in use at the cost of a
-  // seam where the palette's ends meet. Like colorCycles it applies in
-  // every render mode, including the fixed-palette ones.
+  // seam where the palette's ends meet. Like colorDensity it applies in
+  // every coloring method, including the fixed-palette ones.
   paletteOffset: number;
-  // Distance-estimate rendering mode (issue #46): the cached values are a
+  // Distance-estimate coloring method (issue #46): the cached values are a
   // palette-independent brightness in [0, 1] rather than iteration counts, so
   // the palette maps them over the fixed 0..1 range and the min/max iteration
   // thresholds are ignored.
   distanceEstimate: boolean;
-  // Atom-domain rendering mode (issue #45): the cached values are a
+  // Atom-domain coloring method (issue #45): the cached values are a
   // palette-independent, period-scattered value in [0, 1) (each detected
   // period gets a distinct categorical band) rather than iteration counts, so
   // the palette maps them over the fixed 0..1 range and the min/max iteration
@@ -67,8 +67,8 @@ export type TileRenderPayload = {
   originIm: string;
   bounds: TileRect;
   zoomOffset: number;
-  iterations: number;
-  exponent: number;
+  maxIterations: number;
+  power: number;
   imageWidth: number;
   imageHeight: number;
   // Baked into the returned escape values (unlike `coloring`, which only
@@ -92,8 +92,8 @@ export type CalculateRequest = {
 export type JuliaRenderPayload = {
   cRe: number;
   cIm: number;
-  iterations: number;
-  exponent: number;
+  maxIterations: number;
+  power: number;
   imageWidth: number;
   imageHeight: number;
   smoothColoring: boolean;
@@ -118,8 +118,8 @@ export type PointQueryPayload = {
   tileY: number;
   tileZoom: number;
   zoomOffset: number;
-  iterations: number;
-  exponent: number;
+  maxIterations: number;
+  power: number;
 };
 // Requests the exterior distance estimate from a point to the set boundary.
 export type DistanceEstimateRequest = {
@@ -141,19 +141,19 @@ export type OptimisePayload = { buffer: ArrayBuffer };
 export type OptimiseRequest = { type: "optimise"; payload: OptimisePayload };
 // Tier-up warmup for the deep general-exponent (multibrot) perturbation
 // kernel; returns nothing. Sent once per worker at pool spawn when the
-// view's exponent != 2 and it is already at deep-zoom depth.
+// view's power != 2 and it is already at deep-zoom depth.
 export type WarmupGeneralRequest = { type: "warmupGeneral" };
 // Tier-up warmup for the direct-tier general-exponent stream kernel;
 // returns nothing. Sent once per worker at pool spawn when the view's
-// exponent != 2 at direct depth (effective zoom < DEEP_ZOOM_THRESHOLD).
+// power != 2 at direct depth (effective zoom < DEEP_ZOOM_THRESHOLD).
 export type WarmupGeneralDirectRequest = { type: "warmupGeneralDirect" };
 // Tier-up warmup for the perturbation-f64 stream kernel; returns nothing.
 // Sent once per worker at pool spawn when the view is already at deep-zoom
-// depth (exponent 2, effective zoom >= DEEP_ZOOM_THRESHOLD).
+// depth (power 2, effective zoom >= DEEP_ZOOM_THRESHOLD).
 export type WarmupDeepRequest = { type: "warmupDeep" };
 // Tier-up warmup for the hybrid float-exp stream kernel; returns nothing.
 // Sent once per worker at pool spawn when the view is already at float-exp
-// depth (exponent 2, effective zoom >= FLOAT_EXP_THRESHOLD).
+// depth (power 2, effective zoom >= FLOAT_EXP_THRESHOLD).
 export type WarmupFloatExpRequest = { type: "warmupFloatExp" };
 export type WorkerRequest =
   | CalculateRequest

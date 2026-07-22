@@ -66,8 +66,8 @@ class RegionRenderer {
       originIm: frame ? frame.originIm : this.map.origin.im,
       bounds,
       zoomOffset: frame ? frame.zoomOffset : this.map.zoomOffset,
-      iterations: this.map.config.iterations,
-      exponent: this.map.config.exponent,
+      maxIterations: this.map.config.maxIterations,
+      power: this.map.config.power,
       imageWidth,
       imageHeight,
       smoothColoring: this.map.config.smoothColoring,
@@ -129,8 +129,8 @@ class RegionRenderer {
         tileY: position.y,
         tileZoom: zoom,
         zoomOffset: this.map.zoomOffset,
-        iterations: this.map.config.iterations,
-        exponent: this.map.config.exponent,
+        maxIterations: this.map.config.maxIterations,
+        power: this.map.config.power,
       },
     };
 
@@ -162,8 +162,8 @@ class RegionRenderer {
         tileY: position.y,
         tileZoom: zoom,
         zoomOffset: this.map.zoomOffset,
-        iterations: this.map.config.iterations,
-        exponent: this.map.config.exponent,
+        maxIterations: this.map.config.maxIterations,
+        power: this.map.config.power,
       },
     };
 
@@ -179,7 +179,7 @@ class RegionRenderer {
    * `size x size` image (RGBA bytes, iteration range, and — when
    * `includeValues` is set — the per-pixel escape values the panel's palette
    * refit recolors from). Uses the map's current palette, iteration cap,
-   * exponent, and appearance settings — read at call time, like the tile
+   * power, and appearance settings — read at call time, like the tile
    * renderer — so the preview matches the fractal on screen. `c` is an
    * ordinary f64: Julia sets live within `|c| < 2`, far inside f64 precision,
    * so the cursor's deep-zoom sub-pixel precision is not needed for the
@@ -195,8 +195,8 @@ class RegionRenderer {
       payload: {
         cRe,
         cIm,
-        iterations: this.map.config.iterations,
-        exponent: this.map.config.exponent,
+        maxIterations: this.map.config.maxIterations,
+        power: this.map.config.power,
         imageWidth: size,
         imageHeight: size,
         smoothColoring: this.map.config.smoothColoring,

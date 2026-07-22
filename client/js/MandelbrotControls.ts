@@ -12,7 +12,7 @@ import {
   SelectSpec,
   SettingSpec,
   SliderSpec,
-  isFixedPaletteMode,
+  isFixedPaletteMethod,
   settingsSchema,
   syncAllInputsToConfig,
   syncInputToConfig,
@@ -51,17 +51,17 @@ const SMALL_SCREEN_WIDTH_PX = 800;
 class MandelbrotControls {
   map: MandelbrotMap;
   resetButtonConfigs: ResetButtonConfig[];
-  private changeExponentModal: ConfirmModal;
+  private changePowerModal: ConfirmModal;
   private pinnedLocations: PinnedLocations;
   private paletteHistogram: PaletteHistogram;
 
   constructor(map: MandelbrotMap) {
     this.map = map;
 
-    this.changeExponentModal = new ConfirmModal({
-      dialogId: "changeExponentModal",
-      formId: "changeExponentForm",
-      cancelId: "changeExponentCancel",
+    this.changePowerModal = new ConfirmModal({
+      dialogId: "changePowerModal",
+      formId: "changePowerForm",
+      cancelId: "changePowerCancel",
     });
 
     this.pinnedLocations = new PinnedLocations();
@@ -70,13 +70,15 @@ class MandelbrotControls {
       {
         buttonId: "resetRender",
         configKeys: [
-          "iterations",
-          "exponent",
+          "maxIterations",
+          "power",
           "supersampling",
           "showTierOverlay",
         ],
         specialHandling: () => {
-          this.resetPaletteCeilingToIterations(this.map.config.iterations);
+          this.resetPaletteCeilingToMaxIterations(
+            this.map.config.maxIterations,
+          );
         },
         apply: (changedKeys) => {
           // The reset may have flipped the overlay flag; keep its legend in
@@ -95,10 +97,10 @@ class MandelbrotControls {
         },
       },
       {
-        buttonId: "resetColorScheme",
+        buttonId: "resetColorPalette",
         configKeys: [
-          "colorScheme",
-          "colorCycles",
+          "palette",
+          "colorDensity",
           "paletteOffset",
           "reverseColors",
         ],
@@ -106,30 +108,30 @@ class MandelbrotControls {
         apply: () => this.map.applyColorSettings(),
       },
       {
-        buttonId: "resetPaletteRange",
+        buttonId: "resetColorMapping",
         configKeys: [
-          "renderMode",
+          "coloringMethod",
           "smoothColoring",
           "paletteMinIter",
-          "paletteAutoAdjust",
+          "paletteAutoFit",
           "histogramColoring",
         ],
         specialHandling: () => {
-          // Reset paletteMaxIter based on current iterations
-          this.map.config.paletteMaxIter = this.map.config.iterations;
+          // Reset paletteMaxIter based on the current iteration cap
+          this.map.config.paletteMaxIter = this.map.config.maxIterations;
           syncInputToConfig(this.map.config, "paletteMaxIter");
         },
         apply: (changedKeys) => {
           // The coloring method and smooth coloring are baked into the
           // cached escape values, so resetting either needs a full re-render
           // (which re-fits the range once the tiles load). A method reset
-          // can also have turned off a fixed-palette mode, re-enabling the
+          // can also have turned off a fixed-palette method, re-enabling the
           // range controls.
-          if (changedKeys.includes("renderMode")) {
-            this.syncPaletteRangeAvailability();
+          if (changedKeys.includes("coloringMethod")) {
+            this.syncColorMappingAvailability();
           }
           if (
-            changedKeys.includes("renderMode") ||
+            changedKeys.includes("coloringMethod") ||
             changedKeys.includes("smoothColoring")
           ) {
             this.map.refresh();
@@ -143,24 +145,25 @@ class MandelbrotControls {
         },
         checkDiff: () => {
           if (
-            this.map.config.renderMode !== this.map.initialConfig.renderMode ||
+            this.map.config.coloringMethod !==
+              this.map.initialConfig.coloringMethod ||
             this.map.config.smoothColoring !==
               this.map.initialConfig.smoothColoring ||
-            this.map.config.paletteAutoAdjust !==
-              this.map.initialConfig.paletteAutoAdjust ||
+            this.map.config.paletteAutoFit !==
+              this.map.initialConfig.paletteAutoFit ||
             this.map.config.histogramColoring !==
               this.map.initialConfig.histogramColoring
           ) {
             return true;
           }
-          if (this.map.config.paletteAutoAdjust) {
+          if (this.map.config.paletteAutoFit) {
             // Auto-applied values are machine-set, not user divergence.
             return false;
           }
           return (
             this.map.config.paletteMinIter !==
               this.map.initialConfig.paletteMinIter ||
-            this.map.config.paletteMaxIter !== this.map.config.iterations
+            this.map.config.paletteMaxIter !== this.map.config.maxIterations
           );
         },
       },
@@ -176,7 +179,7 @@ class MandelbrotControls {
         apply: () => this.map.applyColorSettings(),
       },
       {
-        buttonId: "resetCoordinates",
+        buttonId: "resetLocation",
         configKeys: ["re", "im", "zoom"],
         apply: () => {
           this.map.refresh(true);
@@ -209,7 +212,7 @@ class MandelbrotControls {
     // controls exist); this writes every setting into its input once.
     syncAllInputsToConfig(this.map.config);
     this.handleInputs();
-    this.syncPaletteRangeAvailability();
+    this.syncColorMappingAvailability();
     this.syncTierLegend();
     this.updateResetButtonsVisibility();
     this.loadDetailsState();
@@ -378,12 +381,12 @@ class MandelbrotControls {
         parsedValue = this.map.config[spec.key];
       }
 
-      // Settings that reset the view (the exponent) discard the current
+      // Settings that reset the view (the power) discard the current
       // position, so confirm the change before applying it; a cancel restores
       // the input to the value still held in the config.
       if (spec.resetView && parsedValue !== this.map.config[spec.key]) {
         const previousValue = this.map.config[spec.key];
-        this.changeExponentModal.open(
+        this.changePowerModal.open(
           () => this.applyNumberInput(spec, input, parsedValue),
           () => {
             input.value = String(previousValue);
@@ -402,17 +405,17 @@ class MandelbrotControls {
     input: HTMLInputElement,
     parsedValue: number,
   ) {
-    if (spec.key === "iterations") {
-      this.resetPaletteCeilingToIterations(parsedValue);
+    if (spec.key === "maxIterations") {
+      this.resetPaletteCeilingToMaxIterations(parsedValue);
     }
 
     input.value = String(parsedValue);
     this.map.config[spec.key] = parsedValue;
     if (spec.resetView) {
-      // Changing the exponent picks a different fractal; iteration tuning
+      // Changing the power picks a different fractal; iteration tuning
       // for the old one doesn't carry over.
-      this.map.config.iterations = this.map.initialConfig.iterations;
-      syncInputToConfig(this.map.config, "iterations");
+      this.map.config.maxIterations = this.map.initialConfig.maxIterations;
+      syncInputToConfig(this.map.config, "maxIterations");
     }
 
     this.updateResetButtonsVisibility();
@@ -420,7 +423,7 @@ class MandelbrotControls {
 
     // An iteration-cap change resets the palette ceiling, which moves the
     // histogram markers.
-    if (spec.key === "iterations") {
+    if (spec.key === "maxIterations") {
       this.refreshPaletteHistogram();
     }
   }
@@ -480,10 +483,11 @@ class MandelbrotControls {
         this.map.config[spec.key] = Number(select.value);
       }
       this.updateResetButtonsVisibility();
-      // The fixed-palette modes suspend the palette-range panel (they ignore
-      // its bounds), so a mode change updates its availability and note.
-      if (spec.key === "renderMode") {
-        this.syncPaletteRangeAvailability();
+      // The fixed-palette methods suspend the Color mapping panel's range
+      // controls (they ignore its bounds), so a method change updates their
+      // availability.
+      if (spec.key === "coloringMethod") {
+        this.syncColorMappingAvailability();
         this.refreshPaletteHistogram();
       }
       this.applySettingEffect(spec);
@@ -495,11 +499,11 @@ class MandelbrotControls {
     checkbox.onchange = () => {
       this.map.config[spec.key] = checkbox.checked;
       this.updateResetButtonsVisibility();
-      if (spec.key === "paletteAutoAdjust") {
+      if (spec.key === "paletteAutoFit") {
         // Disabling keeps the current values (edited by dragging the
         // histogram markers); enabling fits to the visible tiles via an
         // in-place recolor, no re-render.
-        if (this.map.config.paletteAutoAdjust) {
+        if (this.map.config.paletteAutoFit) {
           this.map.refitPaletteAndRecolor();
         }
         this.refreshPaletteHistogram();
@@ -538,8 +542,8 @@ class MandelbrotControls {
    * everything above it into a maxed-out band around the set until the
    * re-fit, so the stale detection is dropped and the proper range is fitted
    * once all tiles finish rendering. A user-set range is untouched. */
-  private resetPaletteCeilingToIterations(newIterations: number) {
-    if (!this.map.config.paletteAutoAdjust) {
+  private resetPaletteCeilingToMaxIterations(newIterations: number) {
+    if (!this.map.config.paletteAutoFit) {
       return;
     }
 
@@ -561,10 +565,10 @@ class MandelbrotControls {
 
   private handleIterationButtons() {
     const multiplyButton = document.getElementById(
-      "iterationsMul2",
+      "maxIterationsMul2",
     ) as HTMLButtonElement;
     const divideButton = document.getElementById(
-      "iterationsDiv2",
+      "maxIterationsDiv2",
     ) as HTMLButtonElement;
 
     const debouncedRefresh = debounce(() => {
@@ -573,17 +577,19 @@ class MandelbrotControls {
     }, 500);
 
     multiplyButton.onclick = () => {
-      this.map.config.iterations *= 2;
-      this.resetPaletteCeilingToIterations(this.map.config.iterations);
-      syncInputToConfig(this.map.config, "iterations");
+      this.map.config.maxIterations *= 2;
+      this.resetPaletteCeilingToMaxIterations(this.map.config.maxIterations);
+      syncInputToConfig(this.map.config, "maxIterations");
 
       debouncedRefresh();
     };
 
     divideButton.onclick = () => {
-      this.map.config.iterations = Math.ceil(this.map.config.iterations / 2);
-      this.resetPaletteCeilingToIterations(this.map.config.iterations);
-      syncInputToConfig(this.map.config, "iterations");
+      this.map.config.maxIterations = Math.ceil(
+        this.map.config.maxIterations / 2,
+      );
+      this.resetPaletteCeilingToMaxIterations(this.map.config.maxIterations);
+      syncInputToConfig(this.map.config, "maxIterations");
 
       debouncedRefresh();
     };
@@ -628,17 +634,17 @@ class MandelbrotControls {
   }
 
   /** The palette range only applies to escape-time coloring; the fixed-range
-   * modes (distance estimate, atom domains) ignore it, so hide the panel's
-   * color-mapping slider and auto-adjust checkbox while one is active (the
+   * methods (distance estimate, atom domains) ignore it, so hide the panel's
+   * color-mapping slider and auto-fit checkbox while one is active (the
    * histogram itself blanks out; see PaletteHistogram). The coloring-method
    * select stays enabled so the user can switch back. */
-  syncPaletteRangeAvailability() {
-    const hidden = isFixedPaletteMode(this.map.config);
-    const autoAdjustWrapper = document
-      .getElementById("paletteAutoAdjust")
+  syncColorMappingAvailability() {
+    const hidden = isFixedPaletteMethod(this.map.config);
+    const autoFitWrapper = document
+      .getElementById("paletteAutoFit")
       ?.closest(".checkbox-wrapper") as HTMLElement | null;
-    if (autoAdjustWrapper) {
-      autoAdjustWrapper.hidden = hidden;
+    if (autoFitWrapper) {
+      autoFitWrapper.hidden = hidden;
     }
     const mappingWrapper = document
       .getElementById("histogramColoring")
@@ -656,7 +662,7 @@ class MandelbrotControls {
         re: String(this.map.config.re),
         im: String(this.map.config.im),
         zoom: this.map.config.zoom,
-        iterations: this.map.config.iterations,
+        iterations: this.map.config.maxIterations,
         session_id: api.sessionId,
       },
     ]);

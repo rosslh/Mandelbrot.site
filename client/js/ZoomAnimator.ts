@@ -136,7 +136,7 @@ class ZoomAnimator {
     // fixed 0..1 domain, so there is nothing to refit.
     const coloring = coloringOptions(this.map.config);
     const standardPalette = !coloring.distanceEstimate && !coloring.atomDomain;
-    const refitPalette = this.map.config.paletteAutoAdjust && standardPalette;
+    const refitPalette = this.map.config.paletteAutoFit && standardPalette;
 
     // Histogram coloring (the color-mapping slider): each standard-mode frame
     // is equalized against its own escape-value distribution over its

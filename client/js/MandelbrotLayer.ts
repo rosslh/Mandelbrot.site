@@ -60,7 +60,7 @@ class MandelbrotLayer extends L.GridLayer {
 
   private shouldImmediatelyGenerateTile(): boolean {
     return (
-      this._map.config.iterations <= 500 ||
+      this._map.config.maxIterations <= 500 ||
       L.Browser.mobile ||
       L.Browser.android
     );

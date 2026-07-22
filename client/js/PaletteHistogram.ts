@@ -3,7 +3,7 @@ import type MandelbrotMap from "./MandelbrotMap";
 import type { ViewHistogram } from "./TileCache";
 import {
   coloringOptions,
-  isFixedPaletteMode,
+  isFixedPaletteMethod,
   syncInputToConfig,
 } from "./config";
 
@@ -135,7 +135,7 @@ class PaletteHistogram {
     // no iteration stats, so blank the panel instead of waiting forever on
     // data that will never arrive. Clearing lastStats also disables marker
     // drags.
-    if (isFixedPaletteMode(this.map.config)) {
+    if (isFixedPaletteMethod(this.map.config)) {
       this.lastStats = null;
       this.hideHistogram();
       return;
@@ -398,9 +398,9 @@ class PaletteHistogram {
 
     // A manual bound overrides the fit: drop auto-adjust so a later settle
     // does not snap the marker back.
-    if (config.paletteAutoAdjust) {
-      config.paletteAutoAdjust = false;
-      syncInputToConfig(config, "paletteAutoAdjust");
+    if (config.paletteAutoFit) {
+      config.paletteAutoFit = false;
+      syncInputToConfig(config, "paletteAutoFit");
     }
 
     this.map.controls.notifyPaletteBoundsChanged();

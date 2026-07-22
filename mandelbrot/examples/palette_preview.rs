@@ -65,7 +65,7 @@ fn palette_colors(name: &str) -> Vec<u8> {
     recolor_values(
         &values,
         &ColoringOptions {
-            color_scheme: name.to_string(),
+            palette: name.to_string(),
             reverse_colors: false,
             shift_hue_amount: 0.0,
             saturate_amount: 0.0,
@@ -73,7 +73,7 @@ fn palette_colors(name: &str) -> Vec<u8> {
             color_space: 0, // Hsl
             palette_min_iter: 0,
             palette_max_iter: 255,
-            color_cycles: 1,
+            color_density: 1,
             distance_estimate: false,
             atom_domain: false,
             palette_cdf: None,

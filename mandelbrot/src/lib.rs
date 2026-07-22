@@ -3599,7 +3599,7 @@ pub struct TileBounds {
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ColoringOptions {
-    pub color_scheme: String,
+    pub palette: String,
     pub reverse_colors: bool,
     pub shift_hue_amount: f32,
     pub saturate_amount: f32,
@@ -3608,15 +3608,15 @@ pub struct ColoringOptions {
     pub color_space: u8,
     pub palette_min_iter: i32,
     pub palette_max_iter: i32,
-    pub color_cycles: u32,
-    /// Distance-estimate rendering mode (issue #46): the cached `values` are a
+    pub color_density: u32,
+    /// Distance-estimate coloring method (issue #46): the cached `values` are a
     /// palette-independent brightness in `[0, 1]` (see
     /// `distance_estimate_brightness`), not iteration counts, so the palette
     /// range is fixed at `0..1` and the min/max thresholds are ignored.
     /// Defaults to false so escape-time payloads that omit it still parse.
     #[serde(default)]
     pub distance_estimate: bool,
-    /// Atom-domain rendering mode (issue #45): the cached `values` are a
+    /// Atom-domain coloring method (issue #45): the cached `values` are a
     /// palette-independent, period-scattered value in `[0, 1)` (see
     /// `atom_domain_value`), not iteration counts, so the palette range is
     /// fixed at `0..1` and the min/max thresholds are ignored. Defaults to
@@ -3636,9 +3636,9 @@ pub struct ColoringOptions {
     /// phase-shifts the pattern seamlessly with two or more cycles (or on a
     /// cyclical palette); a single pass rotates modulo 1 instead, keeping
     /// every color in use at the cost of a seam where the palette's ends
-    /// meet. Applies in every render mode — like `color_cycles`, the
-    /// fixed-palette modes honor it over their `0..1` domain. Defaults to 0
-    /// so payloads that omit it render unshifted.
+    /// meet. Applies in every coloring method — like `color_density`, the
+    /// fixed-palette methods honor it over their `0..1` domain. Defaults to
+    /// 0 so payloads that omit it render unshifted.
     #[serde(default)]
     pub palette_offset: f64,
 }
@@ -3646,7 +3646,7 @@ pub struct ColoringOptions {
 impl ColoringOptions {
     /// The palette-normalization domain: the user's iteration thresholds in
     /// escape-time mode, or the fixed `0..1` range in the palette-independent
-    /// modes (distance-estimate and atom-domain), whose cached `values` are
+    /// methods (distance-estimate and atom-domain), whose cached `values` are
     /// already normalized.
     fn palette_thresholds(&self) -> (f64, f64) {
         if self.distance_estimate || self.atom_domain {
@@ -3671,7 +3671,7 @@ impl ColoringOptions {
     }
 
     /// The histogram-equalization table to color with, or `None` for the
-    /// linear mapping. The fixed-palette modes (distance estimate, atom
+    /// linear mapping. The fixed-palette methods (distance estimate, atom
     /// domains) always map linearly over their fixed `0..1` domain, so a
     /// stray table is ignored there.
     fn effective_palette_cdf(&self) -> Option<&[f32]> {
@@ -3707,8 +3707,8 @@ pub struct TileRenderOptions {
     origin_im: String,
     bounds: TileBounds,
     zoom_offset: u32,
-    iterations: u32,
-    exponent: u32,
+    max_iterations: u32,
+    power: u32,
     image_width: usize,
     image_height: usize,
     /// Baked into the returned escape values (unlike `coloring`, which only
@@ -3755,11 +3755,11 @@ pub fn render_tile(options: JsValue) -> Result<MandelbrotTile, JsValue> {
         options.bounds.y_max,
         options.bounds.zoom,
         options.zoom_offset,
-        options.iterations,
-        options.exponent,
+        options.max_iterations,
+        options.power,
         options.image_width,
         options.image_height,
-        &options.coloring.color_scheme,
+        &options.coloring.palette,
         options.coloring.reverse_colors,
         options.coloring.shift_hue_amount,
         options.coloring.saturate_amount,
@@ -3768,7 +3768,7 @@ pub fn render_tile(options: JsValue) -> Result<MandelbrotTile, JsValue> {
         options.smooth_coloring,
         options.coloring.palette_min_iter,
         options.coloring.palette_max_iter,
-        options.coloring.color_cycles.max(1),
+        options.coloring.color_density.max(1),
         options.distance_estimate(),
         options.atom_domain(),
         options.coloring.effective_palette_cdf(),
@@ -3795,8 +3795,8 @@ pub struct JuliaRenderOptions {
     /// The parameter `c` under the cursor, in the complex plane.
     c_re: f64,
     c_im: f64,
-    iterations: u32,
-    exponent: u32,
+    max_iterations: u32,
+    power: u32,
     image_width: usize,
     image_height: usize,
     smooth_coloring: bool,
@@ -3810,9 +3810,9 @@ pub struct JuliaRenderOptions {
 
 /// Renders a Julia set thumbnail for the parameter `c` under the cursor
 /// (issue #12). The panel below the controls shows the filled Julia set for
-/// `z -> z^exponent + c`, framed to the fixed `[-2, 2] x [-2, 2]` window that
+/// `z -> z^power + c`, framed to the fixed `[-2, 2] x [-2, 2]` window that
 /// contains every such set, colored with the map's current palette and
-/// appearance settings. Distance-estimate mode does not apply (it is a
+/// appearance settings. The distance-estimate coloring method does not apply (it is a
 /// Mandelbrot-boundary technique), so the flag is ignored and escape-time
 /// coloring is always used. Returns the RGBA bytes plus iteration stats, like a
 /// tile render; `include_values` additionally returns the per-pixel escape
@@ -3825,11 +3825,11 @@ pub fn render_julia(options: JsValue) -> Result<MandelbrotTile, JsValue> {
     let rendered = generate_julia_image(
         options.c_re,
         options.c_im,
-        options.iterations,
-        options.exponent,
+        options.max_iterations,
+        options.power,
         options.image_width,
         options.image_height,
-        &options.coloring.color_scheme,
+        &options.coloring.palette,
         options.coloring.reverse_colors,
         options.coloring.shift_hue_amount,
         options.coloring.saturate_amount,
@@ -3838,7 +3838,7 @@ pub fn render_julia(options: JsValue) -> Result<MandelbrotTile, JsValue> {
         options.smooth_coloring,
         options.coloring.palette_min_iter,
         options.coloring.palette_max_iter,
-        options.coloring.color_cycles.max(1),
+        options.coloring.color_density.max(1),
         options.coloring.effective_palette_cdf(),
         options.coloring.effective_palette_offset(),
     );
@@ -3938,8 +3938,8 @@ pub struct PointQueryOptions {
     tile_y: f64,
     tile_zoom: i32,
     zoom_offset: u32,
-    iterations: u32,
-    exponent: u32,
+    max_iterations: u32,
+    power: u32,
 }
 
 impl PointQueryOptions {
@@ -3978,9 +3978,9 @@ pub fn distance_estimate_at_point(options: JsValue) -> Result<f64, JsValue> {
     let escape_radius_squared = ESCAPE_RADIUS * ESCAPE_RADIUS;
     Ok(distance_estimate_at_c(
         options.c(),
-        options.iterations,
+        options.max_iterations,
         escape_radius_squared,
-        options.exponent,
+        options.power,
     )
     .unwrap_or(-1.0))
 }
@@ -3995,12 +3995,12 @@ pub fn period_at_point(options: JsValue) -> Result<u32, JsValue> {
     let options: PointQueryOptions =
         serde_wasm_bindgen::from_value(options).map_err(JsValue::from)?;
 
-    if options.exponent != 2 {
+    if options.power != 2 {
         return Ok(0);
     }
 
     let escape_radius_squared = ESCAPE_RADIUS * ESCAPE_RADIUS;
-    Ok(period_at_c(options.c(), options.iterations, escape_radius_squared).unwrap_or(0))
+    Ok(period_at_c(options.c(), options.max_iterations, escape_radius_squared).unwrap_or(0))
 }
 
 /// Recolors a tile from its cached per-pixel smoothed escape values (as
@@ -4021,8 +4021,8 @@ pub fn recolor_tile(values: &[f32], options: JsValue) -> Result<Vec<u8>, JsValue
 /// (which cannot build a `JsValue`).
 pub fn recolor_values(values: &[f32], options: &ColoringOptions) -> Vec<u8> {
     let (palette, should_reverse_colors, palette_is_cyclic) =
-        get_color_palette(&options.color_scheme, options.reverse_colors);
-    let color_cycles = options.color_cycles.max(1);
+        get_color_palette(&options.palette, options.reverse_colors);
+    let color_cycles = options.color_density.max(1);
     let color_space = options.color_space();
 
     let (min_iterations_threshold, max_iterations_threshold) = options.palette_thresholds();

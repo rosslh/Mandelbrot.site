@@ -19,7 +19,8 @@ const JULIA_VIEW_EXTENT = 4;
 
 // The panel's view-mode choice persists across sessions, like the
 // "mandelbrot-details-state" open/closed state; it is a UI preference, so it
-// stays out of share URLs.
+// stays out of share URLs. The key keeps its historical julia-panel name so
+// stored preferences survive the panel's rename to Navigator.
 const MODE_STORAGE_KEY = "mandelbrot-julia-panel-mode";
 
 type PanelMode = "julia" | "minimap";
@@ -38,7 +39,7 @@ const CANVAS_LABELS: Record<PanelMode, string> = {
  * chosen by a persisted toggle.
  *
  * Julia mode (issue #12): a thumbnail of the filled Julia set for the
- * parameter `c` under the cursor, iterating `z -> z^exponent + c`. It follows
+ * parameter `c` under the cursor, iterating `z -> z^power + c`. It follows
  * the cursor over the map; when the cursor leaves the map it falls back to
  * the center of the visible region, so the panel always shows something
  * meaningful. Renders through the same worker pool as the tile layer (a
@@ -83,20 +84,20 @@ class NavigatorPanel {
 
   constructor(map: MandelbrotMap) {
     this.map = map;
-    // The DOM keeps its historical juliaSet* ids: the details-state
-    // persistence is keyed by the <details> id, so renaming would drop the
-    // panel's saved open/closed state.
+    // The <details> element keeps its historical juliaSet id (the
+    // details-state persistence is keyed by it); the elements inside use
+    // navigator* ids matching the panel's title.
     this.canvas = document.getElementById(
-      "juliaSetCanvas",
+      "navigatorCanvas",
     ) as HTMLCanvasElement;
     this.ctx = this.canvas.getContext("2d");
-    this.coordinatesElement = document.getElementById("juliaSetCoordinates");
-    this.hintElement = document.getElementById("juliaSetHint");
+    this.coordinatesElement = document.getElementById("navigatorCoordinates");
+    this.hintElement = document.getElementById("navigatorHint");
     this.minimap = new MinimapView(map, this.canvas);
     this.mode = this.loadMode();
 
     this.modeSelect = document.getElementById(
-      "juliaPanelMode",
+      "navigatorViewMode",
     ) as HTMLSelectElement | null;
     this.modeSelect?.addEventListener("change", () =>
       this.setMode(this.modeSelect?.value === "julia" ? "julia" : "minimap"),
@@ -271,8 +272,8 @@ class NavigatorPanel {
     return JSON.stringify({
       coloring: this.thumbnailColoring(),
       histogramColoring: config.histogramColoring,
-      iterations: config.iterations,
-      exponent: config.exponent,
+      maxIterations: config.maxIterations,
+      power: config.power,
       smoothColoring: config.smoothColoring,
     });
   }

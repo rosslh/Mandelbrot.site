@@ -531,11 +531,11 @@ datalist {
 }
 
 #juliaSet {
-  #juliaSetHint {
+  #navigatorHint {
     margin: 0;
   }
 
-  #juliaSetThumbnail {
+  #navigatorThumbnail {
     // The Julia set is symmetric about the origin, so a square keeps it
     // undistorted while filling the sidebar column width.
     aspect-ratio: 1 / 1;
@@ -554,7 +554,7 @@ datalist {
     image-rendering: pixelated;
   }
 
-  #juliaSetCoordinates {
+  #navigatorCoordinates {
     margin: 0;
     font-variant-numeric: tabular-nums;
     // Reserve a line so the thumbnail doesn't jump when the readout appears.

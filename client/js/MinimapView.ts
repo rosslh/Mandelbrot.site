@@ -175,8 +175,8 @@ class MinimapView {
     return JSON.stringify({
       coloring: this.minimapColoring(),
       histogramColoring: config.histogramColoring,
-      iterations: config.iterations,
-      exponent: config.exponent,
+      maxIterations: config.maxIterations,
+      power: config.power,
       smoothColoring: config.smoothColoring,
     });
   }
@@ -200,7 +200,7 @@ class MinimapView {
     try {
       // The escape values are only needed for the standard-mode palette fit;
       // the normalized modes use the rendered image as-is.
-      const standardMode = this.map.config.renderMode === "standard";
+      const standardMode = this.map.config.coloringMethod === "standard";
       const response = await this.map.regionRenderer.renderRegion(
         this.tileRect(),
         size,

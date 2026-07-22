@@ -372,7 +372,7 @@ class PointTooltip {
         }
         this.escapeTimeElement.textContent =
           iterations === null
-            ? `In set (>${formatIterations(this.map.config.iterations)})`
+            ? `In set (>${formatIterations(this.map.config.maxIterations)})`
             : `Escape time: ${formatIterations(iterations)}`;
       })
       .catch(() => {
@@ -401,7 +401,7 @@ class PointTooltip {
 
     // The attracting-cycle period (#39): a scalar wasm loop that settles the
     // orbit then measures its cycle length. Only in-set points have a cycle,
-    // so the row stays hidden for exterior points (and other exponents, which
+    // so the row stays hidden for exterior points (and other powers, which
     // the wasm reports as no period).
     this.map.regionRenderer
       .periodAtPoint(position, zoom)
