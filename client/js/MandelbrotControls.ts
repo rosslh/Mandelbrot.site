@@ -660,18 +660,6 @@ class MandelbrotControls {
       );
     };
 
-    // Optimization only applies to the PNG path; hide it while raw-data export
-    // is selected so the two options can't appear to combine.
-    const optimizeWrapper = optimizeImageCheckbox.closest(
-      ".checkbox-wrapper",
-    ) as HTMLElement | null;
-    const syncOptimizeVisibility = () => {
-      if (optimizeWrapper) {
-        optimizeWrapper.hidden = exportRawDataCheckbox.checked;
-      }
-    };
-    exportRawDataCheckbox.onchange = syncOptimizeVisibility;
-
     const modal = new FormModal(
       {
         dialogId: "saveImageModal",
@@ -685,12 +673,13 @@ class MandelbrotControls {
           const currentOptimizeState = optimizeImageCheckbox.checked;
           modal.form.reset();
           optimizeImageCheckbox.checked = currentOptimizeState;
-          syncOptimizeVisibility();
           widthInput.value = String(
-            window.screen.width * 2 * (window.devicePixelRatio || 1),
+            Math.ceil(window.screen.width * 2 * (window.devicePixelRatio || 1)),
           );
           heightInput.value = String(
-            window.screen.height * 2 * (window.devicePixelRatio || 1),
+            Math.ceil(
+              window.screen.height * 2 * (window.devicePixelRatio || 1),
+            ),
           );
         },
         onSubmit: () => {
@@ -706,22 +695,9 @@ class MandelbrotControls {
 
           this.logEvent("imageSave");
 
-          if (exportRawDataCheckbox.checked) {
-            modal.beginBusy("Generating...");
-            this.map.imageSaver
-              .saveVisibleData(width, height)
-              .catch((error: unknown) => {
-                alert("Error exporting data\n\n" + error);
-                console.error(error);
-              })
-              .finally(() => {
-                modal.finishBusy();
-              });
-            return;
-          }
-
           modal.beginBusy("Generating...");
           const shouldOptimize = optimizeImageCheckbox.checked;
+          const shouldExportRawData = exportRawDataCheckbox.checked;
 
           this.map.imageSaver
             .saveVisibleImage(
@@ -732,6 +708,13 @@ class MandelbrotControls {
                 ? () => modal.setBusyLabel("Optimizing...")
                 : undefined,
             )
+            .then(() => {
+              if (!shouldExportRawData) {
+                return;
+              }
+              modal.setBusyLabel("Exporting data...");
+              return this.map.imageSaver.saveVisibleData(width, height);
+            })
             .catch((error: unknown) => {
               alert("Error saving image\n\n" + error);
               console.error(error);

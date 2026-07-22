@@ -38,7 +38,7 @@ class ImageSaver {
 
   /** Exports the current view's per-pixel escape values (issue #47) as a ZIP
    * bundling a NumPy `.npy` float32 array and a JSON sidecar of the view
-   * parameters, so researchers get the raw numbers instead of a rasterized
+   * parameters, so researchers get the raw numbers alongside the rasterized
    * PNG. The value at row `y`, column `x` is the smoothed escape value used
    * for coloring (or the raw iteration count when smooth coloring is off);
    * interior pixels are `Infinity`. Reuses the image export's column layout
