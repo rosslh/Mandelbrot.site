@@ -1,0 +1,35 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ./client/.nvmrc
+      - name: Install dependencies
+        working-directory: ./client
+        run: |
+          npm i
+      - name: Build project
+        working-directory: ./client
+        run: |
+          npm run build
+      - name: Package dist
+        run: |
+          cd client/dist
+          zip -r "../../mandelbrot-site-${GITHUB_REF_NAME}.zip" .
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          "mandelbrot-site-${GITHUB_REF_NAME}.zip"
+          --title "$GITHUB_REF_NAME" --generate-notes
