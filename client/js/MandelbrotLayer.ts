@@ -2,6 +2,7 @@ import debounce from "lodash/debounce";
 import * as L from "leaflet";
 import type MandelbrotMap from "./MandelbrotMap";
 import { MandelbrotResponse, TileRect, WorkerRequest } from "./protocol";
+import { supersamplingFactor } from "./config";
 import { drawTierOverlay } from "./tierOverlay";
 
 type Done = (error: null, tile: HTMLCanvasElement) => void;
@@ -117,9 +118,11 @@ class MandelbrotLayer extends L.GridLayer {
   ) {
     const context = canvas.getContext("2d");
 
-    const scaledTileSize = this._map.config.highDpiTiles
-      ? this.getTileSize().x * Math.max(window.devicePixelRatio || 2, 2)
-      : this.getTileSize().x;
+    // Rounded because "native" supersampling can be fractional (a
+    // devicePixelRatio of e.g. 1.25) and the canvas needs integer dimensions.
+    const scaledTileSize = Math.round(
+      this.getTileSize().x * supersamplingFactor(this._map.config),
+    );
 
     canvas.width = scaledTileSize;
     canvas.height = scaledTileSize;

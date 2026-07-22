@@ -29,7 +29,12 @@ export type MandelbrotConfig = {
   shiftHueAmount: number;
   colorSpace: number;
   reverseColors: boolean;
-  highDpiTiles: boolean;
+  // Tile render resolution: "fast" (the tile's CSS layout size, upscaled on
+  // high-density displays), "native" (the display's devicePixelRatio,
+  // pixel-for-pixel), or "2"/"4" (multiples of native, downscaled by the
+  // browser for anti-aliasing). See supersamplingFactor for how the values
+  // resolve.
+  supersampling: string;
   // Diagnostics: tint each tile by the precision tier (direct f64 /
   // perturbation f64 / hybrid float-exp) that rendered it (issue #50).
   showTierOverlay: boolean;
@@ -85,7 +90,7 @@ export const defaultConfig: MandelbrotConfig = {
   shiftHueAmount: 0,
   colorSpace: 2,
   reverseColors: false,
-  highDpiTiles: false,
+  supersampling: "fast",
   showTierOverlay: false,
   smoothColoring: true,
   renderMode: "standard",
@@ -112,6 +117,34 @@ export function isFixedPaletteMode(config: MandelbrotConfig): boolean {
   return config.renderMode !== "standard";
 }
 
+// Ceiling on the tile-resolution multiplier: a dpr-3 phone at "4" would
+// otherwise render 2400px tiles (~5.8M pixels each). 8x of the 200px tile
+// size caps the worst case at 1600px tiles.
+const MAX_SUPERSAMPLING_FACTOR = 8;
+
+/** The tile-resolution multiplier for the config's supersampling setting.
+ * "fast" is 1 (the CSS layout size — the browser upscales it on
+ * high-density displays); "native" is the devicePixelRatio, matching the
+ * screen pixel-for-pixel; the numeric values are multiples of native, so
+ * the browser's downscale back to the screen is always a whole number of
+ * samples per device pixel — true anti-aliasing with no interpolation
+ * artifacts, on fractional ratios too. Anything malformed falls back to
+ * "fast". */
+export function supersamplingFactor(config: MandelbrotConfig): number {
+  if (config.supersampling === "fast") {
+    return 1;
+  }
+  const dpr = window.devicePixelRatio || 1;
+  if (config.supersampling === "native") {
+    return Math.min(dpr, MAX_SUPERSAMPLING_FACTOR);
+  }
+  const multiple = Number(config.supersampling);
+  if (!Number.isFinite(multiple) || multiple <= 0) {
+    return 1;
+  }
+  return Math.min(multiple * dpr, MAX_SUPERSAMPLING_FACTOR);
+}
+
 type NumericConfigKey = {
   [K in keyof MandelbrotConfig]: MandelbrotConfig[K] extends number ? K : never;
 }[keyof MandelbrotConfig];
@@ -133,7 +166,7 @@ export type SettingEffect = "recolor" | "rerender" | "none";
 type BaseSpec = {
   // Also the id of the setting's input element in index.html.
   key: keyof MandelbrotConfig;
-  // Query parameter in share URLs; settings without one (highDpiTiles) are
+  // Query parameter in share URLs; settings without one (supersampling) are
   // device-specific and deliberately not shared.
   urlParam?: string;
   effect: SettingEffect;
@@ -163,7 +196,7 @@ export type SliderSpec = BaseSpec & {
   control: "slider";
 };
 export type SelectSpec = BaseSpec & {
-  key: "colorScheme" | "renderMode";
+  key: "colorScheme" | "renderMode" | "supersampling";
   control: "select";
 };
 export type SelectNumberSpec = BaseSpec & {
@@ -256,7 +289,7 @@ export const settingsSchema: SettingSpec[] = [
     urlParam: "m",
     effect: "rerender",
   },
-  { key: "highDpiTiles", control: "checkbox", effect: "rerender" },
+  { key: "supersampling", control: "select", effect: "rerender" },
   // Diagnostics overlay: toggling it only draws/clears a cosmetic overlay on
   // the already-rendered tiles, so its effect is "none" and the wiring
   // repaints the on-screen tiles explicitly (see wireCheckboxInput).

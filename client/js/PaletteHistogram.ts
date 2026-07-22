@@ -74,7 +74,6 @@ class PaletteHistogram {
   private maxStat: HTMLElement;
   private medianStat: HTMLElement;
   private interiorStat: HTMLElement;
-  private emptyMessage: HTMLElement;
   // The last computed distribution, so a marker drag can repaint the bounds
   // (and map a pointer x to an iteration value) without rescanning pixels.
   private lastStats: ViewHistogram | null = null;
@@ -114,10 +113,6 @@ class PaletteHistogram {
     this.interiorStat = document.getElementById(
       "paletteStatInterior",
     ) as HTMLElement;
-    this.emptyMessage = document.getElementById(
-      "paletteHistogramEmpty",
-    ) as HTMLElement;
-
     this.setupDragging();
 
     // Redraw as tiles settle, the view moves, and the palette is re-fitted;
@@ -137,15 +132,12 @@ class PaletteHistogram {
   /** Recomputes and redraws from the current view, throttled. */
   update = throttle(() => {
     // The fixed-palette rendering modes ignore the palette range and report
-    // no iteration stats, so explain that instead of waiting forever on data
-    // that will never arrive. Clearing lastStats also disables marker drags.
+    // no iteration stats, so blank the panel instead of waiting forever on
+    // data that will never arrive. Clearing lastStats also disables marker
+    // drags.
     if (isFixedPaletteMode(this.map.config)) {
       this.lastStats = null;
-      const mode =
-        this.map.config.renderMode === "distanceEstimate"
-          ? "distance estimate"
-          : "atom domains";
-      this.showEmptyMessage(`The palette range doesn't apply in ${mode} mode.`);
+      this.hideHistogram();
       return;
     }
 
@@ -154,11 +146,9 @@ class PaletteHistogram {
     this.render(stats);
   }, UPDATE_THROTTLE_MS);
 
-  /** Replaces the histogram with an explanatory note (the fixed-palette
-   * rendering modes, where the panel does not apply). */
-  private showEmptyMessage(text: string) {
-    this.emptyMessage.textContent = text;
-    this.emptyMessage.hidden = false;
+  /** Blanks the histogram and stats (the fixed-palette rendering modes,
+   * where the panel does not apply). */
+  private hideHistogram() {
     this.canvasWrap.hidden = true;
     this.statsList.hidden = true;
     this.spinner.hidden = true;
@@ -170,7 +160,6 @@ class PaletteHistogram {
    * spinner, rather than blanking the panel. The stats are hidden outright —
    * stale numbers read as current more easily than stale bars do. */
   private showLoading() {
-    this.emptyMessage.hidden = true;
     this.canvasWrap.hidden = false;
     this.statsList.hidden = true;
     this.spinner.hidden = false;
@@ -183,7 +172,6 @@ class PaletteHistogram {
       this.showLoading();
       return;
     }
-    this.emptyMessage.hidden = true;
     this.canvasWrap.hidden = false;
     this.statsList.hidden = false;
     this.spinner.hidden = true;

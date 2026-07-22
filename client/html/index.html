@@ -135,7 +135,7 @@
         <div class="details-content">
           <div class="input-wrapper align-start">
             <label for="iterations" class="label-with-subtitle">
-              <span>Iterations</span>
+              <span>Max iterations</span>
               <span class="secondary">Detail level</span>
             </label>
             <input type="number" required id="iterations" name="iterations" />
@@ -150,28 +150,23 @@
           </div>
           <div class="input-wrapper mobile-hidden">
             <label for="exponent" class="label-with-subtitle">
-              <span>Exponent</span>
-              <span class="secondary">Symmetry</span>
+              <span>Power</span>
+              <span class="secondary">Multibrot order</span>
             </label>
             <input type="number" required id="exponent" name="exponent" />
           </div>
           <div class="input-wrapper mobile-hidden">
             <label
-              for="renderMode"
-              title="What each pixel's color encodes. Standard: escape time. Distance estimate: distance to the set boundary, for a crisp image. Atom domains: the period of the pixel's atom domain on a categorical palette. The non-standard modes are available at shallow zoom (direct f64) only."
-              >Mode</label
+              for="supersampling"
+              title="Tile render resolution. Fast renders at the tile's layout size (upscaled on high-density displays); Native matches the display pixel-for-pixel; 2&times; and 4&times; render beyond native resolution and downscale, anti-aliasing the image at a cost that grows with the square of the factor."
+              >Supersampling</label
             >
-            <select id="renderMode" name="renderMode" required>
-              <option value="standard">Standard</option>
-              <option value="distanceEstimate">Distance estimate</option>
-              <option value="atomDomain">Atom domains</option>
+            <select id="supersampling" name="supersampling" required>
+              <option value="fast">Fast</option>
+              <option value="native">Native</option>
+              <option value="2">2&times;</option>
+              <option value="4">4&times; (Slow)</option>
             </select>
-          </div>
-          <div class="checkbox-wrapper mobile-hidden">
-            <input type="checkbox" id="highDpiTiles" name="highDpiTiles" />
-            <label for="highDpiTiles"
-              >High resolution <span class="secondary">(Slow)</span></label
-            >
           </div>
           <div class="checkbox-wrapper mobile-hidden">
             <input
@@ -260,7 +255,7 @@
             <label
               for="colorCycles"
               title="How many times the palette repeats across the palette range. Non-cyclical palettes alternate direction on each repeat so the colors stay seamless."
-              >Color cycles</label
+              >Color density</label
             >
             <input
               type="number"
@@ -275,7 +270,7 @@
           <div class="input-wrapper">
             <label
               for="paletteOffset"
-              title="Slides the palette along the range, choosing which color the range starts on. With two or more color cycles (or a cyclical palette) the pattern glides seamlessly; a single pass wraps instead, showing a seam where the palette's ends meet. Every color stays in use either way."
+              title="Slides the palette along the range, choosing which color the range starts on. With a color density of two or more (or a cyclical palette) the pattern glides seamlessly; a single pass wraps instead, showing a seam where the palette's ends meet. Every color stays in use either way."
               >Palette offset</label
             >
             <input
@@ -291,10 +286,6 @@
           <div class="checkbox-wrapper">
             <input type="checkbox" id="reverseColors" name="reverseColors" />
             <label for="reverseColors">Reverse colors</label>
-          </div>
-          <div class="checkbox-wrapper mobile-hidden">
-            <input type="checkbox" id="smoothColoring" name="smoothColoring" />
-            <label for="smoothColoring">Smooth coloring</label>
           </div>
         </div>
       </details>
@@ -314,6 +305,22 @@
           </button>
         </summary>
         <div class="details-content">
+          <div class="input-wrapper">
+            <label
+              for="renderMode"
+              title="How pixels are colored. Standard: escape time. Distance estimate: distance to the set boundary, for a crisp image. Atom domains: the period of the pixel's atom domain on a categorical palette. The non-standard modes are available at shallow zoom (direct f64) only."
+              >Coloring method</label
+            >
+            <select id="renderMode" name="renderMode" required>
+              <option value="standard">Standard</option>
+              <option value="distanceEstimate">Distance estimate</option>
+              <option value="atomDomain">Atom domains</option>
+            </select>
+          </div>
+          <div class="checkbox-wrapper">
+            <input type="checkbox" id="smoothColoring" name="smoothColoring" />
+            <label for="smoothColoring">Smooth coloring</label>
+          </div>
           <div class="input-wrapper">
             <label
               for="histogramColoring"
@@ -344,7 +351,6 @@
             >
           </div>
           <div id="paletteHistogram">
-            <p id="paletteHistogramEmpty" class="secondary" hidden></p>
             <div id="paletteHistogramCanvasWrap">
               <canvas
                 id="paletteHistogramCanvas"
@@ -454,17 +460,17 @@
               aria-label="Navigator view"
               class="full-width"
             >
-              <option value="julia">Julia set</option>
               <option value="minimap">Minimap</option>
+              <option value="julia">Julia set</option>
             </select>
           </div>
           <p class="secondary" id="juliaSetHint">
-            The Julia set for the point under the cursor.
+            Where the current view sits in the Mandelbrot set.
           </p>
           <div id="juliaSetThumbnail">
             <canvas
               id="juliaSetCanvas"
-              aria-label="Julia set for the point under the cursor"
+              aria-label="Minimap of the Mandelbrot set with the current view marked"
             ></canvas>
           </div>
           <p class="secondary" id="juliaSetCoordinates"></p>
@@ -495,25 +501,28 @@
         </div>
       </details>
 
+      <!-- The details id keeps its historical coordinates name: the
+           open/closed persistence is keyed by it, and the input ids (re, im,
+           zoom) match the config schema keys. -->
       <details class="mobile-hidden" id="coordinates">
         <summary>
-          <span>Coordinates</span>
+          <span>Location</span>
           <button
             type="button"
             class="reset-button"
             id="resetCoordinates"
-            title="Reset coordinates"
+            title="Reset location"
           >
             ↺
           </button>
         </summary>
         <div class="details-content">
           <div class="input-wrapper">
-            <label for="re">Real</label>
+            <label for="re">Center (Re)</label>
             <input type="text" inputmode="decimal" required id="re" name="re" />
           </div>
           <div class="input-wrapper">
-            <label for="im">Imaginary</label>
+            <label for="im">Center (Im)</label>
             <input type="text" inputmode="decimal" required id="im" name="im" />
           </div>
           <div class="input-wrapper">
@@ -756,10 +765,10 @@
     </dialog>
     <dialog id="changeExponentModal" class="overlay form-modal">
       <form id="changeExponentForm">
-        <strong>Change exponent?</strong>
+        <strong>Change power?</strong>
         <p>
-          Changing the exponent renders a different fractal and resets the view
-          to its starting position.
+          Changing the power renders a different fractal and resets the view to
+          its starting position.
         </p>
         <div class="submit-or-cancel">
           <button type="submit" id="changeExponentSubmit">Change</button>

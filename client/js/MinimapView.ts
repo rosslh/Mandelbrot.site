@@ -6,8 +6,9 @@ import type { ColoringOptions, TileRect } from "./protocol";
 import { FULL_SET_ZOOM } from "./magnification";
 
 // The panel canvas renders at its laid-out CSS size times the display's
-// devicePixelRatio (like the tile layer's high-resolution mode), so it is
-// pixel-sharp on high-DPI screens. This is the fallback CSS side length for
+// devicePixelRatio, so it is pixel-sharp on high-DPI screens. It deliberately
+// ignores the tile layer's supersampling setting — display resolution is all
+// a small decorative panel needs. This is the fallback CSS side length for
 // the moment before the panel has a layout to measure.
 const THUMBNAIL_FALLBACK_CSS_PX = 200;
 
@@ -17,11 +18,10 @@ const THUMBNAIL_FALLBACK_CSS_PX = 200;
 const THUMBNAIL_MAX_DEVICE_PX = 800;
 
 /** The device-pixel side length for a render into the panel's square canvas:
- * the laid-out CSS size scaled by the display's devicePixelRatio (the same
- * DPI detection the tile layer's high-resolution mode uses), bounded above so
- * extreme ratios stay cheap. Falls back to a nominal size before the panel
- * has a layout. Shared by the Julia thumbnail and the minimap, which draw
- * into the same canvas. */
+ * the laid-out CSS size scaled by the display's devicePixelRatio (never the
+ * tile layer's supersampling factor), bounded above so extreme ratios stay
+ * cheap. Falls back to a nominal size before the panel has a layout. Shared
+ * by the Julia thumbnail and the minimap, which draw into the same canvas. */
 export function thumbnailRenderSize(canvas: HTMLCanvasElement): number {
   const dpr = window.devicePixelRatio || 1;
   const cssSize = canvas.clientWidth || THUMBNAIL_FALLBACK_CSS_PX;

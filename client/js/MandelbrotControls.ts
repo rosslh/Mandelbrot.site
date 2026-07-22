@@ -72,8 +72,7 @@ class MandelbrotControls {
         configKeys: [
           "iterations",
           "exponent",
-          "renderMode",
-          "highDpiTiles",
+          "supersampling",
           "showTierOverlay",
         ],
         specialHandling: () => {
@@ -81,10 +80,8 @@ class MandelbrotControls {
         },
         apply: (changedKeys) => {
           // The reset may have flipped the overlay flag; keep its legend in
-          // step either way. It can likewise have turned off a fixed-palette
-          // mode, re-enabling the palette-range panel.
+          // step either way.
           this.syncTierLegend();
-          this.syncPaletteRangeAvailability();
           // The tier overlay is cosmetic, so a reset that only toggles it off
           // repaints in place; anything else re-renders.
           const needsRerender = changedKeys.some(
@@ -104,21 +101,15 @@ class MandelbrotControls {
           "colorCycles",
           "paletteOffset",
           "reverseColors",
-          "smoothColoring",
         ],
-        apply: (changedKeys) => {
-          // Smooth coloring is baked into the cached escape values, so
-          // resetting it needs a re-render; the other keys only recolor.
-          if (changedKeys.includes("smoothColoring")) {
-            this.map.refresh();
-          } else {
-            this.map.applyColorSettings();
-          }
-        },
+        // All color-only settings: repaint in place, no re-render.
+        apply: () => this.map.applyColorSettings(),
       },
       {
         buttonId: "resetPaletteRange",
         configKeys: [
+          "renderMode",
+          "smoothColoring",
           "paletteMinIter",
           "paletteAutoAdjust",
           "histogramColoring",
@@ -128,12 +119,33 @@ class MandelbrotControls {
           this.map.config.paletteMaxIter = this.map.config.iterations;
           syncInputToConfig(this.map.config, "paletteMaxIter");
         },
-        // The range only affects coloring: fit (auto) or apply the reset
-        // values (manual) via an in-place repaint. The fit also rebuilds the
-        // equalization CDF, so a restored mapping strength takes effect.
-        apply: () => this.map.refitPaletteAndRecolor(),
+        apply: (changedKeys) => {
+          // The coloring method and smooth coloring are baked into the
+          // cached escape values, so resetting either needs a full re-render
+          // (which re-fits the range once the tiles load). A method reset
+          // can also have turned off a fixed-palette mode, re-enabling the
+          // range controls.
+          if (changedKeys.includes("renderMode")) {
+            this.syncPaletteRangeAvailability();
+          }
+          if (
+            changedKeys.includes("renderMode") ||
+            changedKeys.includes("smoothColoring")
+          ) {
+            this.map.refresh();
+            return;
+          }
+          // The remaining keys only affect coloring: fit (auto) or apply the
+          // reset values (manual) via an in-place repaint. The fit also
+          // rebuilds the equalization CDF, so a restored mapping strength
+          // takes effect.
+          this.map.refitPaletteAndRecolor();
+        },
         checkDiff: () => {
           if (
+            this.map.config.renderMode !== this.map.initialConfig.renderMode ||
+            this.map.config.smoothColoring !==
+              this.map.initialConfig.smoothColoring ||
             this.map.config.paletteAutoAdjust !==
               this.map.initialConfig.paletteAutoAdjust ||
             this.map.config.histogramColoring !==
@@ -192,6 +204,7 @@ class MandelbrotControls {
       }
     }
 
+    this.setUpSupersamplingOptions();
     // The config may already carry share-URL values (applied before the
     // controls exist); this writes every setting into its input once.
     syncAllInputsToConfig(this.map.config);
@@ -220,6 +233,29 @@ class MandelbrotControls {
     this.wireSettingInputs();
     this.setupButtons();
     this.setupDetailsToggle();
+  }
+
+  /** The supersampling select's "native" option resolves to the display's
+   * devicePixelRatio, only known at runtime: show that effective multiplier
+   * in its label. On a 1x display native would just repeat "Fast", so the
+   * option is dropped instead. The numeric options are multiples of native,
+   * so the factors are already monotonic in markup order — no sorting
+   * needed. */
+  private setUpSupersamplingOptions() {
+    const select = document.getElementById(
+      "supersampling",
+    ) as HTMLSelectElement | null;
+    const nativeOption = select?.querySelector('option[value="native"]');
+    if (!(nativeOption instanceof HTMLOptionElement)) {
+      return;
+    }
+
+    const dpr = window.devicePixelRatio || 1;
+    if (dpr === 1) {
+      nativeOption.remove();
+      return;
+    }
+    nativeOption.textContent = `Native (${Number(dpr.toFixed(2))}×)`;
   }
 
   /** Wires every schema-declared setting to its sidebar input. */
@@ -593,8 +629,9 @@ class MandelbrotControls {
 
   /** The palette range only applies to escape-time coloring; the fixed-range
    * modes (distance estimate, atom domains) ignore it, so hide the panel's
-   * color-mapping slider and auto-adjust checkbox while one is active,
-   * leaving just the histogram's explanatory note. */
+   * color-mapping slider and auto-adjust checkbox while one is active (the
+   * histogram itself blanks out; see PaletteHistogram). The coloring-method
+   * select stays enabled so the user can switch back. */
   syncPaletteRangeAvailability() {
     const hidden = isFixedPaletteMode(this.map.config);
     const autoAdjustWrapper = document

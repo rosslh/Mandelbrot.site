@@ -24,7 +24,7 @@ const SUPERSCRIPTS: Record<string, string> = {
 // trimmed to the decimals the cursor can distinguish (displayDigitsForZoom)
 // and then, when still long, shown head…tail. The head keeps the sign and
 // magnitude; the tail keeps the digits that change as the cursor moves.
-// The full-precision center coordinate remains in the coordinates panel.
+// The full-precision center coordinate remains in the Location panel.
 const HEAD_CHARS = 8;
 const TAIL_CHARS = 15;
 

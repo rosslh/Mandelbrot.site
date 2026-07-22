@@ -54,8 +54,9 @@ export function tierLegendEntries(): Array<{ label: string; color: string }> {
 
 /** Draws the tier's tinted border and corner badge onto a tile canvas, over
  * the already-painted pixels. A no-op for an unknown tier so a future tier
- * never throws. Border/badge sizes scale with the canvas so high-DPI tiles
- * (2-3x the pixels) get a proportionate, not hairline, overlay. */
+ * never throws. Border/badge sizes scale with the canvas so supersampled
+ * tiles (up to 8x the edge length) get a proportionate, not hairline,
+ * overlay. */
 export function drawTierOverlay(canvas: HTMLCanvasElement, tier: number): void {
   const style = TIER_STYLES[tier];
   if (!style) {

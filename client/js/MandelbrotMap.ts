@@ -48,7 +48,7 @@ export type TilePosition = {
 const MAX_LEAFLET_ZOOM = 26;
 // Effective zoom where the wasm switches from the direct f64 loop to
 // perturbation at the standard tile resolution (MIN_DIRECT_PIXEL_SPACING in
-// mandelbrot/src/perturbation.rs; high-DPI tiles switch a level or two
+// mandelbrot/src/perturbation.rs; supersampled tiles switch a level or two
 // earlier); used only to decide whether pool spawn should warm the
 // perturbation kernel.
 const DEEP_ZOOM_THRESHOLD = 46;
@@ -665,7 +665,7 @@ class MandelbrotMap extends L.Map {
   }
 
   /** Applies an explicit palette-window or color-mapping change (a marker
-   * drag, the Color mapping select) without re-rendering: rebuild the
+   * drag, the histogram-coloring slider) without re-rendering: rebuild the
    * equalization CDF for the new window — under histogram coloring it spans
    * exactly the window, so moving a bound reshapes the table — then repaint
    * in place. Unlike the settle-time fits this skips the mid-load guard: the

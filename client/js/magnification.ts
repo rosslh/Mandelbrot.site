@@ -1,5 +1,5 @@
 // Converts between the map's internal zoom unit and the magnification shown
-// in the coordinates panel. Internally (share URLs, worker protocol, bench
+// in the Location panel. Internally (share URLs, worker protocol, bench
 // corpora) the view depth stays a Leaflet-style effective zoom level;
 // magnification is presentation only, following the convention of fractal
 // explorers like Ultra Fractal and Kalles Fraktaler: 1x at the initial

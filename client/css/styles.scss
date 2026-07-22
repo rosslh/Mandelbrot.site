@@ -451,10 +451,6 @@ datalist {
   flex-direction: column;
   gap: var(--space-8);
 
-  #paletteHistogramEmpty {
-    margin: 0;
-  }
-
   #paletteHistogramCanvasWrap {
     // Positioning context for the loading-spinner overlay.
     position: relative;

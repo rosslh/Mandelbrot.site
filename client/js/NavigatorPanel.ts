@@ -50,9 +50,9 @@ const CANVAS_LABELS: Record<PanelMode, string> = {
  * the map's window — auto-fit or manual — describes the view's iteration
  * counts, not the Julia set's.
  *
- * Minimap mode: a fixed full-set view of the Mandelbrot set with a marker
- * for the current viewport (see MinimapView) — an orientation aid that keeps
- * a deep zoom anchored to where in the set it lives. */
+ * Minimap mode (the default): a fixed full-set view of the Mandelbrot set
+ * with a marker for the current viewport (see MinimapView) — an orientation
+ * aid that keeps a deep zoom anchored to where in the set it lives. */
 class NavigatorPanel {
   private map: MandelbrotMap;
   private canvas: HTMLCanvasElement;
@@ -99,7 +99,7 @@ class NavigatorPanel {
       "juliaPanelMode",
     ) as HTMLSelectElement | null;
     this.modeSelect?.addEventListener("change", () =>
-      this.setMode(this.modeSelect?.value === "minimap" ? "minimap" : "julia"),
+      this.setMode(this.modeSelect?.value === "julia" ? "julia" : "minimap"),
     );
 
     // Follow the cursor over the map; leaving the map falls back to the view
@@ -167,10 +167,13 @@ class NavigatorPanel {
     }
   }
 
+  /** The minimap is the panel's default view (a "Navigator" in the Ultra
+   * Fractal sense); only an explicitly stored Julia preference overrides
+   * it. */
   private loadMode(): PanelMode {
-    return localStorage.getItem(MODE_STORAGE_KEY) === "minimap"
-      ? "minimap"
-      : "julia";
+    return localStorage.getItem(MODE_STORAGE_KEY) === "julia"
+      ? "julia"
+      : "minimap";
   }
 
   private setMode(mode: PanelMode) {
