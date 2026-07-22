@@ -65,12 +65,19 @@ Run these from the `client` directory:
 
 Important paths:
 
-- [`mandelbrot/src/lib.rs`](mandelbrot/src/lib.rs): Rust Mandelbrot renderer.
+- [`mandelbrot/src/lib.rs`](mandelbrot/src/lib.rs): Rust Mandelbrot renderer (direct f64 tier).
+- [`mandelbrot/src/perturbation.rs`](mandelbrot/src/perturbation.rs): deep-zoom rendering via perturbation theory.
+- [`mandelbrot/src/float_exp.rs`](mandelbrot/src/float_exp.rs): extended-exponent floats for very deep zooms.
 - [`mandelbrot/src/lib_test.rs`](mandelbrot/src/lib_test.rs): Rust tests and snapshots.
 - [`client/js`](client/js): front-end behavior, tile mapping, and controls.
 - [`client/html`](client/html): HTML templates.
 - [`client/css`](client/css): styles.
 - [`client/blog`](client/blog): blog content.
+- [`bench`](bench): WebAssembly performance benchmark harness (see [`bench/README.md`](bench/README.md)).
+
+### Performance Changes
+
+Changes that could affect rendering speed (the Rust code, build flags, or the worker pipeline) should be measured with the benchmark harness in [`bench`](bench) rather than eyeballed. The harness compares a candidate build against a pinned baseline across a corpus of real and synthetic views and verifies that output stays pixel-identical. Results, positive or negative, are recorded in [`bench/LOG.md`](bench/LOG.md) so settled questions are not re-run.
 
 ### Opening a Pull Request
 
