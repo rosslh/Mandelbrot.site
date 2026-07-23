@@ -171,14 +171,14 @@
           <div class="input-wrapper mobile-hidden">
             <label
               for="supersampling"
-              title="Tile render resolution. Fast renders at the tile's layout size (upscaled on high-density displays); Native matches the display pixel-for-pixel; 2&times; and 4&times; render beyond native resolution and downscale, anti-aliasing the image at a cost that grows with the square of the factor."
+              title="Tile render resolution, as a multiple of the tile's on-screen size. 1&times; renders at exactly that size; the option marked native matches the display pixel-for-pixel; higher options render beyond native resolution and downscale, anti-aliasing the image at a cost that grows with the square of the factor."
               >Supersampling</label
             >
             <select id="supersampling" name="supersampling" required>
-              <option value="fast">Fast</option>
+              <option value="layout">1&times;</option>
               <option value="native">Native</option>
               <option value="2">2&times;</option>
-              <option value="4">4&times; (Slow)</option>
+              <option value="4">4&times;</option>
             </select>
           </div>
           <div class="checkbox-wrapper mobile-hidden">

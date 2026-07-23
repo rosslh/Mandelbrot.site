@@ -30,8 +30,8 @@ export type MandelbrotConfig = {
   shiftHueAmount: number;
   colorSpace: number;
   reverseColors: boolean;
-  // Tile render resolution: "fast" (the tile's CSS layout size, upscaled on
-  // high-density displays), "native" (the display's devicePixelRatio,
+  // Tile render resolution: "layout" (the tile's CSS layout size, upscaled
+  // on high-density displays), "native" (the display's devicePixelRatio,
   // pixel-for-pixel), or "2"/"4" (multiples of native, downscaled by the
   // browser for anti-aliasing). See supersamplingFactor for how the values
   // resolve.
@@ -91,7 +91,7 @@ export const defaultConfig: MandelbrotConfig = {
   shiftHueAmount: 0,
   colorSpace: 2,
   reverseColors: false,
-  supersampling: "fast",
+  supersampling: "layout",
   showTierOverlay: false,
   smoothColoring: true,
   coloringMethod: "standard",
@@ -123,27 +123,32 @@ export function isFixedPaletteMethod(config: MandelbrotConfig): boolean {
 // size caps the worst case at 1600px tiles.
 const MAX_SUPERSAMPLING_FACTOR = 8;
 
-/** The tile-resolution multiplier for the config's supersampling setting.
- * "fast" is 1 (the CSS layout size — the browser upscales it on
+/** The tile-resolution multiplier for a supersampling setting value.
+ * "layout" is 1 (the CSS layout size — the browser upscales it on
  * high-density displays); "native" is the devicePixelRatio, matching the
  * screen pixel-for-pixel; the numeric values are multiples of native, so
  * the browser's downscale back to the screen is always a whole number of
  * samples per device pixel — true anti-aliasing with no interpolation
  * artifacts, on fractional ratios too. Anything malformed falls back to
- * "fast". */
-export function supersamplingFactor(config: MandelbrotConfig): number {
-  if (config.supersampling === "fast") {
+ * "layout". */
+export function supersamplingFactorForSetting(setting: string): number {
+  if (setting === "layout") {
     return 1;
   }
   const dpr = window.devicePixelRatio || 1;
-  if (config.supersampling === "native") {
+  if (setting === "native") {
     return Math.min(dpr, MAX_SUPERSAMPLING_FACTOR);
   }
-  const multiple = Number(config.supersampling);
+  const multiple = Number(setting);
   if (!Number.isFinite(multiple) || multiple <= 0) {
     return 1;
   }
   return Math.min(multiple * dpr, MAX_SUPERSAMPLING_FACTOR);
+}
+
+/** The tile-resolution multiplier for the config's supersampling setting. */
+export function supersamplingFactor(config: MandelbrotConfig): number {
+  return supersamplingFactorForSetting(config.supersampling);
 }
 
 type NumericConfigKey = {

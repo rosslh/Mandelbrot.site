@@ -14,6 +14,7 @@ import {
   SliderSpec,
   isFixedPaletteMethod,
   settingsSchema,
+  supersamplingFactorForSetting,
   syncAllInputsToConfig,
   syncInputToConfig,
 } from "./config";
@@ -47,6 +48,10 @@ type ResetButtonConfig = {
 const DETAILS_STATE_STORAGE_KEY = "mandelbrot-details-state";
 const OPTIMIZE_IMAGE_STORAGE_KEY = "mandelbrot-optimize-image";
 const SMALL_SCREEN_WIDTH_PX = 800;
+// Ceiling on the supersampling rungs offered in the sidebar, as a multiple
+// of the tile's layout size (the engine's own cap is higher; this is a cost
+// choice, keeping the deepest offered rung at 800px tiles).
+const MAX_SUPERSAMPLING_OPTION_FACTOR = 4;
 
 class MandelbrotControls {
   map: MandelbrotMap;
@@ -238,27 +243,68 @@ class MandelbrotControls {
     this.setupDetailsToggle();
   }
 
-  /** The supersampling select's "native" option resolves to the display's
-   * devicePixelRatio, only known at runtime: show that effective multiplier
-   * in its label. On a 1x display native would just repeat "Fast", so the
-   * option is dropped instead. The numeric options are multiples of native,
-   * so the factors are already monotonic in markup order — no sorting
-   * needed. */
+  /** Presents the supersampling options as resolved multiples of the tile's
+   * layout size, tagging the one that matches the display pixel-for-pixel
+   * as native. The option values keep their native-multiple semantics (so
+   * downscales stay a whole number of samples per device pixel); only the
+   * labels and visibility are derived here: rungs costlier than
+   * MAX_SUPERSAMPLING_OPTION_FACTOR or duplicating a cheaper rung are
+   * withheld (except native, and whichever rung is selected). Re-derives
+   * whenever the devicePixelRatio changes (browser zoom, monitor moves). */
   private setUpSupersamplingOptions() {
     const select = document.getElementById(
       "supersampling",
     ) as HTMLSelectElement | null;
-    const nativeOption = select?.querySelector('option[value="native"]');
-    if (!(nativeOption instanceof HTMLOptionElement)) {
+    if (!select) {
       return;
     }
+    const allOptions = Array.from(select.options);
 
-    const dpr = window.devicePixelRatio || 1;
-    if (dpr === 1) {
-      nativeOption.remove();
-      return;
-    }
-    nativeOption.textContent = `Native (${Number(dpr.toFixed(2))}×)`;
+    const refresh = () => {
+      const selected = select.value;
+      const nativeFactor = supersamplingFactorForSetting("native");
+      const shown: { option: HTMLOptionElement; factor: number }[] = [];
+      for (const option of allOptions) {
+        const factor = supersamplingFactorForSetting(option.value);
+        const isDuplicate = shown.some((entry) => entry.factor === factor);
+        const withinCap =
+          option.value === "native" ||
+          factor <= MAX_SUPERSAMPLING_OPTION_FACTOR;
+        option.remove();
+        if (option.value === selected || (withinCap && !isDuplicate)) {
+          shown.push({ option, factor });
+        }
+      }
+      const hasNativeRow = shown.some(
+        (entry) => entry.option.value === "native",
+      );
+      for (const { option, factor } of shown) {
+        const isNative =
+          option.value === "native" ||
+          (!hasNativeRow && factor === nativeFactor);
+        const multiplier = Math.round(factor * 10) / 10;
+        option.textContent = `${multiplier}×${isNative ? " (native)" : ""}`;
+        select.add(option);
+      }
+      select.value = selected;
+    };
+
+    const watchDprChange = () => {
+      const query = window.matchMedia(
+        `(resolution: ${window.devicePixelRatio || 1}dppx)`,
+      );
+      query.addEventListener(
+        "change",
+        () => {
+          refresh();
+          watchDprChange();
+        },
+        { once: true },
+      );
+    };
+
+    refresh();
+    watchDprChange();
   }
 
   /** Wires every schema-declared setting to its sidebar input. */

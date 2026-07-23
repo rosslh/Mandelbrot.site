@@ -123,8 +123,9 @@ class MandelbrotLayer extends L.GridLayer {
   ) {
     const context = canvas.getContext("2d");
 
-    // Rounded because "native" supersampling can be fractional (a
-    // devicePixelRatio of e.g. 1.25) and the canvas needs integer dimensions.
+    // Rounded because the resolved supersampling factor can be fractional
+    // (a devicePixelRatio of e.g. 1.25) and the canvas needs integer
+    // dimensions.
     const scaledTileSize = Math.round(
       this.getTileSize().x * supersamplingFactor(this._map.config),
     );
