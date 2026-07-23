@@ -2,6 +2,9 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  schedule:
+    - cron: "0 12 1 * *"
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
@@ -9,27 +12,65 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Determine release tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          latest=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
+          if [ -n "$latest" ] && [ "$(git rev-parse "$latest^{commit}")" = "$(git rev-parse HEAD)" ]; then
+            echo "No new commits since $latest; skipping release."
+            exit 0
+          fi
+          tests=$(gh run list --workflow=Tests --commit "$GITHUB_SHA" --json conclusion --jq '.[0].conclusion')
+          if [ "$tests" != "success" ]; then
+            echo "Tests for $GITHUB_SHA have conclusion '${tests:-none}'; skipping release."
+            exit 0
+          fi
+          base="v$(date -u +%Y).$(date -u +%-m)"
+          tag="$base"
+          n=0
+          while git rev-parse -q --verify "refs/tags/$tag" > /dev/null; do
+            n=$((n + 1))
+            tag="$base.$n"
+          done
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - name: Install wasm-pack
+        if: steps.tag.outputs.tag != ''
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - uses: actions/setup-node@v4
+        if: steps.tag.outputs.tag != ''
         with:
           node-version-file: ./client/.nvmrc
       - name: Install dependencies
+        if: steps.tag.outputs.tag != ''
         working-directory: ./client
         run: |
           npm i
       - name: Build project
+        if: steps.tag.outputs.tag != ''
         working-directory: ./client
         run: |
           npm run build
       - name: Package dist
+        if: steps.tag.outputs.tag != ''
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           cd client/dist
-          zip -r "../../mandelbrot-site-${GITHUB_REF_NAME}.zip" .
+          zip -r "../../mandelbrot-site-${TAG}.zip" .
       - name: Create release
+        if: steps.tag.outputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: >
-          gh release create "$GITHUB_REF_NAME"
-          "mandelbrot-site-${GITHUB_REF_NAME}.zip"
-          --title "$GITHUB_REF_NAME" --generate-notes
+          gh release create "$TAG"
+          "mandelbrot-site-${TAG}.zip"
+          --title "$TAG" --generate-notes --target "$GITHUB_SHA"
