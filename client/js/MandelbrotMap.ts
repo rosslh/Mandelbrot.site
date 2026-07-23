@@ -830,6 +830,23 @@ class MandelbrotMap extends L.Map {
     } else {
       this.goToCoordinates(this.config.re, this.config.im, this.config.zoom);
     }
+    // Every rerender-effect settings change (iteration cap, power, coloring
+    // method, smoothing, supersampling) comes through here, and the
+    // navigator's thumbnails depend on several of them — notified explicitly,
+    // like the recolor-path appliers below do, rather than via the view
+    // events this method happens to fire. Its settings fingerprint makes the
+    // ones that don't affect it (supersampling) free.
+    this.navigatorPanel?.refresh();
+  }
+
+  /** A point-in-time copy of the config for long-running operations (image
+   * export, animation generation): the live config is rewritten under them —
+   * the auto palette fit moves the window as tiles settle, navigation
+   * rewrites the coordinates — and an operation that reads it late can stamp
+   * metadata, name files, or color frames in ways that don't match the
+   * pixels it rendered. */
+  configSnapshot(): MandelbrotConfig {
+    return { ...this.config };
   }
 
   getShareUrl() {

@@ -2,7 +2,7 @@ import { saveAs } from "file-saver";
 import type MandelbrotMap from "./MandelbrotMap";
 import { fittedCdfForRender, fittedRangeForRender } from "./TileCache";
 import { AnimationSpec, buildFrameRects, frameCount } from "./animationFrames";
-import { coloringOptions } from "./config";
+import { coloringOptions, MandelbrotConfig } from "./config";
 import type { TileRect } from "./protocol";
 
 // Candidate container/codec strings in preference order. Safari records H.264
@@ -117,6 +117,13 @@ class ZoomAnimator {
       throw new Error("This browser cannot record video.");
     }
 
+    // Every frame is colored and labeled from this point-in-time copy: the
+    // run keeps renders in flight for its whole duration while the live
+    // config is rewritten under it (the auto palette fit as visible tiles
+    // settle, navigation on moveend), and a frame that read the config late
+    // would color differently than one that read it early.
+    const config = this.map.configSnapshot();
+
     const targetZoom = this.map.effectiveZoom;
     const rects = buildFrameRects(
       spec,
@@ -126,49 +133,58 @@ class ZoomAnimator {
     );
     const total = frameCount(spec);
 
-    // Palette refitting: the config's palette range is auto-fit to the deep
-    // target view, whose iteration counts dwarf a shallow frame's — rendering
-    // every frame with it clamps most of the sweep to a single color. In auto
-    // palette mode the palette is instead refit per frame to the iteration
-    // range at that depth, matching what the live view shows there. Manual
-    // palette mode keeps the user's fixed range, also matching the live view;
-    // the distance-estimate and atom-domain modes normalize their values to a
-    // fixed 0..1 domain, so there is nothing to refit.
-    const coloring = coloringOptions(this.map.config);
+    const coloring = coloringOptions(config);
     const standardPalette = !coloring.distanceEstimate && !coloring.atomDomain;
-    const refitPalette = this.map.config.paletteAutoFit && standardPalette;
 
     // Histogram coloring (the color-mapping slider): each standard-mode frame
     // is equalized against its own escape-value distribution over its
-    // effective window — the smoothed auto-fit window when refitting, else the
-    // user's fixed manual window — exactly as the live view rebuilds its CDF
-    // for whatever it currently shows at that depth (it does so per moveend in
-    // manual-window mode too, not just when auto-fitting). The strength (0
-    // linear .. 1 fully equalized) blends the per-frame table toward the
-    // identity; the fixed-palette modes normalize to a fixed 0..1 domain and
-    // are never equalized. A per-frame table rather than an anchor-interpolated
-    // one is correct here and does not flash: the anchoring that smooths the
-    // window fit guards against the percentile clip snapping to bucket edges
-    // frame to frame, but the CDF is a smooth cumulative integral of the whole
-    // distribution with sub-bucket interpolation and no such threshold, so
-    // near-identical adjacent frames yield near-identical tables — and the one
-    // input that did jitter, the window, is still supplied by the smoothed
-    // anchor fit. It also needs no extra renders: the frame is already
-    // rendered for its values to recolor to its window.
+    // effective window (the per-frame window derived below) — exactly as the
+    // live view rebuilds its CDF for whatever it currently shows at that
+    // depth (it does so per moveend in manual-window mode too, not just when
+    // auto-fitting). The strength (0 linear .. 1 fully equalized) blends the
+    // per-frame table toward the identity; the fixed-palette modes normalize
+    // to a fixed 0..1 domain and are never equalized. A per-frame table
+    // rather than an anchor-interpolated one is correct here and does not
+    // flash: the anchoring that smooths the window fit guards against the
+    // percentile clip snapping to bucket edges frame to frame, but the CDF is
+    // a smooth cumulative integral of the whole distribution with sub-bucket
+    // interpolation and no such threshold, so near-identical adjacent frames
+    // yield near-identical tables — and the one input that did jitter, the
+    // window, is still supplied by the smoothed anchor fit. It also needs no
+    // extra renders: the frame is already rendered for its values to recolor
+    // to its window.
     const equalizeStrength =
-      standardPalette && this.map.config.histogramColoring > 0
-        ? this.map.config.histogramColoring / 100
+      standardPalette && config.histogramColoring > 0
+        ? config.histogramColoring / 100
         : 0;
 
-    // Fitting each frame independently makes the palette window jump every
-    // frame — partly the genuine deepening trend, partly percentile-clip
-    // jitter — which reads as flashing. Instead sample the fitted range at a
-    // few anchor frames spread across the zoom and log-interpolate the window
-    // for the rest, so the colors drift smoothly with depth. Null entries
-    // (all-interior frames) fall back to the plain config-palette render.
-    const frameRanges = refitPalette
+    // Palette windows: the config's window describes the deep target view's
+    // iteration counts, which dwarf a shallow frame's — held fixed across the
+    // sweep it clamps most frames to one end of the palette (a zoom-in would
+    // open nearly flat). So every multi-frame standard-palette animation
+    // measures the smoothed fitted range across the sweep (buildFrameRanges)
+    // and colors each frame to a window derived from it: the fitted range
+    // itself in auto palette mode (what the live view would fit at that
+    // depth), or in manual mode the user's window re-expressed as the same
+    // slice of each frame's range (relativeManualRanges). The fixed-palette
+    // modes normalize to 0..1 and need no windows. A single-frame animation
+    // is the target view itself: auto mode still measures its own fit, while
+    // the manual window already applies exactly as configured.
+    const measureRanges =
+      standardPalette && (config.paletteAutoFit || total > 1);
+    const fittedRanges = measureRanges
       ? await this.buildFrameRanges(rects, spec, total)
       : null;
+    const frameRanges =
+      fittedRanges === null
+        ? null
+        : config.paletteAutoFit
+          ? fittedRanges
+          : this.relativeManualRanges(
+              fittedRanges,
+              config,
+              spec.kind === "in" ? total - 1 : 0,
+            );
     this.throwIfCancelled();
 
     // Phase 1: render every frame off-screen, concurrently across the worker
@@ -198,6 +214,7 @@ class ZoomAnimator {
               spec,
               frameRanges ? frameRanges[index] : null,
               equalizeStrength,
+              config,
             );
           } catch (error) {
             failure ??= error;
@@ -239,7 +256,7 @@ class ZoomAnimator {
       );
 
       const extension = mime.startsWith("video/mp4") ? "mp4" : "webm";
-      saveAs(blob, this.buildFilename(extension));
+      saveAs(blob, this.buildFilename(extension, config));
     } finally {
       for (const frame of frames) {
         frame?.close();
@@ -247,30 +264,33 @@ class ZoomAnimator {
     }
   }
 
-  /** Renders one animation frame to an ImageBitmap.
+  /** Renders one animation frame to an ImageBitmap, coloring it from the
+   * run's config snapshot.
    *
-   * A frame that neither refits the palette window nor equalizes (manual
-   * palette at linear strength, or a normalized fixed-palette mode) takes the
-   * plain render straight from the config palette. The coloring is passed
-   * explicitly rather than inherited so the frame never picks up the map's
-   * viewport-global equalization table: that table is fit to the on-screen
-   * target view and would miscolor every shallower frame.
+   * A frame with no per-frame window that also doesn't equalize (a
+   * single-frame manual-palette animation at linear strength, a frame whose
+   * range measurement found no escaped pixels, or a normalized fixed-palette
+   * mode) takes the plain render straight from the config palette. The
+   * coloring is passed explicitly rather than inherited so the frame never
+   * picks up the map's viewport-global equalization table: that table is fit
+   * to the on-screen target view and would miscolor every shallower frame.
    *
    * Otherwise the frame is rendered for its escape values and recolored over
-   * its effective window: the smoothed per-frame range from buildFrameRanges
-   * (auto palette) or the user's fixed manual window (manual palette). When
-   * `strength` is above 0 the recolor also carries a histogram-equalization
-   * table built from this frame's own values over that window, so recorded
-   * frames equalize per depth exactly like the live view — see
-   * `equalizeStrength` in generate for why a per-frame table is used. */
+   * its effective window: the per-frame `range` from generate (the smoothed
+   * fitted range in auto palette mode, the relative manual slice otherwise)
+   * or, when that is null, the user's fixed window. When `strength` is above
+   * 0 the recolor also carries a histogram-equalization table built from
+   * this frame's own values over that window, so recorded frames equalize
+   * per depth exactly like the live view — see `equalizeStrength` in
+   * generate for why a per-frame table is used. */
   private async renderFrame(
     rect: TileRect,
     spec: AnimationSpec,
     range: PaletteRange | null,
     strength: number,
+    config: MandelbrotConfig,
   ): Promise<ImageBitmap> {
     const renderer = this.map.regionRenderer;
-    const config = this.map.config;
     const equalize = strength > 0;
 
     if (range === null && !equalize) {
@@ -299,8 +319,9 @@ class ZoomAnimator {
 
     let image = response.image;
     if (response.values) {
-      // The window this frame colors over: the smoothed auto-fit range when
-      // refitting, else the user's fixed manual window.
+      // The window this frame colors over: the per-frame derived window
+      // (smoothed auto fit or relative manual slice), else the user's fixed
+      // window.
       const window = range ?? {
         min: config.paletteMinIter,
         max: config.paletteMaxIter,
@@ -376,6 +397,45 @@ class ZoomAnimator {
       ranges[index] = interpolatePaletteRange(fitted, index);
     }
     return ranges;
+  }
+
+  /** Re-expresses the user's manual palette window for every frame as the
+   * same slice of that frame's fitted iteration range. The window's absolute
+   * bounds describe the target view's iteration counts; at shallower depths
+   * the escaped values live orders of magnitude lower, so applying the
+   * absolute bounds across the sweep would clamp most frames to one end of
+   * the palette. What travels instead is the window's intent — which slice
+   * of the distribution to color: the bounds become fractions of the target
+   * frame's fitted range, and those fractions are applied to every frame's
+   * (anchor-smoothed) range. At the target frame the fractions reproduce the
+   * user's window exactly, so the animation meets the live view; fractions
+   * outside [0, 1] (a window wider than the fitted range) carry through
+   * linearly. Frames with no fitted range — and every frame, when the target
+   * frame's own range is missing or degenerate — fall back to null, i.e. the
+   * absolute window (renderFrame's fallback). */
+  private relativeManualRanges(
+    fittedRanges: (PaletteRange | null)[],
+    config: MandelbrotConfig,
+    targetIndex: number,
+  ): (PaletteRange | null)[] {
+    const target = fittedRanges[targetIndex];
+    if (!target || target.max <= target.min) {
+      return fittedRanges.map((): PaletteRange | null => null);
+    }
+
+    const span = target.max - target.min;
+    const low = (config.paletteMinIter - target.min) / span;
+    const high = (config.paletteMaxIter - target.min) / span;
+
+    return fittedRanges.map((range) => {
+      if (!range) {
+        return null;
+      }
+      const frameSpan = range.max - range.min;
+      const min = Math.round(range.min + low * frameSpan);
+      const max = Math.round(range.min + high * frameSpan);
+      return { min, max: Math.max(max, min + 1) };
+    });
   }
 
   /** Renders `rect` for its escape values and returns the auto-palette range
@@ -488,12 +548,12 @@ class ZoomAnimator {
     });
   }
 
-  private buildFilename(extension: string): string {
+  private buildFilename(extension: string, config: MandelbrotConfig): string {
     // Deep-zoom coordinates can be hundreds of digits; keep filenames sane,
     // matching the image export's truncation.
     const truncate = (value: string) =>
       value.length > 24 ? value.slice(0, 24) : value;
-    const { re, im, zoom } = this.map.config;
+    const { re, im, zoom } = config;
     return `mandelbrot${Date.now()}_r${truncate(re)}_im${truncate(
       im,
     )}_z${zoom}_zoom.${extension}`;

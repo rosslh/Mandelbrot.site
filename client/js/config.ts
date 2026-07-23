@@ -10,6 +10,9 @@ import { isValidDecimalCoordinate } from "./highPrecision";
 import { formatMagnification } from "./magnification";
 
 export type MandelbrotConfig = {
+  // Unless a field's comment says otherwise, it is a plain setting: written
+  // only by the user (via its sidebar input or a share URL) and read by
+  // everything else.
   maxIterations: number;
   power: number;
   palette: string;
@@ -67,14 +70,23 @@ export type MandelbrotConfig = {
   // values below the min clamp to the palette start, above the max to the
   // palette end.
   histogramColoring: number;
+  // The palette window. Dual-authored: under paletteAutoFit these hold
+  // viewport-fitted state — rewritten on every settled view, and reset to a
+  // provisional ceiling when the iteration cap changes — while in manual
+  // mode they are the user's, written by the histogram bound markers. See
+  // the derivation policy at standaloneColoring for how surfaces that render
+  // outside the viewport treat them.
   paletteMinIter: number;
   paletteMaxIter: number;
   // When enabled the palette range fits itself to the on-screen tiles and
   // the min/max inputs become read-only displays; when disabled they are
-  // the user's to edit.
+  // the user's to edit. Dragging a histogram marker flips this to manual.
   paletteAutoFit: boolean;
 
-  // Coordinates are decimal strings because deep zooms exceed f64 precision.
+  // View state mirrored into the config: navigation rewrites these on every
+  // settled move (see setCoordinateInputValues), so they describe the live
+  // view, not a user-entered value. Coordinates are decimal strings because
+  // deep zooms exceed f64 precision.
   re: string;
   im: string;
   zoom: number;
@@ -431,6 +443,84 @@ export function coloringOptions(
   }
 
   return options;
+}
+
+// Derivation policy — how surfaces that consume the config outside the tile
+// layer treat fitted and device-specific state:
+// - Auto-fitted values (the palette window under paletteAutoFit, the
+//   equalization CDF) are viewport state, not settings. Surfaces whose
+//   pixels are not the viewport's (the Julia thumbnail, the minimap,
+//   zoom-animation frames) re-fit over their own pixels via
+//   standaloneColoring below; only viewport-identical consumers (the image
+//   and data exports) inherit them, so the export matches the screen.
+// - Serialization (share URLs) shares the recipe — the settings plus the
+//   auto/manual mode — so a recipient's view refits itself; a consumer that
+//   must reproduce the result pins it explicitly (the PNG and data-export
+//   metadata serialize the resolved window as manual).
+// - Resolution settings (supersampling) are per-surface choices, never
+//   derived or shared; diagnostics (the tier overlay) are viewport-only.
+
+/** Options for a standalone coloring derivation (see the policy above). */
+export type StandaloneColoringOptions = {
+  // Keep the fixed-palette method flags (distance estimate, atom domain).
+  // The minimap keeps them — it is a view of the Mandelbrot set itself, so
+  // it should match the on-screen rendering mode — while the Julia thumbnail
+  // drops them: they are view techniques its escape-time render does not
+  // share.
+  keepMethodFlags?: boolean;
+  // The surface's own fitted palette window; zeroed when omitted (the
+  // placeholder for "my fit hasn't run yet" — never the map's window).
+  window?: { min: number; max: number };
+  // The surface's own equalization table; the linear mapping when omitted —
+  // never the map's viewport-global table.
+  paletteCdf?: Float32Array | null;
+};
+
+/** The coloring options for a surface that renders outside the viewport: the
+ * map's appearance settings with every piece of viewport-fitted state
+ * replaced by the surface's own (or a placeholder). The map's palette window
+ * and equalization table describe the on-screen view's iteration counts —
+ * at depth they dwarf a standalone render's, clamping it to one end of the
+ * gradient — so standalone surfaces run their own fit and pass its results
+ * here. */
+export function standaloneColoring(
+  config: MandelbrotConfig,
+  options: StandaloneColoringOptions = {},
+): ColoringOptions {
+  const { keepMethodFlags = false, window: fit, paletteCdf = null } = options;
+
+  const coloring: ColoringOptions = {
+    ...coloringOptions(config, paletteCdf),
+    paletteMinIter: fit ? fit.min : 0,
+    paletteMaxIter: fit ? fit.max : 0,
+  };
+
+  if (!keepMethodFlags) {
+    coloring.distanceEstimate = false;
+    coloring.atomDomain = false;
+  }
+
+  return coloring;
+}
+
+/** Fingerprint of every setting that can change a standalone surface's
+ * pixels, so its refresh can tell a real settings change from the palette
+ * window refits the tile layer performs on every pan at depth (the surface's
+ * `coloring` comes from standaloneColoring, which excludes the map's
+ * window). The color-mapping strength rides separately: the surface builds
+ * its own equalization table, but moving the slider still changes its
+ * pixels. */
+export function renderSettingsFingerprint(
+  config: MandelbrotConfig,
+  coloring: ColoringOptions,
+): string {
+  return JSON.stringify({
+    coloring,
+    histogramColoring: config.histogramColoring,
+    maxIterations: config.maxIterations,
+    power: config.power,
+    smoothColoring: config.smoothColoring,
+  });
 }
 
 /** The shared parameters for the given config as a plain object keyed by URL

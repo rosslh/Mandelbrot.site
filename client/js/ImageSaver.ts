@@ -1,6 +1,6 @@
 import { saveAs } from "file-saver";
 import type MandelbrotMap from "./MandelbrotMap";
-import { buildShareParams } from "./config";
+import { buildShareParams, buildShareUrl, MandelbrotConfig } from "./config";
 import { embedTextChunks } from "./pngMetadata";
 import { buildZip, encodeNpyFloat32 } from "./dataExport";
 import { OptimiseRequest, OptimiseResponse, TileRect } from "./protocol";
@@ -18,6 +18,11 @@ class ImageSaver {
     optimize: boolean,
     onStartOptimizing?: () => void,
   ) {
+    // Snapshot the config alongside the render payloads (which buildPayload
+    // snapshots synchronously below): the auto palette fit and navigation
+    // rewrite the live config, and metadata read after the columns finish
+    // could otherwise describe different parameters than the pixels used.
+    const config = this.map.configSnapshot();
     const bounds = this.adjustBoundsForAspectRatio(
       this.map.mapBoundsInTileSpace,
       totalWidth,
@@ -33,7 +38,12 @@ class ImageSaver {
       totalWidth,
       totalHeight,
     );
-    await this.saveCanvasAsImage(finalCanvas, optimize, onStartOptimizing);
+    await this.saveCanvasAsImage(
+      finalCanvas,
+      config,
+      optimize,
+      onStartOptimizing,
+    );
   }
 
   /** Exports the current view's per-pixel escape values (issue #47) as a ZIP
@@ -45,6 +55,8 @@ class ImageSaver {
    * and bounds handling so the data matches what a PNG of the same view would
    * show. */
   async saveVisibleData(totalWidth: number, totalHeight: number) {
+    // Snapshotted for the same reason as the image export above.
+    const config = this.map.configSnapshot();
     const bounds = this.adjustBoundsForAspectRatio(
       this.map.mapBoundsInTileSpace,
       totalWidth,
@@ -77,15 +89,16 @@ class ImageSaver {
     });
 
     const npy = encodeNpyFloat32(values, totalHeight, totalWidth);
+    const pinned = this.pinnedConfig(config);
     const metadata = {
       software: "Mandelbrot.site",
-      url: this.map.getShareUrl(),
-      params: buildShareParams(this.map.config),
+      url: buildShareUrl(pinned),
+      params: buildShareParams(pinned),
       width: totalWidth,
       height: totalHeight,
-      smoothColoring: this.map.config.smoothColoring,
+      smoothColoring: config.smoothColoring,
       // What each value means, so the file is self-describing without the app.
-      valueDescription: this.map.config.smoothColoring
+      valueDescription: config.smoothColoring
         ? "Smoothed escape value (fractional iteration count); Infinity for interior pixels."
         : "Raw escape iteration count; Infinity for interior pixels.",
       layout: "Row-major float32, shape (height, width), indexed as [y][x].",
@@ -107,9 +120,9 @@ class ImageSaver {
 
     saveAs(
       blob,
-      `mandelbrot${Date.now()}_r${truncate(this.map.config.re)}_im${truncate(
-        this.map.config.im,
-      )}_z${this.map.config.zoom}_data.zip`,
+      `mandelbrot${Date.now()}_r${truncate(config.re)}_im${truncate(
+        config.im,
+      )}_z${config.zoom}_data.zip`,
     );
   }
 
@@ -213,23 +226,42 @@ class ImageSaver {
     return finalCanvas;
   }
 
-  /** Embeds the full, untruncated view parameters into the PNG as tEXt chunks
-   * so a saved image stays exactly regenerable even after it is renamed. The
-   * share URL and the JSON blob are both derived from `buildShareParams`, the
-   * same serialization the share button uses, so they never drift. Runs before
-   * the optional oxipng pass, which preserves text chunks. */
-  private embedViewMetadata(pngBuffer: ArrayBuffer): ArrayBuffer {
-    const params = buildShareParams(this.map.config);
-    const shareUrl = this.map.getShareUrl();
+  /** The config with its palette window pinned for serialization. Under
+   * auto-fit the window values are viewport-fitted state that an opener's
+   * own refit would replace — their window size and aspect differ, so their
+   * fit does too — while an export exists to reproduce this render, so its
+   * metadata marks the range manual with the values actually used. (Under
+   * histogram coloring the equalization table is still rebuilt from the
+   * opener's visible distribution, so regeneration there is close rather
+   * than exact; the table is viewport state with no serial form.) */
+  private pinnedConfig(config: MandelbrotConfig): MandelbrotConfig {
+    return { ...config, paletteAutoFit: false };
+  }
+
+  /** Embeds the full, untruncated view parameters into the PNG as tEXt
+   * chunks so a saved image stays regenerable even after it is renamed. The
+   * share URL and the JSON blob are both derived from `buildShareParams`,
+   * the same serialization the share button uses, so they never drift — but
+   * with the palette window pinned (see pinnedConfig). Runs before the
+   * optional oxipng pass, which preserves text chunks. */
+  private embedViewMetadata(
+    pngBuffer: ArrayBuffer,
+    config: MandelbrotConfig,
+  ): ArrayBuffer {
+    const pinned = this.pinnedConfig(config);
     return embedTextChunks(pngBuffer, [
       { keyword: "Software", text: "Mandelbrot.site" },
-      { keyword: "mandelbrot:url", text: shareUrl },
-      { keyword: "mandelbrot:params", text: JSON.stringify(params) },
+      { keyword: "mandelbrot:url", text: buildShareUrl(pinned) },
+      {
+        keyword: "mandelbrot:params",
+        text: JSON.stringify(buildShareParams(pinned)),
+      },
     ]);
   }
 
   private async saveCanvasAsImage(
     canvas: HTMLCanvasElement,
+    config: MandelbrotConfig,
     optimize: boolean,
     onStartOptimizing?: () => void,
   ): Promise<void> {
@@ -240,7 +272,10 @@ class ImageSaver {
     }
     const dataUrl = canvas.toDataURL("image/png");
     const response = await fetch(dataUrl);
-    const rawPngBuffer = this.embedViewMetadata(await response.arrayBuffer());
+    const rawPngBuffer = this.embedViewMetadata(
+      await response.arrayBuffer(),
+      config,
+    );
 
     let finalBuffer = rawPngBuffer;
 
@@ -263,9 +298,9 @@ class ImageSaver {
 
     saveAs(
       blob,
-      `mandelbrot${Date.now()}_r${truncate(this.map.config.re)}_im${truncate(
-        this.map.config.im,
-      )}_z${this.map.config.zoom}.png`,
+      `mandelbrot${Date.now()}_r${truncate(config.re)}_im${truncate(
+        config.im,
+      )}_z${config.zoom}.png`,
     );
   }
 }

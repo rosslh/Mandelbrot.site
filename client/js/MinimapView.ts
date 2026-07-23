@@ -1,7 +1,7 @@
 import type MandelbrotMap from "./MandelbrotMap";
 import type { RenderFrame } from "./RegionRenderer";
 import { fittedCdfForRender, fittedRangeForRender } from "./TileCache";
-import { coloringOptions } from "./config";
+import { renderSettingsFingerprint, standaloneColoring } from "./config";
 import type { ColoringOptions, TileRect } from "./protocol";
 import { FULL_SET_ZOOM } from "./magnification";
 
@@ -92,28 +92,15 @@ class MinimapView {
     this.ctx = canvas.getContext("2d");
   }
 
-  /** Shows the minimap after a mode switch or panel reopen: repaints from
-   * the cache, rendering first if the cache is missing or stale. */
-  activate() {
-    void this.ensureImageAndDraw();
-  }
-
-  /** Re-renders after a settings change. Renders only when a setting the
-   * minimap's pixels depend on actually changed — the settings fingerprint
-   * excludes the map's palette window (see minimapColoring), so the tile
-   * layer's per-pan window refits at depth are repaint-only no-ops here. */
+  /** Repaints the minimap — the single entrypoint for every trigger (pan,
+   * settings change, mode switch, panel reopen). The settings fingerprint
+   * decides the cost: with the size and settings unchanged (the per-pan
+   * case, and the tile layer's palette-window refits at depth, which the
+   * fingerprint excludes — see minimapColoring) this is a synchronous blit
+   * of the cached image plus the marker; otherwise a fresh render goes
+   * through the worker pool. */
   refresh() {
     void this.ensureImageAndDraw();
-  }
-
-  /** Repaints the marker after a pan or zoom: cached image plus marker, no
-   * worker traffic. */
-  updateMarker() {
-    if (!this.cached) {
-      void this.ensureImageAndDraw();
-      return;
-    }
-    this.draw();
   }
 
   /** The fixed window's bounds in tile space at the minimap's frame. In tile
@@ -142,43 +129,32 @@ class MinimapView {
     };
   }
 
-  /** The coloring options for the minimap's render and recolor: the map's
-   * appearance settings with the palette window zeroed. In standard mode the
-   * minimap fits its own window to its own iteration range (the map's window
-   * — auto-fit or manual — describes the deep view's iteration counts, which
-   * would clamp this shallow render to one end of the gradient); the
-   * normalized modes (distance-estimate, atom-domain) color from fixed [0, 1]
-   * values and ignore the window entirely (see ColoringOptions in
-   * mandelbrot/src/lib.rs), and unlike the Julia thumbnail the minimap keeps
-   * their flags — it is a view of the Mandelbrot set itself, so it should
-   * match the on-screen rendering mode. Zeroing the window in all modes also
-   * keeps it out of the settings fingerprint, which is what makes the tile
-   * layer's per-pan window refits free for the minimap. */
+  /** The coloring options for the minimap's render and recolor: the
+   * standalone profile with the minimap's own fit (see standaloneColoring in
+   * config.ts). In standard mode the minimap fits its own window to its own
+   * iteration range; the normalized modes (distance-estimate, atom-domain)
+   * color from fixed [0, 1] values and ignore the window entirely (see
+   * ColoringOptions in mandelbrot/src/lib.rs), and unlike the Julia
+   * thumbnail the minimap keeps their flags — it is a view of the Mandelbrot
+   * set itself, so it should match the on-screen rendering mode. Keeping the
+   * map's window out (in all modes) also keeps it out of the settings
+   * fingerprint, which is what makes the tile layer's per-pan window refits
+   * free for the minimap. */
   private minimapColoring(
     paletteCdf: Float32Array | null = null,
+    window?: { min: number; max: number },
   ): ColoringOptions {
-    return {
-      ...coloringOptions(this.map.config, paletteCdf),
-      paletteMinIter: 0,
-      paletteMaxIter: 0,
-    };
+    return standaloneColoring(this.map.config, {
+      keepMethodFlags: true,
+      paletteCdf,
+      window,
+    });
   }
 
   /** Fingerprint of every setting that affects the minimap's pixels, so a
-   * refresh can tell a real settings change from a palette-window refit. The
-   * color-mapping strength rides separately: like the window, the
-   * equalization table is private to the minimap (built from its own render,
-   * not the map's viewport table), but moving the slider changes its
-   * pixels. */
+   * refresh can tell a real settings change from a palette-window refit. */
   private settingsKey(): string {
-    const config = this.map.config;
-    return JSON.stringify({
-      coloring: this.minimapColoring(),
-      histogramColoring: config.histogramColoring,
-      maxIterations: config.maxIterations,
-      power: config.power,
-      smoothColoring: config.smoothColoring,
-    });
+    return renderSettingsFingerprint(this.map.config, this.minimapColoring());
   }
 
   private async ensureImageAndDraw() {
@@ -228,11 +204,10 @@ class MinimapView {
             range,
             this.map.config.histogramColoring / 100,
           );
-          image = await this.map.regionRenderer.recolor(response.values, {
-            ...this.minimapColoring(cdf),
-            paletteMinIter: range.min,
-            paletteMaxIter: range.max,
-          });
+          image = await this.map.regionRenderer.recolor(
+            response.values,
+            this.minimapColoring(cdf, range),
+          );
         }
       }
       const bitmap = await createImageBitmap(

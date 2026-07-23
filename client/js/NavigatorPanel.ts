@@ -3,7 +3,7 @@ import throttle from "lodash/throttle";
 import type MandelbrotMap from "./MandelbrotMap";
 import MinimapView, { thumbnailRenderSize } from "./MinimapView";
 import { fittedCdfForRender, fittedRangeForRender } from "./TileCache";
-import { coloringOptions } from "./config";
+import { renderSettingsFingerprint, standaloneColoring } from "./config";
 import type { ColoringOptions } from "./protocol";
 
 // Minimum spacing between Julia renders while the cursor moves. Each render is
@@ -128,7 +128,7 @@ class NavigatorPanel {
       if (this.mode === "julia") {
         this.scheduleRender();
       } else if (this.panelOpen()) {
-        this.minimap.updateMarker();
+        this.minimap.refresh();
       }
     });
 
@@ -215,7 +215,7 @@ class NavigatorPanel {
     if (this.mode === "julia") {
       this.scheduleRender();
     } else {
-      this.minimap.activate();
+      this.minimap.refresh();
     }
   }
 
@@ -235,47 +235,25 @@ class NavigatorPanel {
     return this.map.complexAtLatLngFloat(latLng);
   }
 
-  /** The coloring options the thumbnail's recolor pass uses: the map's
-   * appearance settings, minus everything tied to the map's view. The palette
-   * window is a placeholder — the thumbnail runs its own auto-adjust, fitting
-   * the window to its own iteration range on every render (the map's window
-   * describes the viewport's iteration counts, which at depth dwarf the Julia
-   * set's shallow ones and would clamp the whole thumbnail to one end of the
-   * gradient; that holds for the auto-fit and manual windows alike). The
-   * same goes for histogram coloring's equalization table: the map's is
-   * built from the viewport's distribution, so the thumbnail passes its own
-   * (`paletteCdf`, from its private fit) or none. The normalized modes
-   * (distance-estimate, atom-domain) are view techniques the escape-time
-   * thumbnail does not share, so their flags are dropped too. */
+  /** The coloring options the thumbnail's render and recolor use: the
+   * standalone profile with the thumbnail's own fit (see standaloneColoring
+   * in config.ts). The thumbnail runs its own auto-adjust, fitting the
+   * window to its own iteration range on every render — the map's window
+   * describes the viewport's iteration counts, which at depth dwarf the
+   * Julia set's shallow ones. The normalized modes (distance-estimate,
+   * atom-domain) are view techniques the escape-time thumbnail does not
+   * share, so their flags are dropped. */
   private thumbnailColoring(
     paletteCdf: Float32Array | null = null,
+    window?: { min: number; max: number },
   ): ColoringOptions {
-    return {
-      ...coloringOptions(this.map.config, paletteCdf),
-      paletteMinIter: 0,
-      paletteMaxIter: 0,
-      distanceEstimate: false,
-      atomDomain: false,
-    };
+    return standaloneColoring(this.map.config, { paletteCdf, window });
   }
 
   /** Fingerprint of every setting that affects the thumbnail's pixels, so
-   * render() can tell a settings change from a cursor move. Built from
-   * thumbnailColoring, so the settings the thumbnail ignores — above all the
-   * palette window, which the tile layer refits on every pan and zoom at
-   * depth — do not force renders that would repaint the same image. The
-   * color-mapping strength rides separately: the thumbnail builds its own
-   * equalization CDF (its private fit, not the map's table), but moving the
-   * slider still changes its pixels. */
+   * render() can tell a settings change from a cursor move. */
   private settingsKey(): string {
-    const config = this.map.config;
-    return JSON.stringify({
-      coloring: this.thumbnailColoring(),
-      histogramColoring: config.histogramColoring,
-      maxIterations: config.maxIterations,
-      power: config.power,
-      smoothColoring: config.smoothColoring,
-    });
+    return renderSettingsFingerprint(this.map.config, this.thumbnailColoring());
   }
 
   /** Renders the Julia thumbnail unless the panel is collapsed. Throttled so
@@ -341,11 +319,10 @@ class NavigatorPanel {
           range,
           this.map.config.histogramColoring / 100,
         );
-        image = await this.map.regionRenderer.recolor(response.values, {
-          ...this.thumbnailColoring(cdf),
-          paletteMinIter: range.min,
-          paletteMaxIter: range.max,
-        });
+        image = await this.map.regionRenderer.recolor(
+          response.values,
+          this.thumbnailColoring(cdf, range),
+        );
       }
       // A newer render (or a pool re-creation that resolved out of order)
       // supersedes this one — as does a switch to the minimap, which now

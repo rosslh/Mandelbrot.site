@@ -190,13 +190,7 @@ class MandelbrotControls {
           this.map.refresh(true);
           this.setCoordinateInputValues();
         },
-        checkDiff: () => {
-          return (
-            this.map.config.re !== this.map.initialConfig.re ||
-            this.map.config.im !== this.map.initialConfig.im ||
-            this.map.config.zoom !== this.map.initialConfig.zoom
-          );
-        },
+        checkDiff: () => !this.isAtInitialView(),
       },
     ];
 
@@ -1021,49 +1015,58 @@ class MandelbrotControls {
       .forEach((hint) => (hint.style.display = "inline-block"));
   }
 
+  /** Mirrors the settled view into the config's view-state fields and their
+   * inputs. Always the truthful coordinates: the share URL, exports, and
+   * filenames read these same fields, so writing anything else (an earlier
+   * version snapped views near the initial one to its exact values) labels
+   * the pixels on screen with a view up to the snap tolerance away. The
+   * near-initial affordance this snap provided — hiding the location reset
+   * button — lives in isAtInitialView instead. */
   private setCoordinateInputValues() {
-    const { re: currentRe, im: currentIm } =
-      this.map.currentCenterCoordinates();
-    const currentZoom = this.map.effectiveZoom;
+    const { re, im } = this.map.currentCenterCoordinates();
+    const zoom = this.map.effectiveZoom;
 
-    let finalRe = currentRe;
-    let finalIm = currentIm;
-    let finalZoom = currentZoom;
-
-    // Snap to the initial view when close to it, so the reset button hides.
-    // Only meaningful at shallow zooms, where f64 comparison is exact enough.
-    if (this.map.zoomOffset === 0) {
-      const tolerance = 0.02;
-      const reDiff = Math.abs(
-        Number.parseFloat(currentRe) -
-          Number.parseFloat(this.map.initialConfig.re),
-      );
-      const imDiff = Math.abs(
-        Number.parseFloat(currentIm) -
-          Number.parseFloat(this.map.initialConfig.im),
-      );
-      const zoomDiff = Math.abs(currentZoom - this.map.initialConfig.zoom);
-
-      if (reDiff <= tolerance && imDiff <= tolerance && zoomDiff <= tolerance) {
-        finalRe = this.map.initialConfig.re;
-        finalIm = this.map.initialConfig.im;
-        finalZoom = this.map.initialConfig.zoom;
-      }
-    }
-
-    this.map.config.re = finalRe;
-    this.map.config.im = finalIm;
-    this.map.config.zoom = finalZoom;
+    this.map.config.re = re;
+    this.map.config.im = im;
+    this.map.config.zoom = zoom;
     syncInputToConfig(this.map.config, "re");
     syncInputToConfig(this.map.config, "im");
     syncInputToConfig(this.map.config, "zoom");
 
     const caption = document.getElementById("zoomScaleCaption");
     if (caption) {
-      const description = describeZoomScale(finalZoom);
+      const description = describeZoomScale(zoom);
       caption.hidden = description === null;
       caption.textContent = description ?? "";
     }
+  }
+
+  /** Whether the view is effectively the initial one, so the location reset
+   * button can hide. At shallow zoom the comparison uses a small tolerance:
+   * settling near home never reproduces the initial view's exact decimals,
+   * and an exact comparison would keep the button visible forever. At depth
+   * (a nonzero zoom offset) any drift is a genuinely different view, so the
+   * comparison is exact. */
+  private isAtInitialView(): boolean {
+    const config = this.map.config;
+    const initial = this.map.initialConfig;
+
+    if (this.map.zoomOffset !== 0) {
+      return (
+        config.re === initial.re &&
+        config.im === initial.im &&
+        config.zoom === initial.zoom
+      );
+    }
+
+    const tolerance = 0.02;
+    return (
+      Math.abs(Number.parseFloat(config.re) - Number.parseFloat(initial.re)) <=
+        tolerance &&
+      Math.abs(Number.parseFloat(config.im) - Number.parseFloat(initial.im)) <=
+        tolerance &&
+      Math.abs(config.zoom - initial.zoom) <= tolerance
+    );
   }
 
   private resetConfigValues(keys: Array<keyof MandelbrotConfig>) {
