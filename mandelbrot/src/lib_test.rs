@@ -1359,10 +1359,6 @@ mod lib_test {
         let (escape_iters, _) =
             super::calculate_escape_iterations(c.0, c.1, max_iterations, exponent);
         assert!(escape_iters < max_iterations, "Test point should escape");
-        println!(
-            "Point ({}, {}) escapes after {} iterations",
-            c.0, c.1, escape_iters
-        );
         assert!(
             escape_iters > 2,
             "Test point should take multiple iterations to escape"
@@ -1394,9 +1390,6 @@ mod lib_test {
         // When min equals max, max gets clamped to min+epsilon
         // Since escape_iters > threshold, we should get max color
         let max_palette_color = palette.eval_continuous(1.0).as_array();
-
-        println!("Actual color with equal min/max: {:?}", color);
-        println!("Expected max_palette_color: {:?}", max_palette_color);
 
         assert_eq!(
             color, max_palette_color,
@@ -1649,13 +1642,6 @@ mod lib_test {
             f64::from(escape_iters - 5),
             f64::from(escape_iters + 5),
         );
-
-        println!(
-            "Point ({}, {}) escapes after {} iterations",
-            c.0, c.1, escape_iters
-        );
-        println!("With smooth coloring: {:?}", color_smooth);
-        println!("Without smooth coloring: {:?}", color_non_smooth);
 
         // Smooth coloring should affect the result
         assert_ne!(
@@ -2495,9 +2481,6 @@ mod lib_test {
         // When min equals max, max gets clamped to min+epsilon
         // Since escape_iters > 0, we should get max color
         let max_palette_color = palette.eval_continuous(1.0).as_array();
-
-        println!("Actual color_zero_both: {:?}", color_zero_both);
-        println!("Expected max_palette_color: {:?}", max_palette_color);
 
         assert_eq!(
             color_zero_both, max_palette_color,

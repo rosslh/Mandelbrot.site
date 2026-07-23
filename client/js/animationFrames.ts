@@ -30,7 +30,7 @@ export type AnimationSpec = {
 // The fully-zoomed-out end of every animation: the effective zoom at which the
 // whole set frames the viewport (the app's initial desktop view). Zooming "in"
 // starts here and ends at the target; zooming "out" is the reverse.
-export const FULL_SET_EFFECTIVE_ZOOM = 3;
+const FULL_SET_EFFECTIVE_ZOOM = 3;
 
 /** The number of frames an animation of this spec renders (at least one). */
 export function frameCount(spec: AnimationSpec): number {
@@ -75,7 +75,7 @@ function targetFraming(
  * exactly `2^(zoom-2)`), so scaling the center and half-extents this way keeps
  * the frame's complex-plane rectangle — and thus the exponential zoom sweep —
  * exact while emitting an integer `zoom` field. */
-export function frameBounds(
+function frameBounds(
   framing: { centerX: number; centerY: number; halfX: number; halfY: number },
   targetZoom: number,
   zoomOffset: number,
@@ -108,10 +108,7 @@ export function frameBounds(
  * zoom level, i.e. log-magnification) between the fully-zoomed-out view and the
  * target. A "zoom in" runs from the full set to the target; a "zoom out" is the
  * reverse. A single-frame animation is just the target. */
-export function frameZoomLevels(
-  spec: AnimationSpec,
-  targetZoom: number,
-): number[] {
+function frameZoomLevels(spec: AnimationSpec, targetZoom: number): number[] {
   const count = frameCount(spec);
   const start = spec.kind === "in" ? FULL_SET_EFFECTIVE_ZOOM : targetZoom;
   const end = spec.kind === "in" ? targetZoom : FULL_SET_EFFECTIVE_ZOOM;
