@@ -586,12 +586,56 @@ export function buildPaletteCdf(
   return cdf;
 }
 
+/** The equalization table fit to an offscreen render's own escape values
+ * (row-major `height x width` floats, `Infinity` for interior pixels) over
+ * the given palette window, at the given blend strength (0..1; see
+ * buildPaletteCdf) — for consumers with a private palette fit whose values
+ * don't arrive as a single worker response (the image export stitches its
+ * columns into one buffer first). `range` is the escaped-pixel iteration
+ * range of the values; null (all interior) yields null. Uses the same
+ * throwaway single-tile cache as fittedRangeForRender, so the histogram
+ * matches the map's on-screen scan exactly. Returns null (linear) at
+ * strength 0 or when the window holds no escaped mass. */
+export function fittedCdfForValues(
+  values: Float32Array,
+  width: number,
+  height: number,
+  range: TileIterationRange | null,
+  window: TileIterationRange,
+  strength = 1,
+): Float32Array | null {
+  if (range === null) {
+    return null;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const fitCache = new TileCache();
+  fitCache.record(
+    { x: 0, y: 0, z: 0 },
+    range.min,
+    range.max,
+    canvas,
+    values,
+    0,
+  );
+  const stats = fitCache.viewStats({
+    xMin: 0,
+    xMax: 1,
+    yMin: 0,
+    yMax: 1,
+    zoom: 0,
+  });
+
+  return stats ? buildPaletteCdf(stats, window, strength) : null;
+}
+
 /** The equalization table fit to a single offscreen render's own escape
  * values over the given palette window, at the given blend strength (0..1;
  * see buildPaletteCdf) — the CDF counterpart of `fittedRangeForRender`, for
  * consumers with a private palette fit (the Navigator panel's Julia
- * thumbnail and minimap). Uses the same throwaway single-tile cache, so the
- * histogram matches the map's on-screen scan exactly. Returns null (linear)
+ * thumbnail and minimap, the zoom animator's frames). Returns null (linear)
  * at strength 0 or when the render has no escape values. */
 export function fittedCdfForRender(
   response: MandelbrotResponse,
@@ -608,27 +652,14 @@ export function fittedCdfForRender(
     return null;
   }
 
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const fitCache = new TileCache();
-  fitCache.record(
-    { x: 0, y: 0, z: 0 },
-    response.minIter,
-    response.maxIter,
-    canvas,
+  return fittedCdfForValues(
     response.values,
-    response.tier,
+    width,
+    height,
+    { min: response.minIter, max: response.maxIter },
+    window,
+    strength,
   );
-  const stats = fitCache.viewStats({
-    xMin: 0,
-    xMax: 1,
-    yMin: 0,
-    yMax: 1,
-    zoom: 0,
-  });
-
-  return stats ? buildPaletteCdf(stats, window, strength) : null;
 }
 
 /** The auto-palette range fit to a single offscreen render's escape values,

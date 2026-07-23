@@ -49,9 +49,10 @@ class RegionRenderer {
    * still come from the map either way. The optional `coloring` overrides the
    * palette mapping entirely: consumers that manage their own per-render
    * palette (the zoom animator, which colors each frame to its own window and
-   * equalization table) pass one so the render does not inherit the map's
-   * viewport-global table, which is fit to the on-screen view rather than the
-   * off-screen region being rendered. */
+   * equalization table; the image export, which equalizes to the exported
+   * region's own distribution) pass one so the render does not inherit the
+   * map's viewport-global table, which is fit to the on-screen view rather
+   * than the off-screen region being rendered. */
   buildPayload(
     bounds: TileRect,
     imageWidth: number,

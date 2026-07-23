@@ -1,9 +1,23 @@
 import { saveAs } from "file-saver";
 import type MandelbrotMap from "./MandelbrotMap";
-import { buildShareParams, buildShareUrl, MandelbrotConfig } from "./config";
+import {
+  buildShareParams,
+  buildShareUrl,
+  coloringOptions,
+  isFixedPaletteMethod,
+  MandelbrotConfig,
+} from "./config";
+import { fittedCdfForValues, TileIterationRange } from "./TileCache";
 import { embedTextChunks } from "./pngMetadata";
 import { buildZip, encodeNpyFloat32 } from "./dataExport";
-import { OptimiseRequest, OptimiseResponse, TileRect } from "./protocol";
+import {
+  MandelbrotResponse,
+  OptimiseRequest,
+  OptimiseResponse,
+  TileRect,
+} from "./protocol";
+
+type ColumnLayout = { subBounds: TileRect; width: number; xOffset: number };
 
 class ImageSaver {
   private map: MandelbrotMap;
@@ -18,10 +32,9 @@ class ImageSaver {
     optimize: boolean,
     onStartOptimizing?: () => void,
   ) {
-    // Snapshot the config alongside the render payloads (which buildPayload
-    // snapshots synchronously below): the auto palette fit and navigation
-    // rewrite the live config, and metadata read after the columns finish
-    // could otherwise describe different parameters than the pixels used.
+    // Snapshot the config once for the whole export: the auto palette fit
+    // and navigation rewrite the live config while the columns render, and
+    // both the coloring and the metadata must describe one point in time.
     const config = this.map.configSnapshot();
     const bounds = this.adjustBoundsForAspectRatio(
       this.map.mapBoundsInTileSpace,
@@ -32,6 +45,7 @@ class ImageSaver {
       bounds,
       totalWidth,
       totalHeight,
+      config,
     );
     const finalCanvas = this.combineImageColumns(
       imageCanvases,
@@ -74,19 +88,12 @@ class ImageSaver {
       ),
     );
 
-    // Stitch the per-column row-major buffers into one row-major
-    // `totalHeight x totalWidth` array.
-    const values = new Float32Array(totalWidth * totalHeight);
-    columns.forEach((column, i) => {
-      const columnBuffer = columnValues[i];
-      for (let y = 0; y < totalHeight; y++) {
-        const source = columnBuffer.subarray(
-          y * column.width,
-          (y + 1) * column.width,
-        );
-        values.set(source, y * totalWidth + column.xOffset);
-      }
-    });
+    const values = this.stitchColumnValues(
+      columns,
+      columnValues,
+      totalWidth,
+      totalHeight,
+    );
 
     const npy = encodeNpyFloat32(values, totalHeight, totalWidth);
     const pinned = this.pinnedConfig(config);
@@ -157,16 +164,12 @@ class ImageSaver {
    * clamped so the columns tile the full width exactly (`ceil` can otherwise
    * overshoot `totalWidth`). Shared by the image and raw-data exports so both
    * carve up the view identically. */
-  private columnLayout(
-    bounds: TileRect,
-    totalWidth: number,
-  ): { subBounds: TileRect; width: number; xOffset: number }[] {
+  private columnLayout(bounds: TileRect, totalWidth: number): ColumnLayout[] {
     const numColumns = 24;
     const columnWidth = Math.ceil(totalWidth / numColumns);
     const xDiff = bounds.xMax - bounds.xMin;
 
-    const columns: { subBounds: TileRect; width: number; xOffset: number }[] =
-      [];
+    const columns: ColumnLayout[] = [];
     for (let i = 0; i < numColumns; i++) {
       const xOffset = columnWidth * i;
       if (xOffset >= totalWidth) {
@@ -187,20 +190,170 @@ class ImageSaver {
     return columns;
   }
 
+  /** Renders the export's columns, colored to the export itself rather than
+   * to the screen. The coloring is passed explicitly so the columns never
+   * inherit the map's viewport-global equalization table: that table is fit
+   * to the on-screen distribution, and the export's region (aspect-adjusted
+   * bounds) and resolution are not the screen's. When histogram coloring is
+   * active, the columns render for their escape values first and are then
+   * recolored through one table fit to the whole export's own distribution
+   * (fitting per column would seam the gradient at every column edge);
+   * otherwise the columns render straight to canvases with the linear
+   * mapping. The palette window still comes from the config — under auto-fit
+   * that is the viewport's fitted window, kept so the export's window
+   * matches what the user dialed in on screen. */
   private async generateImageColumns(
     bounds: TileRect,
     totalWidth: number,
     totalHeight: number,
+    config: MandelbrotConfig,
   ): Promise<HTMLCanvasElement[]> {
-    return Promise.all(
-      this.columnLayout(bounds, totalWidth).map((column) =>
-        this.map.regionRenderer.renderToCanvas(
+    const columns = this.columnLayout(bounds, totalWidth);
+    const coloring = coloringOptions(config);
+    // Mirrors the map's own CDF gating (rebuildPaletteCdf): the fixed-palette
+    // methods normalize to 0..1 and are never equalized.
+    const strength =
+      !isFixedPaletteMethod(config) && config.histogramColoring > 0
+        ? config.histogramColoring / 100
+        : 0;
+
+    if (strength <= 0) {
+      return Promise.all(
+        columns.map((column) =>
+          this.map.regionRenderer.renderToCanvas(
+            column.subBounds,
+            column.width,
+            totalHeight,
+            coloring,
+          ),
+        ),
+      );
+    }
+
+    const responses = await Promise.all(
+      columns.map((column) =>
+        this.map.regionRenderer.renderRegion(
           column.subBounds,
           column.width,
           totalHeight,
+          true,
+          undefined,
+          coloring,
         ),
       ),
     );
+
+    const cdf = this.exportCdf(
+      responses,
+      columns,
+      totalWidth,
+      totalHeight,
+      config,
+      strength,
+    );
+    // A null table means there is no distribution to equalize to (no escaped
+    // pixels, degenerate window); the provisional linear renders stand.
+    const images =
+      cdf === null
+        ? responses.map((response) => response.image)
+        : await Promise.all(
+            responses.map((response) =>
+              this.map.regionRenderer.recolor(
+                response.values as Float32Array,
+                coloringOptions(config, cdf),
+              ),
+            ),
+          );
+
+    return images.map((image, i) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = columns[i].width;
+      canvas.height = totalHeight;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        throw new Error("Could not get canvas context for image column");
+      }
+      context.putImageData(
+        new ImageData(
+          Uint8ClampedArray.from(image),
+          columns[i].width,
+          totalHeight,
+        ),
+        0,
+        0,
+      );
+      return canvas;
+    });
+  }
+
+  /** The equalization table fit to the whole export's own escape values over
+   * the config's palette window (see fittedCdfForValues), or null (linear)
+   * when the export has nothing to equalize to. The columns are stitched into
+   * one buffer first so the neighbor-capped, center-weighted histogram scan
+   * sees the export as the single image it is. */
+  private exportCdf(
+    responses: MandelbrotResponse[],
+    columns: ColumnLayout[],
+    totalWidth: number,
+    totalHeight: number,
+    config: MandelbrotConfig,
+    strength: number,
+  ): Float32Array | null {
+    const columnValues = responses.map((response) => response.values);
+    if (columnValues.some((values) => values === null)) {
+      return null;
+    }
+
+    let range: TileIterationRange | null = null;
+    for (const response of responses) {
+      if (response.minIter === null || response.maxIter === null) {
+        continue;
+      }
+      range =
+        range === null
+          ? { min: response.minIter, max: response.maxIter }
+          : {
+              min: Math.min(range.min, response.minIter),
+              max: Math.max(range.max, response.maxIter),
+            };
+    }
+
+    return fittedCdfForValues(
+      this.stitchColumnValues(
+        columns,
+        columnValues as Float32Array[],
+        totalWidth,
+        totalHeight,
+      ),
+      totalWidth,
+      totalHeight,
+      range,
+      { min: config.paletteMinIter, max: config.paletteMaxIter },
+      strength,
+    );
+  }
+
+  /** Stitches per-column row-major value buffers into one row-major
+   * `totalHeight x totalWidth` array. Shared by the raw-data export and the
+   * image export's histogram fit. */
+  private stitchColumnValues(
+    columns: ColumnLayout[],
+    columnValues: Float32Array[],
+    totalWidth: number,
+    totalHeight: number,
+  ): Float32Array {
+    const values = new Float32Array(totalWidth * totalHeight);
+    columns.forEach((column, i) => {
+      const columnBuffer = columnValues[i];
+      for (let y = 0; y < totalHeight; y++) {
+        const source = columnBuffer.subarray(
+          y * column.width,
+          (y + 1) * column.width,
+        );
+        values.set(source, y * totalWidth + column.xOffset);
+      }
+    });
+    return values;
   }
 
   private combineImageColumns(
