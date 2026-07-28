@@ -69,16 +69,9 @@ export function describeZoomScale(effectiveZoom: number): string | null {
   const viewLog2 = Math.log2(anchor.meters) - doublings;
 
   // Deeper than a Planck length even at the largest anchor: no physical
-  // object is left to compare against, so switch to the numeric fallback
-  // immediately rather than lingering on the Planck target.
+  // object is left to compare against.
   if (viewLog2 < Math.log2(PLANCK_METERS)) {
-    const powersOfTenBelowPlanck = Math.round(
-      (Math.log2(PLANCK_METERS) - viewLog2) * Math.log10(2),
-    );
-    if (powersOfTenBelowPlanck < 1) {
-      return `If the set were the size of ${anchor.name}, your view would be smaller than a Planck length.`;
-    }
-    return `If the set were the size of ${anchor.name}, your view would be 10^${powersOfTenBelowPlanck} times smaller than a Planck length.`;
+    return `If the set were the size of ${anchor.name}, your view would be impossibly small.`;
   }
 
   let target = TARGETS[0];
