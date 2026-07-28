@@ -18,6 +18,12 @@ Run from this directory (`npm install` first):
 - `npm run run`: benchmark a variant against the corpus.
 - `npm run compare`: compare variant results against the baseline.
 - `npm run pixel-check`: verify output is byte-identical to the baseline.
+- `npm run verify-e2e`: correctness gate that drives the built client dist
+  (`client/dist`) in Chrome through the published deep-zoom coordinates in
+  [`corpus/deep-coords.json`](corpus/deep-coords.json) (magnification 10^31
+  to 10^275, centers up to 286 digits) and asserts every tile renders and
+  matches the case's externally verified pixel expectation. Rust twins of
+  these cases live in `mandelbrot/src/perturbation_test.rs`.
 - `npm run ingest`: turn exported analytics rows into corpus cases.
 
 `src/run-e2e.mjs` measures end-to-end page-load-to-rendered time (the

@@ -1335,3 +1335,338 @@ fn orbit_clamp_ground_truth_probe() {
          detection, pair it with an oracle-class verification step"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Published deep-zoom coordinates (2026-07-27): end-to-end coverage for
+// well-known, externally verified zoom targets, from decimal-string parsing
+// through tier selection to the rendered tile. Every expected iteration count
+// below was pinned independently with mpmath at generous precision (escape
+// radius 3, matching ESCAPE_RADIUS) before being asserted here, so these
+// tests detect digit-loss anywhere in the pipeline, not just self-consistency.
+// ---------------------------------------------------------------------------
+
+/// Seahorse valley center of Wikimedia's "Mandelbrot sequence new" zoom
+/// (Zom-B), published magnification 3.18e31 -> effective zoom 108. The center
+/// stays bounded for >=500k iterations; the surrounding tile pixels escape
+/// between ~56k and ~67k.
+const SEAHORSE_E31_RE: &str = "-0.743643887037158704752191506114774";
+const SEAHORSE_E31_IM: &str = "0.131825904205311970493132056385139";
+const SEAHORSE_E31_ZOOM: i32 = 108;
+
+/// "Hardest Mandelbrot zoom 2017" (Kalles Fraktaler), published magnification
+/// 3.187e99 -> effective zoom 334. The published render needed ~750M
+/// iterations, far past MAX_ORBIT_LENGTH, so at practical budgets every pixel
+/// in the view is still bounded and the tile must come back clean solid
+/// black via the border-in-set shortcut. The `...999999995` tails are KF's
+/// decimal rounding as published, not corruption.
+const HARDEST_2017_E99_RE: &str = "-1.74995768370609350360221450607069970727110579726252077930242837820286008082972804887218672784431700831100544507655659531379747541999999995";
+const HARDEST_2017_E99_IM: &str = "0.00000000000000000278793706563379402178294753790944364927085054500163081379043930650189386849765202169477470552201325772332454726999999995";
+const HARDEST_2017_E99_ZOOM: i32 = 334;
+
+/// Orson Wang's "Fractal Journey Ultra Zoom #5" center as circulated (286/285
+/// digits), published magnification 2.07e275 -> effective zoom 918. As
+/// circulated the coordinate carries the truncation damage its source page
+/// warns about: its true distance to the set boundary is ~1.45e-212, so it
+/// escapes at iteration 9944 and is only a *structured* zoom target down to
+/// roughly zoom 707. It still exercises 286-digit parsing and float-exp
+/// rendering at zoom 918, where the whole view escapes uniformly at ~9944.
+const ULTRA5_E275_RE: &str = "-1.740062382579339905220844167065825638296641720436171866879862418461182919644153056054840718339483225743450008259172138785492983677893366503417299549623738838303346465461290768441055486136870719850559269507357211790243666940134793753068611574745943820712885258222629105433648695946003865";
+const ULTRA5_E275_IM: &str = "0.0281753397792110489924115211443195096875390767429906085704013095958801743240920186385400814658560553615695084486774077000669037710191665338060418999324320867147028768983704831316527873719459264592084600433150333628593181020170329580747999667210303082150171994798478089798638258639934";
+const ULTRA5_E275_ZOOM: i32 = 918;
+const ULTRA5_E275_ESCAPE: u32 = 9944;
+
+/// Misiurewicz point M(4,1), the principal branch point of the 1/3-limb,
+/// computed to 140 digits by Newton's method on f_c^5(0) = f_c^4(0) (residual
+/// ~1e-221; digits stable between 160- and 220-digit solves). The 140-digit
+/// truncation sits ~1.1e-141 from the boundary, so it is an exact,
+/// transcription-risk-free float-exp target good to roughly zoom 470.
+const M41_RE: &str = "-0.1010963638456221610257854457386225654638054428262534838769311776607808407404705842748212198105167790334045319085567411939715461442609";
+const M41_IM: &str = "0.9562865108091415007710960577299774358098333365105291700343143215005246590657167325269784107873398072043444724926469284366752406567465";
+const M41_ZOOM: i32 = 330;
+
+/// Renders one 32x32 tile through the public wasm-level entrypoint using the
+/// client's rebase convention (leaflet zoom pinned to 12, remainder in
+/// zoom_offset, origin tile floor(0.64 * 2^12) = 2621), i.e. exactly the call
+/// the production worker makes for the tile containing the shared coordinate.
+fn published_coordinate_tile(
+    origin_re: &str,
+    origin_im: &str,
+    zoom: i32,
+    max_iterations: u32,
+) -> crate::MandelbrotTile {
+    let zoom_offset = (zoom - 12).max(0) as u32;
+    let tile_zoom = zoom - zoom_offset as i32;
+    let v = (0.64 * f64::powi(2.0, tile_zoom)).floor();
+    crate::get_mandelbrot_tile_precise(
+        origin_re.to_string(),
+        origin_im.to_string(),
+        v,
+        v + 1.0,
+        v,
+        v + 1.0,
+        tile_zoom,
+        zoom_offset,
+        max_iterations,
+        2,
+        32,
+        32,
+        "turbo".to_string(),
+        false,
+        0.0,
+        0.0,
+        0.0,
+        crate::ValidColorSpace::Hsl,
+        true,
+        0,
+        max_iterations as i32,
+        true,
+        None,
+    )
+}
+
+/// The precision the renderer derives for a given effective zoom
+/// (PerturbedFrame::new): enough bits for the zoom depth plus 64 guard bits,
+/// rounded up to a 32-bit limb.
+fn renderer_precision_bits(effective_zoom: i64) -> usize {
+    (effective_zoom.max(0) as usize + 64).div_ceil(32) * 32
+}
+
+#[test]
+fn published_coordinate_centers_match_external_escape_ground_truth() {
+    // (re, im, precision bits, iteration cap, expected escape iteration;
+    // expected == cap means "stays bounded through the cap"). Expectations
+    // come from mpmath at >= 40 guard digits over the coordinate length.
+    let cases: [(&str, &str, usize, u32, u32, &str); 4] = [
+        (
+            SEAHORSE_E31_RE,
+            SEAHORSE_E31_IM,
+            renderer_precision_bits(SEAHORSE_E31_ZOOM as i64),
+            100_000,
+            100_000,
+            "seahorse e31",
+        ),
+        (
+            HARDEST_2017_E99_RE,
+            HARDEST_2017_E99_IM,
+            renderer_precision_bits(HARDEST_2017_E99_ZOOM as i64),
+            20_000,
+            20_000,
+            "hardest 2017 e99",
+        ),
+        (
+            ULTRA5_E275_RE,
+            ULTRA5_E275_IM,
+            renderer_precision_bits(ULTRA5_E275_ZOOM as i64),
+            15_000,
+            ULTRA5_E275_ESCAPE,
+            "ultra zoom 5 e275",
+        ),
+        // 512 bits (~154 digits) represents all 140 published digits, so the
+        // escape iteration is pinned by the coordinate itself, not the parse.
+        (M41_RE, M41_IM, 512, 5_000, 1_083, "misiurewicz M(4,1)"),
+    ];
+
+    for (re, im, precision_bits, cap, expected, name) in cases {
+        let c_re = parse_decimal(re, precision_bits).unwrap();
+        let c_im = parse_decimal(im, precision_bits).unwrap();
+        // +-5 absorbs rounding-mode differences against the mpmath reference
+        // near the escape threshold; digit loss would shift counts by far
+        // more (the 250-digit truncation of the e275 coordinate, for
+        // instance, moves its behavior by orders of magnitude at depth).
+        let iterations = direct_escape_iterations_big(&c_re, &c_im, cap);
+        assert!(
+            iterations.abs_diff(expected) <= 5,
+            "{name}: expected escape at {expected} (cap {cap}), got {iterations}"
+        );
+    }
+}
+
+#[test]
+fn seahorse_e31_tile_renders_boundary_structure_at_published_depth() {
+    let max_iterations = 100_000;
+    let tile = published_coordinate_tile(
+        SEAHORSE_E31_RE,
+        SEAHORSE_E31_IM,
+        SEAHORSE_E31_ZOOM,
+        max_iterations,
+    );
+
+    assert_eq!(tile.tier, crate::RenderTier::Perturbation as u8);
+    // Externally probed grid pixels escape between ~56.8k (corner 31,31) and
+    // ~66.1k (corner 0,0), while the center region stays bounded: the tile
+    // must show a wide escape band around a bounded interior.
+    assert!(
+        (40_000..=66_200).contains(&tile.min_iter),
+        "min_iter {} outside the externally verified band",
+        tile.min_iter
+    );
+    assert!(
+        tile.max_iter >= 66_117,
+        "max_iter {} lost the slow corner",
+        tile.max_iter
+    );
+    assert!(tile.max_iter < max_iterations as i32);
+    assert!(
+        tile.values.iter().any(|v| v.is_infinite()),
+        "the bounded center region must survive 100k iterations"
+    );
+    let distinct_colors: std::collections::HashSet<&[u8]> = tile.image.chunks(4).collect();
+    assert!(
+        distinct_colors.len() > 4,
+        "expected visible structure, got {} distinct colors",
+        distinct_colors.len()
+    );
+}
+
+#[test]
+fn hardest_2017_e99_tile_renders_clean_interior_at_published_depth() {
+    let max_iterations = 2_000;
+    let tile = published_coordinate_tile(
+        HARDEST_2017_E99_RE,
+        HARDEST_2017_E99_IM,
+        HARDEST_2017_E99_ZOOM,
+        max_iterations,
+    );
+
+    assert_eq!(tile.tier, crate::RenderTier::FloatExp as u8);
+    // Every pixel is still bounded at this budget (the published render used
+    // ~750M iterations): a clean solid-black interior tile, not noise.
+    assert_eq!(tile.min_iter, -1, "no pixel may escape at this budget");
+    assert_eq!(tile.max_iter, -1);
+    assert_eq!(tile.image, crate::create_solid_black_image(32, 32));
+    assert!(tile.values.iter().all(|v| v.is_infinite()));
+}
+
+#[test]
+fn ultra5_e275_tile_renders_uniform_escape_at_published_depth() {
+    let max_iterations = 15_000;
+    let tile = published_coordinate_tile(
+        ULTRA5_E275_RE,
+        ULTRA5_E275_IM,
+        ULTRA5_E275_ZOOM,
+        max_iterations,
+    );
+
+    assert_eq!(tile.tier, crate::RenderTier::FloatExp as u8);
+    // The whole 1.9e-275-wide view sits ~1.45e-212 from the boundary, so
+    // every pixel escapes together at ~9944; digit loss anywhere in the
+    // 286-digit pipeline would move this band.
+    assert!(
+        (9_900..=10_000).contains(&tile.min_iter),
+        "min_iter {} outside the externally verified escape band",
+        tile.min_iter
+    );
+    assert!(
+        (9_900..=10_000).contains(&tile.max_iter),
+        "max_iter {} outside the externally verified escape band",
+        tile.max_iter
+    );
+    assert!(
+        tile.values.iter().all(|v| v.is_finite()),
+        "no pixel in this view may classify interior"
+    );
+}
+
+#[test]
+fn ultra5_e275_tile_renders_structure_at_boundary_depth() {
+    // At zoom 700 the ~1.45e-212 boundary distance is inside the view again:
+    // probed grid pixels escape between 9933 (corners) and 9941+ (center).
+    let max_iterations = 15_000;
+    let tile = published_coordinate_tile(ULTRA5_E275_RE, ULTRA5_E275_IM, 700, max_iterations);
+
+    assert_eq!(tile.tier, crate::RenderTier::FloatExp as u8);
+    assert!(
+        (9_900..=9_950).contains(&tile.min_iter),
+        "min_iter {} outside the externally verified band",
+        tile.min_iter
+    );
+    assert!(
+        tile.max_iter - tile.min_iter >= 5,
+        "escape band collapsed: min {} max {}",
+        tile.min_iter,
+        tile.max_iter
+    );
+}
+
+#[test]
+fn misiurewicz_m41_tile_renders_structure_at_float_exp_depth() {
+    let max_iterations = 5_000;
+    let tile = published_coordinate_tile(M41_RE, M41_IM, M41_ZOOM, max_iterations);
+
+    assert_eq!(tile.tier, crate::RenderTier::FloatExp as u8);
+    // Probed grid pixels escape between ~800 and ~813; the Misiurewicz
+    // center itself holds out to 1083.
+    assert!(
+        (700..=950).contains(&tile.min_iter),
+        "min_iter {} outside the externally verified band",
+        tile.min_iter
+    );
+    assert!(
+        tile.max_iter - tile.min_iter >= 5,
+        "escape band collapsed: min {} max {}",
+        tile.min_iter,
+        tile.max_iter
+    );
+}
+
+#[test]
+fn exact_algebraic_points_render_at_e275_depth() {
+    // M(2,1) = -2 (tip of the antenna) and M(2,2) = i (tip of the 1/3-limb
+    // dendrite) are exact at every depth, so they give transcription-free
+    // structure at the same zoom the e275 coordinate targets. Externally
+    // probed escape bands at zoom 918: 460..=466 around -2, 735..=740
+    // around i.
+    let max_iterations = 3_000;
+    let cases = [
+        ("-2", "0", 440, 480, "antenna tip -2"),
+        ("0", "1", 700, 780, "dendrite tip i"),
+    ];
+
+    for (re, im, band_min, band_max, name) in cases {
+        let tile = published_coordinate_tile(re, im, 918, max_iterations);
+        assert_eq!(tile.tier, crate::RenderTier::FloatExp as u8, "{name}");
+        assert!(
+            (band_min..=band_max).contains(&tile.min_iter),
+            "{name}: min_iter {} outside the externally verified band",
+            tile.min_iter
+        );
+        assert!(
+            tile.max_iter - tile.min_iter >= 3,
+            "{name}: escape band collapsed: min {} max {}",
+            tile.min_iter,
+            tile.max_iter
+        );
+        assert!(tile.max_iter < max_iterations as i32, "{name}");
+    }
+}
+
+/// Misiurewicz point M(22,1) in seahorse valley (preperiod 22 from z=0,
+/// period-1 landing fixed point, multiplier magnitude ~3.03), computed to
+/// 1012 digits by Newton's method (residual ~2.4e-1099, digits stable
+/// between 1100- and 1250-digit solves). The strongly repelling multiplier
+/// keeps escape times low even at magnification ~1.05e1000, making it the
+/// gate's cheapest source of real structure at four-digit zoom levels.
+const M221_RE: &str = "-0.7746724469356738080461171765322245435665009634996757196925763115299425962283014864589690183581885748430138088165308986575760739845395374554399750678253210153068529322781239209519866648355959030654665668885974698821086557325734881760549966896235238992147272519073915254995423260399092985392885028164560281456137789832760566539485756443905422916318129749558197019114973491544402817366831463152707114483207872350094279731748948355835313597996205669690322396885813558657365936640529599746967422516427768350808850454571018237002924648253236998316887820440065542321741884933579969951685202979437222980810534468765940226330539387169085343276454881175352871706298824662314831723592274165718033222008780945889336086340016394672948556228828740802511210263307137850397526048548647484994637687149379484454150799971546750159895327502905875408343040956757793038890909258427409086829699247468211946846230066458709669711282376665446081182543591777461464356205166882685391442276169161064362001910538095561088008454681907040656642";
+const M221_IM: &str = "0.1374292923409168905915434640978695290073047059069381610343287435141172764888543912434490128003568538372300074143347301415302886386462782652776406279639431688988581762531208016486668033800396271990595154258886593908823013624062339571820419412904383334582087382932358676129100970544836964110528920520278972319211734254521736850911114457972726878339710387756284161552926537531826332838440390004350125808040372697000051132566075454255703931498471130716522817062123042972160571759776455040107017864777016818431475654388429767184484507964074928723194765419592815243406991359020824233271893283061578523843397728811595211479713457484112555593551500514831521411950009550369202959132082847423310732462755883245986254526404651573145752251034030470295148435492205184555237295507672569215417232050752846064432933152476009949143398740675874254935629921193734330086436646201718658547315710918510011613929632616758791779052527416062902617096080817587526446116719572501770039789097438199696668795685712367662446523656421483117594";
+
+#[test]
+fn misiurewicz_m221_tile_renders_structure_at_e1000_depth() {
+    // Zoom 3325 is magnification ~1.05e1000; the renderer derives 3392-bit
+    // precision. Externally probed pixels escape at ~2094-2098.
+    let max_iterations = 5_000;
+    let tile = published_coordinate_tile(M221_RE, M221_IM, 3325, max_iterations);
+
+    assert_eq!(tile.tier, crate::RenderTier::FloatExp as u8);
+    assert!(
+        (2_000..=2_110).contains(&tile.min_iter),
+        "min_iter {} outside the externally verified band",
+        tile.min_iter
+    );
+    assert!(
+        tile.max_iter - tile.min_iter >= 3,
+        "escape band collapsed: min {} max {}",
+        tile.min_iter,
+        tile.max_iter
+    );
+    assert!(tile.max_iter < max_iterations as i32);
+}

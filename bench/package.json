@@ -6,6 +6,7 @@
   "scripts": {
     "build-variant": "node src/build.mjs",
     "run": "node src/run.mjs",
+    "verify-e2e": "node src/verify-e2e.mjs",
     "compare": "node src/compare.mjs",
     "pixel-check": "node src/pixel-check.mjs",
     "ingest": "node src/ingest.mjs"
