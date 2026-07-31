@@ -81,7 +81,7 @@ const appConfig = {
   module: {
     rules: [
       {
-        test: /\.ts$/,
+        test: /\.tsx?$/,
         use: [
           {
             loader: "ts-loader",
@@ -117,7 +117,7 @@ const appConfig = {
     ],
   },
   resolve: {
-    extensions: [".ts", ".js"],
+    extensions: [".ts", ".tsx", ".js"],
   },
   output: { path: dist, filename: "app.js" },
   experiments: { asyncWebAssembly: true },

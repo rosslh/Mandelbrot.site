@@ -18,6 +18,11 @@ module.exports = {
     },
   ],
   parser: "@typescript-eslint/parser",
+  parserOptions: {
+    ecmaFeatures: {
+      jsx: true,
+    },
+  },
   plugins: ["@typescript-eslint"],
   root: true,
   rules: {

@@ -1,10 +1,11 @@
 import * as L from "leaflet";
 import throttle from "lodash/throttle";
-import type MandelbrotMap from "./MandelbrotMap";
-import MinimapView, { thumbnailRenderSize } from "./MinimapView";
-import { fittedCdfForRender, fittedRangeForRender } from "./TileCache";
-import { renderSettingsFingerprint, standaloneColoring } from "./config";
-import type { ColoringOptions } from "./protocol";
+import type MandelbrotMap from "../MandelbrotMap";
+import MinimapView, { thumbnailRenderSize } from "../MinimapView";
+import { fittedCdfForRender, fittedRangeForRender } from "../TileCache";
+import { renderSettingsFingerprint, standaloneColoring } from "../config";
+import type { ColoringOptions } from "../protocol";
+import type { NavigatorMode } from "../state/uiState";
 
 // Minimum spacing between Julia renders while the cursor moves. Each render is
 // a small offscreen image on the worker pool; throttling bounds pool traffic
@@ -17,26 +18,29 @@ const RENDER_THROTTLE_MS = 120;
 // thumbnail pixel spans JULIA_VIEW_EXTENT / size of the `c`-plane.
 const JULIA_VIEW_EXTENT = 4;
 
-// The panel's view-mode choice persists across sessions, like the
-// "mandelbrot-details-state" open/closed state; it is a UI preference, so it
-// stays out of share URLs. The key keeps its historical julia-panel name so
-// stored preferences survive the panel's rename to Navigator.
-const MODE_STORAGE_KEY = "mandelbrot-julia-panel-mode";
-
-type PanelMode = "julia" | "minimap";
-
-const HINTS: Record<PanelMode, string> = {
+export const NAVIGATOR_HINTS: Record<NavigatorMode, string> = {
   julia: "The Julia set for the point under the cursor.",
   minimap: "Where the current view sits in the Mandelbrot set.",
 };
 
-const CANVAS_LABELS: Record<PanelMode, string> = {
+export const NAVIGATOR_CANVAS_LABELS: Record<NavigatorMode, string> = {
   julia: "Julia set for the point under the cursor",
   minimap: "Minimap of the Mandelbrot set with the current view marked",
 };
 
-/** The Navigator panel below the controls: one square canvas with two views,
- * chosen by a persisted toggle.
+export type NavigatorEngineOptions = {
+  canvas: HTMLCanvasElement;
+  // The active view mode; owned by the NavigatorPanel component (persisted
+  // via uiState), read at render time.
+  getMode: () => NavigatorMode;
+  // Whether the panel's <details> is open; nothing renders while it is
+  // collapsed (the component calls renderCurrentMode on reopen).
+  isPanelOpen: () => boolean;
+  // Reports the Julia parameter readout ("c = …"), or "" in minimap mode.
+  onCoordinates: (text: string) => void;
+};
+
+/** The engine behind the Navigator panel: one square canvas with two views.
  *
  * Julia mode (issue #12): a thumbnail of the filled Julia set for the
  * parameter `c` under the cursor, iterating `z -> z^power + c`. It follows
@@ -53,16 +57,17 @@ const CANVAS_LABELS: Record<PanelMode, string> = {
  *
  * Minimap mode (the default): a fixed full-set view of the Mandelbrot set
  * with a marker for the current viewport (see MinimapView) — an orientation
- * aid that keeps a deep zoom anchored to where in the set it lives. */
-class NavigatorPanel {
+ * aid that keeps a deep zoom anchored to where in the set it lives.
+ *
+ * The NavigatorPanel component owns the markup (mode select, hint,
+ * coordinates line) and this engine's lifecycle; worker renders, cursor
+ * tracking, and canvas painting live here. */
+class NavigatorEngine {
   private map: MandelbrotMap;
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D | null;
-  private coordinatesElement: HTMLElement | null;
-  private hintElement: HTMLElement | null;
-  private modeSelect: HTMLSelectElement | null;
+  private options: NavigatorEngineOptions;
   private minimap: MinimapView;
-  private mode: PanelMode;
   // The cursor's latLng while it is over the map, or null when it is off the
   // map (in which case the view center stands in for `c`). Tracked in both
   // modes so switching back to Julia resumes from the cursor's position.
@@ -82,77 +87,69 @@ class NavigatorPanel {
     settingsKey: string;
   } | null = null;
 
-  constructor(map: MandelbrotMap) {
+  constructor(map: MandelbrotMap, options: NavigatorEngineOptions) {
     this.map = map;
-    // The <details> element keeps its historical juliaSet id (the
-    // details-state persistence is keyed by it); the elements inside use
-    // navigator* ids matching the panel's title.
-    this.canvas = document.getElementById(
-      "navigatorCanvas",
-    ) as HTMLCanvasElement;
+    this.canvas = options.canvas;
     this.ctx = this.canvas.getContext("2d");
-    this.coordinatesElement = document.getElementById("navigatorCoordinates");
-    this.hintElement = document.getElementById("navigatorHint");
+    this.options = options;
     this.minimap = new MinimapView(map, this.canvas);
-    this.mode = this.loadMode();
-
-    this.modeSelect = document.getElementById(
-      "navigatorViewMode",
-    ) as HTMLSelectElement | null;
-    this.modeSelect?.addEventListener("change", () =>
-      this.setMode(this.modeSelect?.value === "julia" ? "julia" : "minimap"),
-    );
 
     // Follow the cursor over the map; leaving the map falls back to the view
     // center (the issue's requirement when the mouse is not in the window).
     // The minimap ignores the cursor, but the position is still recorded so
     // switching back to Julia resumes from it.
-    map.on("mousemove", (event: L.LeafletMouseEvent) => {
-      this.cursorLatLng = event.latlng;
-      if (this.mode === "julia") {
-        this.scheduleRender();
-      }
-    });
-    map.on("mouseout", () => {
-      this.cursorLatLng = null;
-      if (this.mode === "julia") {
-        this.scheduleRender();
-      }
-    });
+    map.on("mousemove", this.handleMouseMove);
+    map.on("mouseout", this.handleMouseOut);
 
     // A pan or zoom moves the fractal: the Julia thumbnail re-derives `c`
     // (which, while the cursor is off the map, is the view center); the
     // minimap only repaints its marker — its image never depends on the
-    // view's position, so no worker render is scheduled.
-    map.on("moveend zoomend viewreset", () => {
-      if (this.mode === "julia") {
-        this.scheduleRender();
-      } else if (this.panelOpen()) {
-        this.minimap.refresh();
-      }
-    });
+    // view's position, so no worker render is scheduled. An initial load or
+    // a resize can change the canvas's laid-out size, so both modes may need
+    // a fresh render there.
+    map.on("moveend zoomend viewreset load resize", this.handleViewChange);
 
-    // An initial load or a resize can change the canvas's laid-out size, so
-    // both modes may need a fresh render.
-    map.on("load resize", () => {
-      if (this.mode === "julia") {
-        this.scheduleRender();
-      } else if (this.panelOpen()) {
-        this.minimap.refresh();
-      }
-    });
-
-    // Rendering only when the panel is open avoids pool traffic for a
-    // collapsed panel; opening it renders immediately.
-    const panel = document.getElementById("juliaSet");
-    panel?.addEventListener("toggle", () => this.renderCurrentMode());
-
-    this.applyModeUi();
-    // The panel is constructed before the map's initial goToCoordinates, and
+    // The panel may be constructed before the map's initial view exists, and
     // a Julia render reads the view center (the cursor's off-map fallback) —
     // getCenter() throws until the view exists. whenReady defers the first
     // render to the initial view; later renders are event-driven.
     map.whenReady(() => this.renderCurrentMode());
+  }
+
+  /** Detaches the map listeners (component unmount). */
+  destroy() {
+    this.map.off("mousemove", this.handleMouseMove);
+    this.map.off("mouseout", this.handleMouseOut);
+    this.map.off(
+      "moveend zoomend viewreset load resize",
+      this.handleViewChange,
+    );
+  }
+
+  private handleMouseMove = (event: L.LeafletMouseEvent) => {
+    this.cursorLatLng = event.latlng;
+    if (this.mode === "julia") {
+      this.scheduleRender();
+    }
+  };
+
+  private handleMouseOut = () => {
+    this.cursorLatLng = null;
+    if (this.mode === "julia") {
+      this.scheduleRender();
+    }
+  };
+
+  private handleViewChange = () => {
+    if (this.mode === "julia") {
+      this.scheduleRender();
+    } else if (this.options.isPanelOpen()) {
+      this.minimap.refresh();
+    }
+  };
+
+  private get mode(): NavigatorMode {
+    return this.options.getMode();
   }
 
   /** Re-renders the active view with the current settings. Called after a
@@ -163,53 +160,27 @@ class NavigatorPanel {
   refresh() {
     if (this.mode === "julia") {
       this.scheduleRender();
-    } else if (this.panelOpen()) {
+    } else if (this.options.isPanelOpen()) {
       this.minimap.refresh();
     }
   }
 
-  /** The minimap is the panel's default view (a "Navigator" in the Ultra
-   * Fractal sense); only an explicitly stored Julia preference overrides
-   * it. */
-  private loadMode(): PanelMode {
-    return localStorage.getItem(MODE_STORAGE_KEY) === "julia"
-      ? "julia"
-      : "minimap";
-  }
-
-  private setMode(mode: PanelMode) {
-    if (mode === this.mode) {
-      return;
-    }
-    this.mode = mode;
-    localStorage.setItem(MODE_STORAGE_KEY, mode);
-    // The next Julia render must repaint even if `c` is unchanged: the
-    // minimap has drawn over the shared canvas in the meantime.
+  /** Applies a view-mode switch: the next Julia render must repaint even if
+   * `c` is unchanged (the minimap has drawn over the shared canvas in the
+   * meantime), and the `c = …` readout is a Julia concept, cleared in
+   * minimap mode (the line keeps its reserved height so the thumbnail
+   * doesn't jump between modes). */
+  handleModeChanged() {
     this.lastRender = null;
-    this.applyModeUi();
+    if (this.mode === "minimap") {
+      this.options.onCoordinates("");
+    }
     this.renderCurrentMode();
   }
 
-  /** Reflects the active mode in the view select, hint, coordinates
-   * readout, and canvas label. */
-  private applyModeUi() {
-    if (this.modeSelect) {
-      this.modeSelect.value = this.mode;
-    }
-    if (this.hintElement) {
-      this.hintElement.textContent = HINTS[this.mode];
-    }
-    this.canvas.setAttribute("aria-label", CANVAS_LABELS[this.mode]);
-    if (this.mode === "minimap" && this.coordinatesElement) {
-      // The `c = …` readout is a Julia concept; the line keeps its reserved
-      // height (see styles) so the thumbnail doesn't jump between modes.
-      this.coordinatesElement.textContent = "";
-    }
-  }
-
   /** Renders the active view, if the panel is open. */
-  private renderCurrentMode() {
-    if (!this.panelOpen()) {
+  renderCurrentMode() {
+    if (!this.options.isPanelOpen()) {
       return;
     }
     if (this.mode === "julia") {
@@ -217,15 +188,6 @@ class NavigatorPanel {
     } else {
       this.minimap.refresh();
     }
-  }
-
-  /** Whether the panel's <details> is open; nothing renders while it is
-   * collapsed (it renders on reopen). */
-  private panelOpen(): boolean {
-    const panel = document.getElementById(
-      "juliaSet",
-    ) as HTMLDetailsElement | null;
-    return !panel || panel.open;
   }
 
   /** The parameter `c` to visualize: the cursor's complex coordinate while it
@@ -263,7 +225,7 @@ class NavigatorPanel {
   }, RENDER_THROTTLE_MS);
 
   private async render() {
-    if (this.mode !== "julia" || !this.panelOpen() || !this.ctx) {
+    if (this.mode !== "julia" || !this.options.isPanelOpen() || !this.ctx) {
       return;
     }
 
@@ -351,14 +313,11 @@ class NavigatorPanel {
 
   /** Shows the parameter `c` beneath the thumbnail, e.g. "c = -0.4 + 0.6i". */
   private showCoordinates(re: number, im: number) {
-    if (!this.coordinatesElement) {
-      return;
-    }
     const sign = im < 0 ? "−" : "+";
     const reText = re.toPrecision(4);
     const imText = Math.abs(im).toPrecision(4);
-    this.coordinatesElement.textContent = `c = ${reText} ${sign} ${imText}i`;
+    this.options.onCoordinates(`c = ${reText} ${sign} ${imText}i`);
   }
 }
 
-export default NavigatorPanel;
+export default NavigatorEngine;

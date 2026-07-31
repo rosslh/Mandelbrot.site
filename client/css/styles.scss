@@ -250,12 +250,6 @@ html.fractal-root {
       text-decoration: underline;
     }
 
-    .checkbox-wrapper {
-      display: flex;
-      align-items: center;
-      gap: var(--space-4);
-    }
-
     .shortcut-wrapper {
       display: flex;
       align-items: center;
@@ -780,6 +774,12 @@ button,
 select,
 input[type="checkbox"] {
   cursor: pointer;
+}
+
+.checkbox-wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
 }
 
 input[type="text"] {

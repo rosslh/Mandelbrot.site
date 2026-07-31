@@ -1,13 +1,12 @@
 // Single source of truth for the app's settings: their types, defaults,
 // share-URL parameters, sidebar inputs, and how a change takes effect.
-// Input wiring (MandelbrotControls), share-URL serialization and parsing,
-// and reset handling are all derived from the schema below, so adding a
-// setting is one schema entry plus its HTML input — not a hand-edit of each
-// of those code paths.
+// Input binding (the ui/inputs components over the settings signals),
+// share-URL serialization and parsing, and reset handling are all derived
+// from the schema below, so adding a setting is one schema entry plus its
+// input component — not a hand-edit of each of those code paths.
 
 import type { ColoringOptions } from "./protocol";
 import { isValidDecimalCoordinate } from "./highPrecision";
-import { formatMagnification } from "./magnification";
 
 export type MandelbrotConfig = {
   // Unless a field's comment says otherwise, it is a plain setting: written
@@ -84,9 +83,9 @@ export type MandelbrotConfig = {
   paletteAutoFit: boolean;
 
   // View state mirrored into the config: navigation rewrites these on every
-  // settled move (see setCoordinateInputValues), so they describe the live
-  // view, not a user-entered value. Coordinates are decimal strings because
-  // deep zooms exceed f64 precision.
+  // settled move (see MandelbrotMap.publishViewState), so they describe the
+  // live view, not a user-entered value. Coordinates are decimal strings
+  // because deep zooms exceed f64 precision.
   re: string;
   im: string;
   zoom: number;
@@ -182,7 +181,8 @@ type BooleanConfigKey = {
 export type SettingEffect = "recolor" | "rerender" | "none";
 
 type BaseSpec = {
-  // Also the id of the setting's input element in index.html.
+  // Also rendered as the id/name of the setting's input element, which the
+  // stylesheet and <label for> wiring rely on.
   key: keyof MandelbrotConfig;
   // Query parameter in share URLs; settings without one (supersampling) are
   // device-specific and deliberately not shared.
@@ -673,47 +673,4 @@ export function parseShareParams(search: string): Partial<MandelbrotConfig> {
   }
 
   return parsed;
-}
-
-// Settings that exist only in the config (no sidebar input element);
-// syncInputToConfig skips them rather than warning about a missing element.
-const virtualKeys = new Set<keyof MandelbrotConfig>(
-  settingsSchema
-    .filter((spec) => spec.control === "virtualNumber")
-    .map((spec) => spec.key),
-);
-
-/** Writes a setting's current config value into its sidebar input. */
-export function syncInputToConfig(
-  config: MandelbrotConfig,
-  key: keyof MandelbrotConfig,
-) {
-  if (virtualKeys.has(key)) {
-    return;
-  }
-  const element = document.getElementById(key);
-  if (!element) {
-    console.warn(`Could not find input element for setting: ${key}`);
-    return;
-  }
-
-  if (element instanceof HTMLInputElement && element.type === "checkbox") {
-    element.checked = Boolean(config[key]);
-  } else if (
-    element instanceof HTMLInputElement ||
-    element instanceof HTMLSelectElement
-  ) {
-    // Zoom is stored as an effective zoom level but displayed as a
-    // magnification factor.
-    element.value =
-      key === "zoom" ? formatMagnification(config.zoom) : String(config[key]);
-  }
-}
-
-/** Writes every setting's config value into its input, e.g. after the
- * share-URL parameters have been applied. */
-export function syncAllInputsToConfig(config: MandelbrotConfig) {
-  for (const spec of settingsSchema) {
-    syncInputToConfig(config, spec.key);
-  }
 }

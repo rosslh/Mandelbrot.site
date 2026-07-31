@@ -1,11 +1,7 @@
 import throttle from "lodash/throttle";
-import type MandelbrotMap from "./MandelbrotMap";
-import type { ViewHistogram } from "./TileCache";
-import {
-  coloringOptions,
-  isFixedPaletteMethod,
-  syncInputToConfig,
-} from "./config";
+import type MandelbrotMap from "../MandelbrotMap";
+import type { ViewHistogram } from "../TileCache";
+import { coloringOptions, isFixedPaletteMethod } from "../config";
 
 // The histogram redraw scans every visible pixel (via TileCache.viewStats),
 // so it is throttled to keep view moves and tile loads cheap; the memoized
@@ -43,6 +39,18 @@ function formatCount(value: number): string {
   return Math.round(value).toLocaleString();
 }
 
+export type PaletteHistogramElements = {
+  container: HTMLElement;
+  canvas: HTMLCanvasElement;
+  canvasWrap: HTMLElement;
+  spinner: HTMLElement;
+  statsList: HTMLElement;
+  minStat: HTMLElement;
+  maxStat: HTMLElement;
+  medianStat: HTMLElement;
+  interiorStat: HTMLElement;
+};
+
 /** The levels-style iteration histogram in the palette-range panel (issue
  * #49): the center-weighted distribution of visible escape values that palette
  * auto-fit fits over, with the current palette min/max bounds overlaid as
@@ -61,8 +69,12 @@ function formatCount(value: number): string {
  * visibly stretches them across the dense mass. The tints come from the
  * worker's recolor path with the live coloring options (window, equalization
  * table, cycles, reversal, adjustments), so they can never drift from the
- * colors on screen. */
-class PaletteHistogram {
+ * colors on screen.
+ *
+ * Pointer-capture dragging, throttled pixel scans, and canvas painting live
+ * here as imperative code; the PaletteHistogramPanel component owns the
+ * markup and this renderer's lifecycle, and passes the elements in. */
+class PaletteHistogramRenderer {
   private map: MandelbrotMap;
   private container: HTMLElement;
   private canvas: HTMLCanvasElement;
@@ -88,45 +100,37 @@ class PaletteHistogram {
   private barColorsKey: string | null = null;
   private barColorsFetchKey: string | null = null;
 
-  constructor(map: MandelbrotMap) {
+  constructor(map: MandelbrotMap, elements: PaletteHistogramElements) {
     this.map = map;
 
-    this.container = document.getElementById("paletteHistogram") as HTMLElement;
-    this.canvas = document.getElementById(
-      "paletteHistogramCanvas",
-    ) as HTMLCanvasElement;
-    this.canvasWrap = document.getElementById(
-      "paletteHistogramCanvasWrap",
-    ) as HTMLElement;
-    this.spinner = document.getElementById(
-      "paletteHistogramSpinner",
-    ) as HTMLElement;
+    this.container = elements.container;
+    this.canvas = elements.canvas;
+    this.canvasWrap = elements.canvasWrap;
+    this.spinner = elements.spinner;
     this.ctx = this.canvas.getContext("2d");
-    this.statsList = document.getElementById(
-      "paletteHistogramStats",
-    ) as HTMLElement;
-    this.minStat = document.getElementById("paletteStatMin") as HTMLElement;
-    this.maxStat = document.getElementById("paletteStatMax") as HTMLElement;
-    this.medianStat = document.getElementById(
-      "paletteStatMedian",
-    ) as HTMLElement;
-    this.interiorStat = document.getElementById(
-      "paletteStatInterior",
-    ) as HTMLElement;
+    this.statsList = elements.statsList;
+    this.minStat = elements.minStat;
+    this.maxStat = elements.maxStat;
+    this.medianStat = elements.medianStat;
+    this.interiorStat = elements.interiorStat;
     this.setupDragging();
 
     // Redraw as tiles settle, the view moves, and the palette is re-fitted;
-    // the panel expanding is also a chance to catch up on a size that was 0
-    // while collapsed.
+    // the owning component also calls update() when the panel expands (a
+    // chance to catch up on a size that was 0 while collapsed) and when the
+    // palette bounds or coloring settings change.
     map.on("moveend zoomend viewreset load resize", this.update);
     map.mandelbrotLayer?.on("load", this.update);
-    const panel = document.getElementById("paletteRange");
-    panel?.addEventListener("toggle", () => this.update());
 
-    // The map may not have a view yet (the controls are constructed before
-    // the initial goToCoordinates), and getBounds() throws until it does;
+    // The map may not have a view yet, and getBounds() throws until it does;
     // whenReady defers the first paint to the initial view when needed.
     map.whenReady(() => this.update());
+  }
+
+  /** Detaches the map listeners (component unmount). */
+  destroy() {
+    this.map.off("moveend zoomend viewreset load resize", this.update);
+    this.map.mandelbrotLayer?.off("load", this.update);
   }
 
   /** Recomputes and redraws from the current view, throttled. */
@@ -382,7 +386,9 @@ class PaletteHistogram {
 
   /** Commits a marker drag: sets the dragged palette bound to the iteration
    * value under the pointer (keeping min < max), leaves auto-adjust so the
-   * override sticks, and recolors the visible tiles in place. */
+   * override sticks, and recolors the visible tiles in place. The config
+   * writes go through the settings signals, so the auto-fit checkbox and the
+   * reset button react on their own. */
   private applyDrag(fraction: number, stats: ViewHistogram) {
     if (!this.dragging) {
       return;
@@ -400,10 +406,8 @@ class PaletteHistogram {
     // does not snap the marker back.
     if (config.paletteAutoFit) {
       config.paletteAutoFit = false;
-      syncInputToConfig(config, "paletteAutoFit");
     }
 
-    this.map.controls.notifyPaletteBoundsChanged();
     // The window moved, so histogram coloring's CDF must rebuild before
     // the repaint (it spans exactly the window).
     this.map.applyPaletteWindowChange();
@@ -412,4 +416,4 @@ class PaletteHistogram {
   }
 }
 
-export default PaletteHistogram;
+export default PaletteHistogramRenderer;

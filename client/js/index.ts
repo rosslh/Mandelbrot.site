@@ -1,16 +1,13 @@
 import "./static";
-import MandelbrotMap from "./MandelbrotMap";
 import { firstTileRenderedEvent } from "./MandelbrotLayer";
-import { defaultConfig } from "./config";
 import { initRegionalAttribution } from "./regionalAttribution";
+import { bootstrapApp } from "./ui/bootstrap";
 
-const mapHtmlId = "leaflet";
-const smallScreenWidthPx = 800;
 const swReloadFlagKey = "mandelbrot-sw-reloaded";
 const swReloadWindowMs = 10000;
 const cacheRecoveryFlagKey = "mandelbrot-cache-recovered";
 
-// Captured before setConfigFromUrl strips the share parameters from the URL,
+// Captured before the share parameters are parsed and stripped from the URL,
 // so the recovery and update reloads below land back on the shared view
 // instead of the bare origin.
 const initialHref = window.location.href;
@@ -128,12 +125,7 @@ window.addEventListener("load", () => {
       });
   }
 
-  if (document.getElementById(mapHtmlId)) {
-    const initialZoom = window.innerWidth <= smallScreenWidthPx ? 2 : 3;
-
-    new MandelbrotMap({
-      htmlId: mapHtmlId,
-      initialConfig: { ...defaultConfig, zoom: initialZoom },
-    });
-  }
+  bootstrapApp().catch((err: unknown) => {
+    console.error("App initialization failed:", err);
+  });
 });

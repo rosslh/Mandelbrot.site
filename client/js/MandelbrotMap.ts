@@ -1,12 +1,12 @@
 import * as L from "leaflet";
+import { signal } from "@preact/signals";
+import throttle from "lodash/throttle";
 import { Pool } from "threads";
 import MandelbrotLayer from "./MandelbrotLayer";
 import { QueuedTask } from "threads/dist/master/pool-types";
-import MandelbrotControls from "./MandelbrotControls";
 import ImageSaver from "./ImageSaver";
 import ZoomAnimator from "./ZoomAnimator";
 import PointTooltip from "./PointTooltip";
-import NavigatorPanel from "./NavigatorPanel";
 import RegionRenderer from "./RegionRenderer";
 import TileCache, { buildPaletteCdf, CachedTile } from "./TileCache";
 import {
@@ -14,8 +14,8 @@ import {
   coloringOptions,
   isFixedPaletteMethod,
   MandelbrotConfig,
-  parseShareParams,
 } from "./config";
+import { ConfigStore } from "./state/configStore";
 import {
   RecolorResponse,
   TaskThread,
@@ -79,8 +79,8 @@ type TileRepaint = { tile: CachedTile; imageData: ImageData };
 class MandelbrotMap extends L.Map {
   mandelbrotLayer: MandelbrotLayer;
   mapId: string;
-  controls: MandelbrotControls;
-  initialConfig: MandelbrotConfig;
+  store: ConfigStore;
+  initialConfig: Readonly<MandelbrotConfig>;
   config: MandelbrotConfig;
   pool: Pool<TaskThread>;
   // Worker count of the current pool, for consumers that size their own
@@ -94,10 +94,25 @@ class MandelbrotMap extends L.Map {
   imageSaver: ImageSaver;
   zoomAnimator: ZoomAnimator;
   pointTooltip: PointTooltip;
-  navigatorPanel: NavigatorPanel;
+  // The navigator panel's engine. Structurally typed: the map only ever
+  // notifies it to re-render after a settings change.
+  navigatorPanel: { refresh(): void } | null;
   queuedTileTasks: QueuedTileTask[] = [];
   origin: { re: string; im: string };
-  zoomOffset: number;
+  // Reactive mirror of the deep-zoom offset, for UI computeds (the location
+  // reset button's visibility compares views exactly whenever the offset is
+  // nonzero, so it must react to origin rebases). Engine code keeps reading
+  // and writing the plain `zoomOffset` accessor, which peeks — reads from
+  // inside a component effect must not subscribe it to every rebase.
+  readonly zoomOffsetSignal = signal(0);
+  // Resolves once initializeMap has finished: pool spawned, layers added,
+  // and the initial view set. The UI mounts against a fully-initialized map.
+  ready: Promise<void>;
+  // Registered by the palette-histogram panel when it mounts. The recolor
+  // appliers poke it directly (like the navigator panel) so its palette
+  // strip and bound markers track every repaint trigger, including CDF
+  // rebuilds that change no config signal.
+  paletteHistogram: { update(): void } | null = null;
   tileCache = new TileCache();
   // The viewport-global equalization table for histogram coloring, or null
   // for the linear mapping. Built from the visible escape-value distribution
@@ -119,13 +134,7 @@ class MandelbrotMap extends L.Map {
   private layerLoading = false;
   private activeRecolorPasses = 0;
 
-  constructor({
-    htmlId,
-    initialConfig,
-  }: {
-    htmlId: string;
-    initialConfig: MandelbrotConfig;
-  }) {
+  constructor({ htmlId, store }: { htmlId: string; store: ConfigStore }) {
     super(htmlId, {
       attributionControl: false,
       maxZoom: 60,
@@ -133,42 +142,49 @@ class MandelbrotMap extends L.Map {
       center: [0, 0],
     });
 
-    this.initializeMap(htmlId, initialConfig);
+    this.ready = this.initializeMap(htmlId, store);
   }
 
-  private async initializeMap(htmlId: string, initialConfig: MandelbrotConfig) {
+  get zoomOffset(): number {
+    return this.zoomOffsetSignal.peek();
+  }
+
+  set zoomOffset(value: number) {
+    this.zoomOffsetSignal.value = value;
+  }
+
+  private async initializeMap(htmlId: string, store: ConfigStore) {
     this.mapId = htmlId;
-    this.origin = { re: initialConfig.re, im: initialConfig.im };
+    this.store = store;
+    this.initialConfig = store.initial;
+    // The store's facade over the settings signals; every existing
+    // `this.config.foo` read and write works unchanged on top of it.
+    this.config = store.config;
+    this.origin = { re: this.initialConfig.re, im: this.initialConfig.im };
     this.zoomOffset = 0;
-    this.initialConfig = { ...initialConfig };
-    this.config = { ...initialConfig };
-    // Apply any share-URL parameters before the pool spawns or any tile is
-    // requested: the spawn warmups are chosen by the view's depth and
-    // power, and the first (and only) tile batch should be the target
-    // view. The previous order spawned a pool against the default view, let
-    // setView request throwaway default-view tiles, then terminated that
-    // pool and spawned a second one once the URL was parsed — two full
-    // spawn+warmup cycles serialized on every shared-link load.
-    this.setConfigFromUrl();
+    // Any share-URL parameters were applied to the store before this map was
+    // constructed — and so before the pool spawns or any tile is requested:
+    // the spawn warmups are chosen by the view's depth and power, and the
+    // first (and only) tile batch should be the target view.
     await this.createPool();
     this.regionRenderer = new RegionRenderer(this);
     this.mandelbrotLayer = new MandelbrotLayer().addTo(this);
     this.addLoadingSpinnerControl();
-    this.controls = new MandelbrotControls(this);
     this.imageSaver = new ImageSaver(this);
     this.zoomAnimator = new ZoomAnimator(this);
     this.pointTooltip = new PointTooltip(this);
-    this.navigatorPanel = new NavigatorPanel(this);
+    // The navigator panel and palette histogram register themselves when
+    // their components mount (after this method resolves).
+    this.navigatorPanel = null;
 
     // Anchor the world origin at the target coordinates (latLng (0, 0), the
     // center of Leaflet's tile universe) and set the initial view; for a
     // plain load this.config still holds the defaults.
     this.goToCoordinates(this.config.re, this.config.im, this.config.zoom);
     this.setupEventListeners();
-    // The initial setView fired before the listeners above existed, so sync
-    // the coordinate inputs (and the zoom scale caption) to the starting
-    // view once.
-    this.controls.throttleSetCoordinateInputValues();
+    // The initial setView fired before the listeners above existed, so
+    // publish the starting view into the settings signals once.
+    this.publishViewState();
   }
 
   /** Adds the spinner to the same corner as the zoom control (after it, so
@@ -191,11 +207,8 @@ class MandelbrotMap extends L.Map {
   private setupEventListeners() {
     this.on("drag", () => this.mandelbrotLayer.debounceTileGeneration.flush());
     this.on("click", this.handleMapClick);
-    this.on(
-      "load moveend zoomend viewreset resize",
-      this.controls.throttleSetCoordinateInputValues,
-    );
-    this.on("move", this.controls.throttleSetCoordinateInputValues);
+    this.on("load moveend zoomend viewreset resize", this.publishViewState);
+    this.on("move", this.publishViewState);
     // Apply the auto-fitted palette range at zoom boundaries: the new zoom's
     // tiles all render from scratch anyway, so the update costs nothing.
     this.on("zoomstart", () => {
@@ -207,7 +220,7 @@ class MandelbrotMap extends L.Map {
     this.on("zoomend", () => {
       this.cancelTileTasksOnWrongZoom();
       this.rebaseOriginIfNeeded();
-      this.controls.throttleSetCoordinateInputValues();
+      this.publishViewState();
     });
     // The fit follows the viewport, so a pan settle can shift the detected
     // range even when no tile loads or unloads. Pans that do load tiles are
@@ -412,9 +425,8 @@ class MandelbrotMap extends L.Map {
         if (changed) {
           // The histogram's bound markers track the config, so the fit
           // moving the bounds must repaint them. Optional-chained: the fit
-          // can run before the controls (which own the histogram) are
-          // constructed.
-          this.controls?.refreshPaletteHistogram();
+          // can run before the histogram's component mounts.
+          this.paletteHistogram?.update();
         }
       }
     }
@@ -659,7 +671,7 @@ class MandelbrotMap extends L.Map {
     // The Julia thumbnail uses the same palette; keep it in step.
     this.navigatorPanel?.refresh();
     // The histogram panel's palette strip shows these same colors.
-    this.controls?.refreshPaletteHistogram();
+    this.paletteHistogram?.update();
   }
 
   /** Applies an explicit palette-window or color-mapping change (a marker
@@ -676,7 +688,7 @@ class MandelbrotMap extends L.Map {
     // The Julia thumbnail follows the same color-mapping setting.
     this.navigatorPanel?.refresh();
     // The histogram panel's palette strip warps with the mapping.
-    this.controls?.refreshPaletteHistogram();
+    this.paletteHistogram?.update();
   }
 
   /** Applies an explicit palette-range action (a reset, or enabling
@@ -686,7 +698,7 @@ class MandelbrotMap extends L.Map {
     this.applyDetectedPaletteRange();
     this.recolorVisibleTiles();
     // The refit moved the palette bounds; keep the histogram markers in step.
-    this.controls?.refreshPaletteHistogram();
+    this.paletteHistogram?.update();
     // The Julia thumbnail maps its escape counts over the same palette range.
     this.navigatorPanel?.refresh();
   }
@@ -845,26 +857,24 @@ class MandelbrotMap extends L.Map {
    * rewrites the coordinates — and an operation that reads it late can stamp
    * metadata, name files, or color frames in ways that don't match the
    * pixels it rendered. */
+  /** Mirrors the settled view into the config's view-state signals. Always
+   * the truthful coordinates: the share URL, exports, filenames, and the
+   * sidebar's location inputs all read these same fields, so writing
+   * anything else (an earlier version snapped views near the initial one to
+   * its exact values) labels the pixels on screen with a view up to the snap
+   * tolerance away. The near-initial affordance that snap provided — hiding
+   * the location reset button — lives in isAtInitialView instead. */
+  publishViewState = throttle(() => {
+    const { re, im } = this.currentCenterCoordinates();
+    this.store.patch({ re, im, zoom: this.effectiveZoom });
+  }, 200);
+
   configSnapshot(): MandelbrotConfig {
-    return { ...this.config };
+    return this.store.snapshot();
   }
 
   getShareUrl() {
     return buildShareUrl(this.config);
-  }
-
-  /** Applies share-URL parameters to the config, then strips them from the
-   * address bar. Runs before the controls exist (initializeMap creates them
-   * right after); their constructor syncs every input from the config values
-   * written here. */
-  setConfigFromUrl() {
-    const parsed = parseShareParams(window.location.search);
-    if (Object.keys(parsed).length === 0) {
-      return;
-    }
-
-    Object.assign(this.config, parsed);
-    window.history.replaceState({}, document.title, window.location.pathname);
   }
 }
 
