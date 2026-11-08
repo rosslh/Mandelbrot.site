@@ -1,6 +1,6 @@
 ---
 name: improve-performance
-description: "Make Mandelbrot.site measurably faster, one experiment at a time, carried across hour-long runs: finish an experiment already in progress, take the top item of the perf-experiment backlog, or, when the backlog is spent, measure where real views spend their time and add new ranked items. Runs the experiment through the perf-experiment harness and gates, ships a winner to main (which deploys) only after it reproduces on a quiet machine, and records every result in bench/LOG.md. Pass 'routine' when a schedule runs it: trade-offs that need Ross are then held, not shipped; run manually, it first puts held items to him."
+description: "Make Mandelbrot.site measurably faster, one experiment per run: finish an experiment already in progress, take the top item of the perf-experiment backlog, or, when the backlog is spent, measure where real views spend their time and add new ranked items. Runs the experiment through the perf-experiment harness and gates, ships a winner to main (which deploys) only after it reproduces on a quiet machine, and records every result in bench/LOG.md. Pass 'routine' when a schedule runs it: trade-offs that need Ross are then held, not shipped; run manually, it first puts held items to him."
 argument-hint: "'routine' when run by a schedule; otherwise an optional focus, e.g. 'direct tier only', 'discovery', or a backlog item"
 user-invocable: true
 disable-model-invocation: false
@@ -140,11 +140,10 @@ Note "awaiting a quiet machine" in the LOG entry and leave the timing for the ne
 Take the first that applies:
 
 1. **An experiment in progress**: a `perf/*` branch, or a LOG entry marked in progress or
-   awaiting a quiet machine. Finish it before starting anything new. Once it has had twelve
-   runs with a quiet machine (about two days of slots) and still has no verdict, close it
-   instead: record it as inconclusive with what is known, and say what would justify re-opening
-   it. Runs that found the machine busy do not count toward the twelve; keep the count in its
-   LOG entry.
+   awaiting a quiet machine. Finish it before starting anything new. Once it has had three
+   runs with a quiet machine and still has no verdict, close it instead: record it as
+   inconclusive with what is known, and say what would justify re-opening it. Runs that found
+   the machine busy do not count toward the three; keep the count in its LOG entry.
 2. **An item Ross approved in step 0.**
 3. **The top open item of the perf-experiment backlog**, after reconciliation, under the focus
    directive.
@@ -163,20 +162,20 @@ Take the first that applies:
    If discovery finds nothing with a plausible saving above the noise floor on a case that
    matters, write that in the LOG with the measurements and end the run. Do not invent churn.
 
-**Each run has one hour.** The schedule gives each of Ross's project routines its own hour in
-every four, and another project's routine starts when this one's hour ends. So stop 50 minutes
-after the run started, whatever state the work is in, at the last clean point:
+**Each run has four hours.** The schedule gives each of Ross's project routines its own
+four-hour slot a day, and another project's routine starts when this one's slot ends. Aim to
+finish one experiment in the run. Stop 3 hours 45 minutes after the run started, whatever state
+the work is in, at the last clean point:
 
 - commit the work so far to the experiment's `perf/<slug>` branch and push it;
 - write or update the LOG entry as in progress, saying exactly what is done and what is next
   (which builds exist, which verdict invocations are taken, which gates have passed);
 - let the next run continue.
 
-An experiment usually spans several runs. Build artifacts (`bench/artifacts/`, the dists, and
-`bench/results/`) stay on this machine between runs. Reuse them when the commit their
-`meta.json` records still matches, rather than rebuilding. Plan each run's work to fit what is
-left of its hour: a build, one verdict invocation, or one gate. Do not start a step that cannot
-finish before the 50-minute mark.
+An experiment that does not finish continues in the next day's run. Build artifacts
+(`bench/artifacts/`, the dists, and `bench/results/`) stay on this machine between runs. Reuse
+them when the commit their `meta.json` records still matches, rather than rebuilding. Do not
+start a step that cannot finish before the 3-hour-45-minute mark.
 
 ## 4. Run it
 
