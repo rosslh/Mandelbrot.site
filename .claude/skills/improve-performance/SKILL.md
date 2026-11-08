@@ -1,6 +1,6 @@
 ---
 name: improve-performance
-description: "Make Mandelbrot.site measurably faster, one experiment per run: finish an experiment already in progress, take the top item of the perf-experiment backlog, or, when the backlog is spent, measure where real views spend their time and add new ranked items. Runs the experiment through the perf-experiment harness and gates, ships a winner to main (which deploys) only after it reproduces on a quiet machine, and records every result in bench/LOG.md. Pass 'routine' when a schedule runs it: trade-offs that need Ross are then held, not shipped; run manually, it first puts held items to him."
+description: "Make Mandelbrot.site measurably faster, one experiment at a time, carried across hour-long runs: finish an experiment already in progress, take the top item of the perf-experiment backlog, or, when the backlog is spent, measure where real views spend their time and add new ranked items. Runs the experiment through the perf-experiment harness and gates, ships a winner to main (which deploys) only after it reproduces on a quiet machine, and records every result in bench/LOG.md. Pass 'routine' when a schedule runs it: trade-offs that need Ross are then held, not shipped; run manually, it first puts held items to him."
 argument-hint: "'routine' when run by a schedule; otherwise an optional focus, e.g. 'direct tier only', 'discovery', or a backlog item"
 user-invocable: true
 disable-model-invocation: false
@@ -140,10 +140,11 @@ Note "awaiting a quiet machine" in the LOG entry and leave the timing for the ne
 Take the first that applies:
 
 1. **An experiment in progress**: a `perf/*` branch, or a LOG entry marked in progress or
-   awaiting a quiet machine. Finish it before starting anything new. Once it has had three
-   runs with a quiet machine and still has no verdict, close it instead: record it as
-   inconclusive with what is known, and say what would justify re-opening it. Runs that found
-   the machine busy do not count toward the three.
+   awaiting a quiet machine. Finish it before starting anything new. Once it has had twelve
+   runs with a quiet machine (about two days of slots) and still has no verdict, close it
+   instead: record it as inconclusive with what is known, and say what would justify re-opening
+   it. Runs that found the machine busy do not count toward the twelve; keep the count in its
+   LOG entry.
 2. **An item Ross approved in step 0.**
 3. **The top open item of the perf-experiment backlog**, after reconciliation, under the focus
    directive.
@@ -162,9 +163,20 @@ Take the first that applies:
    If discovery finds nothing with a plausible saving above the noise floor on a case that
    matters, write that in the LOG with the measurements and end the run. Do not invent churn.
 
-One experiment per run. If it will not finish within about four hours, stop at a clean point:
-commit the work so far to its `perf/<slug>` branch and push it, write the LOG entry as in
-progress with what is left, and let the next run continue.
+**Each run has one hour.** The schedule gives each of Ross's project routines its own hour in
+every four, and another project's routine starts when this one's hour ends. So stop 50 minutes
+after the run started, whatever state the work is in, at the last clean point:
+
+- commit the work so far to the experiment's `perf/<slug>` branch and push it;
+- write or update the LOG entry as in progress, saying exactly what is done and what is next
+  (which builds exist, which verdict invocations are taken, which gates have passed);
+- let the next run continue.
+
+An experiment usually spans several runs. Build artifacts (`bench/artifacts/`, the dists, and
+`bench/results/`) stay on this machine between runs. Reuse them when the commit their
+`meta.json` records still matches, rather than rebuilding. Plan each run's work to fit what is
+left of its hour: a build, one verdict invocation, or one gate. Do not start a step that cannot
+finish before the 50-minute mark.
 
 ## 4. Run it
 
@@ -183,8 +195,11 @@ again.
 - Build a second, identical baseline dist (`base-dist2`, same ref as `base-dist`), so every
   verdict run carries its own A/A pair:
   `node src/run-e2e.mjs --variants base-dist,base-dist2,exp-dist`.
-- Make three independent invocations, each on a quiet machine. Each invocation contributes one
-  cold sample per variant.
+- Make three independent invocations, each on a quiet machine. They may come from different
+  runs as long as all three use the same builds. Each invocation contributes one cold sample per
+  variant. If one invocation over the whole corpus will not fit in the time left, split it by
+  `--filter` across consecutive runs on the same builds; the parts together count as one
+  invocation, and each part must carry the A/A pair.
 - A run in which the A/A pair flags any case is void; it does not count toward the three.
 - The experiment **wins** only if all three hold:
   - one or more cases that matter are significant in at least two of the three runs and faster
