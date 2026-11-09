@@ -32,14 +32,22 @@ it on real client builds.
 
 ## Architecture you must know before interpreting numbers
 
-Rendering pathway is selected on `effective_zoom = tile_zoom + zoom_offset`
-(thresholds in mandelbrot/src/perturbation.rs):
+Rendering pathway is selected in mandelbrot/src/perturbation.rs. Since
+2026-07-15 (LOG) direct vs perturbation is chosen from the request's actual
+pixel spacing (`MIN_DIRECT_PIXEL_SPACING = 2^-50`), not a zoom threshold: at
+the corpus-default 200px tiles the switch lands at effective zoom 46, and
+denser (high-DPI) tiles switch one or two levels earlier. Float-exp is still
+`effective_zoom = tile_zoom + zoom_offset >= 250` (exponent 2).
 
-| pathway | effective zoom | what runs |
+| pathway | effective zoom (200px tiles) | what runs |
 |---|---|---|
-| `direct` | < 47 | plain f64 escape loop |
-| `perturbation-f64` | 47–249 | arbitrary-precision (dashu) reference orbit + f64 pixel deltas |
+| `direct` | < 46 | plain f64 escape loop |
+| `perturbation-f64` | 46–249 | arbitrary-precision (dashu) reference orbit + f64 pixel deltas |
 | `float-exp` | >= 250 | reference orbit + ComplexExp extended-exponent deltas |
+
+At perturbation depths the kernel-visible iteration budget saturates at
+`MAX_ORBIT_LENGTH` = 1M (orbit budget clamp, LOG 2026-07-20); the direct
+tier is unaffected.
 
 - The reference orbit is cached thread-locally per (origin, exponent,
   precision). The runner reports the first call per case as **cold** (includes
@@ -49,8 +57,11 @@ Rendering pathway is selected on `effective_zoom = tile_zoom + zoom_offset`
   source. The **fallback lane** (`mandelbrot/pkg`, what Safari gets) is
   `opt-level = 3` (root Cargo.toml) + `-C target-feature=+simd128`
   (.cargo/config.toml, wasm target only) + `wasm-opt -O3 --enable-simd
-  --enable-relaxed-simd` (mandelbrot/Cargo.toml; the relaxed flag is
-  byte-neutral without relaxed instructions). The **fast lane**
+  --enable-relaxed-simd --enable-mutable-globals --enable-bulk-memory
+  --enable-nontrapping-float-to-int` (mandelbrot/Cargo.toml; the relaxed
+  flag is byte-neutral without relaxed instructions; the last two are
+  required since rustc 1.87 emits those features by default — LOG
+  2026-07-10 deploy fix). The **fast lane**
   (`mandelbrot/pkg-relaxed`, built by client/build-relaxed-wasm.js, what
   relaxed-simd browsers get via WebAssembly.validate detection in
   client/js/worker.js) adds `+relaxed-simd` to RUSTFLAGS: the quadratic
@@ -59,7 +70,7 @@ Rendering pathway is selected on `effective_zoom = tile_zoom + zoom_offset`
   what the anchor and blessed enrich hashes track). A no-flag bench build
   reproduces the fallback lane; add `--rustflags "-C
   target-feature=+simd128,+relaxed-simd"` for the fast lane. Each visitor
-  downloads one ~327 KiB wasm; the service worker precaches both, so
+  downloads one ~400 KiB wasm (2026-07-20 sizes); the service worker precaches both, so
   **every speed claim must also report the size delta** (compare output
   includes it). simd128 sets the hard browser floor at Safari 16.4 /
   Chrome 91 / Firefox 89; relaxed-simd (Chrome 114+/Firefox 125+, no
@@ -114,7 +125,7 @@ origin; off-localhost requests are blocked so no telemetry fires.
 | `--lto true\|fat\|thin\|off` | `CARGO_PROFILE_RELEASE_LTO` | `true` (= fat) |
 | `--codegen-units N` | `CARGO_PROFILE_RELEASE_CODEGEN_UNITS` | `1` |
 | `--rustflags "..."` | `RUSTFLAGS` | (empty; simd128 comes from .cargo/config.toml) |
-| `--wasm-opt "<flags>"` / `--no-wasm-opt` | post-build binaryen pass | `-O3 --enable-simd --enable-mutable-globals` |
+| `--wasm-opt "<flags>"` / `--no-wasm-opt` | post-build binaryen pass | `-O3 --enable-simd --enable-relaxed-simd --enable-mutable-globals --enable-bulk-memory --enable-nontrapping-float-to-int` |
 
 Experiments never edit production config: variant builds go through
 `wasm-pack build --profiling` (release profile, wasm-opt disabled via
@@ -599,14 +610,21 @@ first real use: two-sample KS must consume ties on both sides
 (nosmooth integer tie groups), and tail quantiles are rank-fragile
 under re-roll membership churn (central p25/50/75 only).
 
-1. **General (multibrot) kernel relaxed-FMA**: the natural next
-   rounding-lane candidate — the powu chain's complex multiplies are
-   madd/nmadd-shaped, the dual-build and statistical gate
-   infrastructure now exist, and the heaviest real multibrot view
-   (z30-e6) is ~3.9 s e2e. Gate identically (--statistical + holdout
-   + fallback byte-check); re-sweep its 6/32 after any step-cost
-   change.
-2. z0 whole-set small-tile wave/gather overhead — micro (accepted
+General (multibrot) kernel relaxed-FMA (former item #1) **shipped
+2026-07-10** — see the LOG entry: grid-z30-e6 e2e 3386 → 2845 ms
+(−16.0% warm, −18.2% cold); relaxed lane 6 chains / stride 64. The
+lever was folding the `+c` into the powu chain's final multiply
+(removing a serial step), not the FMA itself. Both direct-tier kernels
+now run fused bare recurrences in the fast lane; no rounding-lane
+candidates remain in the direct tier.
+
+Since then the client was rebuilt on Preact with signal-based state
+(2806422, after the last e2e verdict) and production moved to rustc
+1.99 (local now matches). No e2e ranking has been taken on that client,
+so the next direct-tier targets come from discovery (startup, dispatch,
+main-thread work while tiles stream), not from this list.
+
+1. z0 whole-set small-tile wave/gather overhead — micro (accepted
    +0.6 ms/tile from the Mariani ship); only if whole-set loads ever
    matter in user data.
 
@@ -640,6 +658,10 @@ has a sanctioned lane but stays closed on absolute-time grounds
   tile (~55 ns/px post-processing; the smooth/nosmooth pair differs by 9%
   only on light tiles). Negligible on the heavy tiles that set page-load
   times — below the action threshold under absolute-time weighting.
+- Deep sub-1M dust cache cost (LOG 2026-07-20): post-clamp, the
+  syn-z96-orbitclamp-minibrot case's genuine sub-1M work (~44 s at 64px)
+  runs at ~27 ns/iter, cache-bound against the 16 MiB orbit table.
+  Traffic-gated like the z400+ item: no real export view budgets near 1M.
 - dashu precision headroom (perturbation.rs: `(zoom + 64) -> 32-bit`
   granularity): affects cold times only; correctness-sensitive.
 - ~~`panic = "abort"` in release profile~~ **CLOSED 2026-07-08**: exactly
