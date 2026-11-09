@@ -36,12 +36,16 @@ const crateDir = join(repoDir, "mandelbrot");
 //   --rustflags "-C target-feature=+simd128,+relaxed-simd"
 // --enable-relaxed-simd in wasm-opt matches mandelbrot/Cargo.toml and is
 // byte-neutral on builds without relaxed instructions (verified 2026-07-10).
+// --enable-bulk-memory / --enable-nontrapping-float-to-int match the
+// 2026-07-10 deploy fix: rustc >= 1.87 emits both by default, and an explicit
+// wasm-opt feature list otherwise rejects its own input.
 export const PRODUCTION_DEFAULTS = {
   optLevel: "3",
   lto: "true",
   codegenUnits: "1",
   rustflags: "",
-  wasmOpt: "-O3 --enable-simd --enable-relaxed-simd --enable-mutable-globals",
+  wasmOpt:
+    "-O3 --enable-simd --enable-relaxed-simd --enable-mutable-globals --enable-bulk-memory --enable-nontrapping-float-to-int",
 };
 
 function parseArgs(argv) {
