@@ -17,6 +17,17 @@ type Done = (error: null, tile: HTMLCanvasElement) => void;
 // warmups trigger can land before real tiles occupy every core (see
 // queueTileGeneration).
 const TIER_UP_GRACE_MS = 100;
+// Light direct-kernel views skip the grace: power-2 views at direct depth
+// whose per-pixel iteration budget (the cap times the supersampling factor
+// squared, since a supersampled tile has that many more pixels) is at most
+// this. Running their first wave unoptimized (Liftoff) costs less than the
+// grace's idle time: even a fully border-bound 200px tile at this budget is
+// ~80M iterations, ~17 ms optimized on the direct kernel (0.21 ms/Miter), so
+// Liftoff adds well under 100 ms. Heavier views, and every perturbation,
+// float-exp or multibrot view (14-100x the direct kernel's cost per
+// iteration), keep the grace: their tiles can run for seconds at Liftoff
+// (bench/LOG.md 2026-07-10 and 2026-11-09).
+const GRACELESS_MAX_ITERATION_BUDGET = 2000;
 
 // Fired (once per page load) when the first map tile finishes rendering.
 // index.ts listens for this as proof that the served asset set is healthy and
@@ -87,12 +98,21 @@ class MandelbrotLayer extends L.GridLayer {
     // every worker's first heavy tile run its in-flight kernel call at
     // Liftoff speed while the busy workers starve the compile threads
     // (measured: intermittent +9..+20% on the heaviest direct grid). The
-    // grace gives the compile a quiet machine to finish on. Later batches
-    // (pan/zoom flurries, setting changes) keep the debounce.
+    // grace gives the compile a quiet machine to finish on. Light views skip
+    // it (see GRACELESS_MAX_ITERATION_BUDGET). Later batches (pan/zoom
+    // flurries, setting changes) keep the debounce.
     if (!this.initialBatchFlushScheduled) {
       this.initialBatchFlushScheduled = true;
+      const pixelBudget =
+        this._map.config.maxIterations *
+        supersamplingFactor(this._map.config) ** 2;
+      const graceMs =
+        this._map.poolRendersDirectQuadratic &&
+        pixelBudget <= GRACELESS_MAX_ITERATION_BUDGET
+          ? 0
+          : TIER_UP_GRACE_MS;
       void this._map.poolSpawned.then(() => {
-        setTimeout(() => this.debounceTileGeneration.flush(), TIER_UP_GRACE_MS);
+        setTimeout(() => this.debounceTileGeneration.flush(), graceMs);
       });
     }
   }

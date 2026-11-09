@@ -90,6 +90,12 @@ class MandelbrotMap extends L.Map {
   // its warmup renders; the tile layer holds the initial batch until then
   // (see queueTileGeneration).
   poolSpawned: Promise<void>;
+  // Whether the current pool was spawned for a view the power-2 direct f64
+  // kernel renders (no deep or multibrot warmup). Only that kernel is cheap
+  // enough per iteration for the tile layer to skip the tier-up grace on
+  // light views; perturbation, float-exp and multibrot kernels cost 14-100x
+  // more per iteration.
+  poolRendersDirectQuadratic = false;
   regionRenderer: RegionRenderer;
   imageSaver: ImageSaver;
   zoomAnimator: ZoomAnimator;
@@ -797,6 +803,8 @@ class MandelbrotMap extends L.Map {
       !isMultibrot && initialZoom >= FLOAT_EXP_THRESHOLD;
     const warmDeepKernel =
       !isMultibrot && !warmFloatExpKernel && initialZoom >= DEEP_ZOOM_THRESHOLD;
+    this.poolRendersDirectQuadratic =
+      !isMultibrot && initialZoom < DEEP_ZOOM_THRESHOLD;
     const poolSize = renderPoolSize();
     this.poolSize = poolSize;
     let spawnedWorkers = 0;
