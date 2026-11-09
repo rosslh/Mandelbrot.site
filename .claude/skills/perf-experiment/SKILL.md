@@ -716,4 +716,9 @@ warm and cold, overall e2e geomean −8.7%, direct geomean −25.8%
 wasm-level — first ship through the statistical gate; mechanism notes:
 replay through the kernel's own relaxed SIMD instructions, never
 f64::mul_add on wasm32; the cheaper FMA step moved the quadratic
-optimum to 8 chains/stride 64 in the fast lane only).
+optimum to 8 chains/stride 64 in the fast lane only). Light-view tier-up grace skip (2026-11-09: power-2 direct-depth views at
+maxIterations × ss² ≤ 2000 flush at pool-ready; grid-z20 e2e −22%, cold
+−21..−25%; heavy views keep the grace — at grace 0 grid-z28 went bimodal,
+one pass 5.1 s on Liftoff). Next startup candidates: the post-load
+recolor pass (46 messages right after the last tile), worker init
+(~70–80 ms of the ~100 ms before pool-ready).

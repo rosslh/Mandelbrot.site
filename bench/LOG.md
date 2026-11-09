@@ -2634,3 +2634,80 @@ fast lane. Suspected Liftoff-vs-TurboFan lowering difference of relaxed
 FMA making the blessed hash tier-up-timing-dependent. Not re-blessed here
 (this ship's pixel-check shows the case byte-identical baseline vs post
 within each run); worth a dedicated look if it recurs.
+
+## 2026-11-09 — SHIPPED: skip the tier-up grace on light direct-kernel views
+
+Machine: Apple M1 Pro (8 cores, pool of 7), Chrome for Testing 136.0.7103.94,
+rustc 1.99.1 (matches production). Merge base 877422d; the baseline dists were
+built from de2c0fc, whose client/crate/config tree is identical to 877422d
+(only bench/ and skill notes differ). Experiment built with
+`build-dist.mjs --ref perf/tier-up-grace`.
+
+**Discovery (current main, first e2e ranking since the Preact rebuild
+2806422).** The A/A pair was clean. Against a pre-Preact dist the cases were
+flat: the rebuild cost nothing measurable, although app.js grew from 501,094
+to 540,486 bytes. Medians in ms: z36-i51200 447, z45-i6400 408, z20-i1600 362,
+z48-i20000 1748, z47-i50000 44973, z48-i48000 15003, z28-i50000 3110,
+z259-i1600 1086, z48-i800 732, z85-i200 448.
+
+**Decomposition of z20 (startup probe that wraps Worker/postMessage).**
+DOMContentLoaded 17 ms; workers spawned at 18 ms; worker init done at
+89–101 ms; the grace runs from 101 to 206 ms; first tile at 218 ms, last
+tile at 372 ms. On a light view the 100 ms grace is about 27% of the
+load time.
+
+Probe with the grace at 0 everywhere: z20 went from 378 to 293 ms. z28 was
+bimodal: 7 of 8 passes ran about 3.0 s (vs 3.15 s), but one ran 5141 ms, with
+its first tiles at 2533 ms because the kernel was still on Liftoff. So the
+grace stays load-bearing for heavy views (it reconfirms 2026-07-10), and only
+light views can safely skip it.
+
+**Traffic (events export, 22,748 deduped views).** By iteration cap:
+- ≤500: 58.3%. These already render immediately and bypass the debounce and
+  the grace.
+- ≤2000: 76.9%.
+- ≤2000 and at direct depth: 70.1%. That leaves about 12% of all views that
+  newly skip the grace: queued views (cap above 500) at a budget of ≤2000.
+
+**Change (client only: MandelbrotLayer.ts, MandelbrotMap.ts).** The initial
+batch flushes with a grace of 0 when two conditions hold:
+- the pool was spawned for a power-2 view below DEEP_ZOOM_THRESHOLD
+  (`poolRendersDirectQuadratic`);
+- maxIterations × supersampling² is at most 2000.
+
+Every other view keeps the 100 ms grace. Rationale: a fully border-bound
+200px tile at this budget is about 80M iterations, about 17 ms optimized
+(0.21 ms per million iterations), so Liftoff costs less than the grace's idle
+time. Output is unchanged. The wasm is byte-identical across all variants
+(fast lane 396.1 KiB): size delta 0.
+
+**Adversarial review.** Findings and fixes:
+- Deep and multibrot views at a low cap would also have skipped the grace,
+  and their kernels are 14–100× costlier per iteration. Fixed with the
+  pool-kind flag.
+- Supersampling multiplies the work per tile. Fixed: the budget now counts
+  ss².
+
+Gates after the fixes: typecheck, lint, format:check, test and build all
+pass; verify-e2e passes (8/8).
+
+**Verdict (3 invocations, each with an A/A pair; 0 A/A flags in total).**
+Medians across the runs, base → exp, with the change in each run:
+- z20-i1600: 369 → 287 ms. Runs −22.2%*, −21.9%*, −23.8%*; cold −24.9%,
+  −20.8%, −25.3%. **Win.**
+- z259-i1600: +4.3%* in run 1 only, then +2.6% and +0.3%; cold −1.0%, −1.3%,
+  −1.7%. This view keeps the grace and runs an identical code path, so this
+  is noise. It is significant in only 1 run, so it is not a regression.
+- All other cases were within ±5% and never significant.
+  z36: −4.9%, +1.1%, −0.7%. z28: +0.9%, +1.3%, −0.1%.
+
+**Harness notes.**
+- Build experiment dists with `--ref`. The no-ref form uses the repo's stale
+  client/node_modules and produced different wasm (386.5 vs 391.6 KiB).
+- After a toolchain update, the first build installs wasm-bindgen and produced
+  a nonstandard relaxed wasm. A rebuild fixed it.
+- Puppeteer intermittently timed out on Runtime.callFunctionOn (seen once at
+  z48-i800). Re-running the case was clean.
+- Possible future target: after the last tile there is a recolor pass of
+  46 messages (381–391 ms on z20). It is not in the metric, but it is
+  main-thread work that runs right after the load.
