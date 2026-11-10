@@ -31,7 +31,8 @@ const GRACELESS_MAX_ITERATION_BUDGET = 2000;
 
 // Fired (once per page load) when the first map tile finishes rendering.
 // index.ts listens for this as proof that the served asset set is healthy and
-// its one-shot cache-recovery guards can be re-armed.
+// its one-shot cache-recovery guards can be re-armed; bootstrap.tsx strips
+// share parameters from the address bar on it.
 export const firstTileRenderedEvent = "mandelbrot:first-tile-rendered";
 
 let firstTileRendered = false;

@@ -21,18 +21,17 @@ export async function bootstrapApp(): Promise<void> {
   const initialZoom = window.innerWidth <= SMALL_SCREEN_WIDTH_PX ? 2 : 3;
   const initialConfig = { ...defaultConfig, zoom: initialZoom };
 
-  // Apply any share-URL parameters to the settings store, then strip them
-  // from the address bar. This happens before the map is constructed — and
-  // so before its worker pool spawns or any tile is requested — because the
-  // spawn warmups are chosen by the view's depth and power, and the first
-  // (and only) tile batch should be the target view.
+  // Parse any share-URL parameters into the settings store before the map is
+  // constructed — and so before its worker pool spawns or any tile is
+  // requested — because the spawn warmups are chosen by the view's depth and
+  // power, and the first (and only) tile batch should be the target view.
   //
-  // The strip itself waits for the first rendered tile. Chrome handles the
-  // replaceState on the browser's main thread for ~40 ms, and the worker
-  // pool's host creation queues behind it there: stripping at boot delayed
-  // every worker's start, and so every shared-link load, by ~45 ms (measured
-  // without DevTools attached, bench/LOG.md 2026-11-10). By the first tile
-  // the pool is up and nothing on the load path waits on the browser.
+  // Stripping them from the address bar waits for the first rendered tile.
+  // Chrome handles the replaceState on the browser's main thread for tens of
+  // milliseconds, and the worker pool's host creation queues behind it there,
+  // so stripping at boot delayed every worker's start on shared-link loads
+  // (bench/LOG.md 2026-11-10). By the first tile the pool is up and nothing
+  // on the load path waits on the browser.
   const overrides = parseShareParams(window.location.search);
   if (Object.keys(overrides).length > 0) {
     window.addEventListener(
