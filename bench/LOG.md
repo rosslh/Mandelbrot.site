@@ -2711,3 +2711,73 @@ Medians across the runs, base → exp, with the change in each run:
 - Possible future target: after the last tile there is a recolor pass of
   46 messages (381–391 ms on z20). It is not in the metric, but it is
   main-thread work that runs right after the load.
+
+## 2026-11-10 — IN PROGRESS (awaiting a quiet machine): defer the share-URL strip until the first tile renders
+
+Machine: Apple M1 Pro (8 cores, pool of 7), Chrome for Testing 136.0.7103.94,
+rustc 1.99.1 (matches production; `rustup check` up to date). Branch
+`perf/defer-url-strip` (pushed). Merge base c979577.
+
+Quiet-machine runs with a verdict so far: 0 of 3. Runs that found the machine
+busy: 1 (2026-11-10: Time Machine backup and a VM at load 6–26, then on battery
+power for the rest of the run).
+
+**Discovery: worker init on a light shared-link view (grid-z20-i1600).** A
+Chrome trace of a warm load (main's client, the exp-grace dist) showed:
+- app.js evaluated at 19 ms;
+- the load handler called history.replaceState (bootstrap.tsx strips the share
+  parameters), and the browser process's main thread then ran one
+  `content.mojom.FrameHost` message for 41.7 ms (24.4–66.1 ms);
+- all seven `DedicatedWorkerHostFactory.CreateWorkerHostAndStartScriptLoad`
+  messages for the pool queued behind it, so the workers started at 67–73 ms;
+- after that, each worker took about 30 ms: script eval 6 ms; wasm from the
+  code cache (`compileConsume`) under 1 ms; the init warmup about 15 ms.
+
+The "~70–80 ms of worker init" the backlog named was mostly that browser-side
+wait, not worker work.
+
+**Probes (decomposition only: noisy machine, no verdict).**
+- Puppeteer A/B on the same dist, with replaceState stubbed out in B, 6 rounds
+  on z20: pool ready (the last worker's first message) 114 → 71 ms; last tile
+  299 → 267 ms.
+- The same A/B in headless Chrome with no DevTools attached. The
+  instrumentation was prepended to app.js and the page drove its own
+  navigations in one tab. Over 8 warm loads each: pool ready 138 → 90 ms (every
+  B load beat every A load); last tile 334 → 309 ms. So the stall is not a
+  DevTools artifact.
+
+**Change (client only).** `bootstrap.tsx` still parses the share parameters
+before the map and pool exist. The `history.replaceState` strip now runs on a
+one-shot `firstTileRenderedEvent` listener instead of at boot. The wasm is
+byte-identical (same hashed files in all three dists; size delta 0). The
+comment-only follow-up commit 811606d rebuilds to an identical dist (only the
+source maps differ).
+
+**Adversarial review: nothing serious.**
+- Fixed: comment accuracy.
+- Accepted: if no tile ever renders, the share parameters stay in the address
+  bar. A reload before the first tile now reopens the shared view instead of
+  the default one. Both are cosmetic or better.
+- Nothing else reads location or history state between boot and the first
+  tile: share URLs are built from config, and the self-heal reloads use
+  `initialHref`.
+- Two cautions to check in the verdict:
+  - the probes removed replaceState rather than moving it, so the deferred
+    version itself must be measured;
+  - a reused tab's session history grows with every load, which could inflate
+    the browser-side cost. Fresh-tab probe:
+    `scratchpad freshtab-probe.mjs` style, a new Chrome process per load on
+    one warm profile, base-dist vs exp-dist.
+- The e2e corpus is all shared links. Loads of the bare site never ran
+  replaceState and gain nothing.
+
+**Gates passed** on 2da745f/811606d: typecheck, lint, format:check, test (87
+cargo tests), build; verify-e2e 8/8 against the fresh client/dist.
+
+**Next:**
+- Take three verdict invocations on a quiet machine with AC power:
+  `node src/run-e2e.mjs --variants base-dist,base-dist2,exp-dist`. The builds
+  are in bench/artifacts: base-dist and base-dist2 at c979577, exp-dist at
+  811606d.
+- Take a no-DevTools fresh-tab base-vs-exp probe on z20 as a real-user check.
+- Then land it, or record the verdict.
