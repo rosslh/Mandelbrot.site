@@ -1,4 +1,5 @@
 import { render } from "preact";
+import { firstTileRenderedEvent } from "../MandelbrotLayer";
 import MandelbrotMap from "../MandelbrotMap";
 import { defaultConfig, parseShareParams } from "../config";
 import { createConfigStore } from "../state/configStore";
@@ -25,9 +26,26 @@ export async function bootstrapApp(): Promise<void> {
   // so before its worker pool spawns or any tile is requested — because the
   // spawn warmups are chosen by the view's depth and power, and the first
   // (and only) tile batch should be the target view.
+  //
+  // The strip itself waits for the first rendered tile. Chrome handles the
+  // replaceState on the browser's main thread for ~40 ms, and the worker
+  // pool's host creation queues behind it there: stripping at boot delayed
+  // every worker's start, and so every shared-link load, by ~45 ms (measured
+  // without DevTools attached, bench/LOG.md 2026-11-10). By the first tile
+  // the pool is up and nothing on the load path waits on the browser.
   const overrides = parseShareParams(window.location.search);
   if (Object.keys(overrides).length > 0) {
-    window.history.replaceState({}, document.title, window.location.pathname);
+    window.addEventListener(
+      firstTileRenderedEvent,
+      () => {
+        window.history.replaceState(
+          {},
+          document.title,
+          window.location.pathname,
+        );
+      },
+      { once: true },
+    );
   }
 
   const store = createConfigStore(initialConfig, overrides);
