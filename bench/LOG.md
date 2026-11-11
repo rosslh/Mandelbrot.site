@@ -2712,7 +2712,7 @@ Medians across the runs, base → exp, with the change in each run:
   46 messages (381–391 ms on z20). It is not in the metric, but it is
   main-thread work that runs right after the load.
 
-## 2026-11-10 — IN PROGRESS (awaiting a quiet machine): defer the share-URL strip until the first tile renders
+## 2026-11-10 — SHIPPED (verdict 2026-11-11): defer the share-URL strip until the first tile renders
 
 Machine: Apple M1 Pro (8 cores, pool of 7), Chrome for Testing 136.0.7103.94,
 rustc 1.99.1 (matches production; `rustup check` up to date). Branch
@@ -2774,10 +2774,58 @@ source maps differ).
 **Gates passed** on 2da745f/811606d: typecheck, lint, format:check, test (87
 cargo tests), build; verify-e2e 8/8 against the fresh client/dist.
 
-**Next:**
-- Take three verdict invocations on a quiet machine with AC power:
-  `node src/run-e2e.mjs --variants base-dist,base-dist2,exp-dist`. The builds
-  are in bench/artifacts: base-dist and base-dist2 at c979577, exp-dist at
-  811606d.
-- Take a no-DevTools fresh-tab base-vs-exp probe on z20 as a real-user check.
-- Then land it, or record the verdict.
+**Verdict (2026-11-11, rustc 1.99.1, `rustup check` up to date).** Quiet-machine
+runs with a verdict: 3 of 3, all taken this run on the same builds (base-dist
+and base-dist2 at c979577, exp-dist at 811606d), on AC power at a 1-minute load
+of 1.3–3.7. The A/A pair flagged 0 cases in all three runs (its largest
+unflagged deltas: z259 +5.6% and z20 +4.6%, both in run 2). Results:
+`bench/results/e2e-urlstrip-v{1,2,3}.json`.
+
+Base → exp medians across the three runs, with the change in each run:
+- z20-i1600: 280 → 251 ms. Runs −11.3%*, −9.3%*, −9.2%*; cold −18.4%, −5.7%,
+  −11.6%. **Win.**
+- z36-i51200: 445 → 419 ms. Runs −6.1%*, −5.8%*, −5.2%*; cold −15.1%, −7.3%,
+  −7.8%. **Win.**
+- z45-i6400: 409 → 376 ms. Runs −8.6%*, −6.6%, −7.0%*; cold −7.2%, −8.6%,
+  −7.6%. **Win.**
+- z48-i800: 699 → 680 ms. Runs −4.2%*, −2.2%, −5.4%*; cold −4.0%, −5.0%,
+  −3.8%. **Win.**
+- z85-i200: 452 → 431 ms. Runs −9.9%*, −1.2%, −4.1%. Faster in all three but
+  significant in only one.
+- Heavy and deep cases are flat and never significant: z48-i20000 −1.7%,
+  −4.2%, −3.9%; z28 +0.6%, −0.9%, −0.1%; z47 +0.5%, +1.0%, −1.1%; z48-i48000
+  −0.2%, +0.1%, +1.3%; z259 −1.4%, +0.4%, −0.4%.
+- No case was significantly slower in any run.
+- Overall geomean −4.3%, −2.9%, −3.6% (A/A −0.1%, +1.0%, 0.0%).
+- The saving is a fixed ~20–30 ms per shared-link load. It is visible on
+  light views and lost in the noise of heavy ones, as expected for a change
+  that only moves when the workers start.
+
+**Real-user check (fresh browser process per load, no DevTools).** One warm
+profile, base-dist vs exp-dist on z20, 12 loads each at load 2.3:
+- pool ready 218 → 195 ms;
+- first tile 246 → 214 ms;
+- last tile 422 → 394 ms (−28 ms, −6.6%).
+
+Every exp load reached pool-ready before every base load. So the stall is real
+in a fresh tab with empty session history too, not only in the harness's
+reused tab. An earlier probe at load 6.2, while the machine was still busy from
+the benchmark, showed a smaller gap (last tile 408 → 404 ms) and is discarded.
+
+**Behaviour check.** A headless load of the fresh client/dist with share
+parameters had them in `location.search` at load and stripped after the first
+tile (`location.href` ended in `/`). It raised no page errors.
+
+**Gates (re-run this run on f1f1ff2, client identical to 811606d).**
+typecheck, lint, format:check, test and build all pass, and verify-e2e passes
+8/8 against the fresh client/dist. cargo test was not re-run: there is no Rust
+change and the wasm is byte-identical (it passed with 87 tests last run). Size
+delta: 0. The adversarial review is the one recorded above, and nothing on the
+"Held for Ross" list applies: output, wasm, browser support and dependencies
+are all unchanged.
+
+**Mechanism note for the next run.** In Chrome, `history.replaceState` during
+startup blocks the browser process's main thread for tens of milliseconds, and
+dedicated-worker host creation queues behind it. Keep browser-process work
+(history, navigation, storage-partition calls) off the path between bundle
+eval and pool spawn.

@@ -719,6 +719,14 @@ f64::mul_add on wasm32; the cheaper FMA step moved the quadratic
 optimum to 8 chains/stride 64 in the fast lane only). Light-view tier-up grace skip (2026-11-09: power-2 direct-depth views at
 maxIterations × ss² ≤ 2000 flush at pool-ready; grid-z20 e2e −22%, cold
 −21..−25%; heavy views keep the grace — at grace 0 grid-z28 went bimodal,
-one pass 5.1 s on Liftoff). Next startup candidates: the post-load
-recolor pass (46 messages right after the last tile), worker init
-(~70–80 ms of the ~100 ms before pool-ready).
+one pass 5.1 s on Liftoff). Deferred share-URL strip (2026-11-11:
+`history.replaceState` moved from boot to the first rendered tile;
+light/mid shared-link views −5..−11% e2e, ~20–30 ms per load; mechanism
+note: in Chrome a startup replaceState blocks the browser process's main
+thread ~40 ms and dedicated-worker host creation queues behind it, so the
+backlog's "~70–80 ms of worker init" was mostly that wait — keep
+browser-process work off the path to pool spawn). Each worker now takes
+~30 ms after it starts (script eval ~6 ms, cached wasm compile <1 ms,
+init warmup ~15 ms). Next startup candidates: the post-load recolor pass
+(46 messages right after the last tile; not in the metric), the per-worker
+init warmup (~15 ms, runs in parallel across the pool).
