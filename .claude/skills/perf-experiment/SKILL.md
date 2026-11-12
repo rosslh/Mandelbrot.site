@@ -727,6 +727,10 @@ thread ~40 ms and dedicated-worker host creation queues behind it, so the
 backlog's "~70–80 ms of worker init" was mostly that wait — keep
 browser-process work off the path to pool spawn). Each worker now takes
 ~30 ms after it starts (script eval ~6 ms, cached wasm compile <1 ms,
-init warmup ~15 ms). Next startup candidates: the post-load recolor pass
-(46 messages right after the last tile; not in the metric), the per-worker
-init warmup (~15 ms, runs in parallel across the pool).
+init warmup ~15 ms). Skipping the init warmup on light views is **settled negative
+(2026-11-12)**: grid-z20 went +7.3% slower and border-dense light views
++4..+6% slower, because Liftoff on the first wave costs more than the
+warmup's ~15 ms even at budget ≤ 2000; keep the warmup on every spawn.
+Remaining startup candidate: the post-load recolor pass (46 messages right
+after the last tile; not in the metric, so it needs a metric for
+post-load main-thread jank first).

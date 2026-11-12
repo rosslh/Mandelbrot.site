@@ -2829,3 +2829,66 @@ startup blocks the browser process's main thread for tens of milliseconds, and
 dedicated-worker host creation queues behind it. Keep browser-process work
 (history, navigation, storage-partition calls) off the path between bundle
 eval and pool spawn.
+
+## 2026-11-12 — NEGATIVE: skip the init warmup on light direct-kernel views
+
+Machine: Apple M1 Pro (8 cores, pool of 7), Chrome for Testing 136.0.7103.94,
+rustc 1.99.1 (`rustup update stable`: unchanged). Merge base 7ab215e;
+base-dist and base-dist2 built at 7ab215e, exp-dist at 68d4dfe (branch
+`perf/light-init-warmup`, deleted unpushed). The wasm is byte-identical across
+all three dists (fast lane 396.1 KiB): size delta 0.
+
+**Hypothesis (the backlog's "per-worker init warmup ~15 ms" startup
+candidate).** The page-load spawn for a light view, the same views that skip
+the tier-up grace (power 2, direct depth, maxIterations × ss² ≤ 2000, ~70% of
+real views), dispatches tiles at pool-ready with no grace. The two 64px init
+renders cost ~15 ms per worker before the worker can take a tile. If the first
+light tiles cost less than that at Liftoff, skipping the warmup should cut
+~15 ms from those loads.
+
+**Change (client only).** The init warmup became a `warmupInit` request. After
+the adversarial review, `createPool` sent it on every spawn except the
+page-load spawn of a light direct view at supersampling ≤ 2. The review's
+findings, all fixed in the measured build:
+- Respawns after a settings change ran in parallel with the 350 ms debounce,
+  so skipping there saved nothing and left the next tiles on Liftoff. They now
+  always warm.
+- Heavy supersampling made "light" tiles carry up to 2.56M pixels of
+  coloring work.
+- A failed-wasm worker rejected the new request and failed the spawn.
+
+Gates passed on the first commit: typecheck, lint, format:check, test (87
+cargo tests), build, verify-e2e 8/8.
+
+**Measurement (decomposition probes, 1-minute load 3.3–3.9, AC power).**
+- Real light case grid-z20-i1600, 9 rounds. The A/A pair was clean (−3.3%,
+  not flagged):
+
+  | variant | median | cold |
+  |---|---|---|
+  | base-dist | 276 ms | 364 ms |
+  | base-dist2 | 267 ms | 328 ms |
+  | exp-dist | 297 ms | 363 ms |
+
+  exp-dist is +7.3% vs base-dist.
+- Border-dense light stress set (seahorse valley z14 at i2000/i1000/i500, cusp
+  z20 at i2000), 7 rounds. The A/A pair flagged z14-i500 (−3.6%*), so treat
+  this run as indicative only. Exp vs base:
+  - i2000: +3.9%*
+  - i1000: +4.0%
+  - i500: −3.5% (the A/A pair moved by the same −3.6%, so nothing gained)
+  - cusp i2000: +6.4%*
+
+**Verdict: negative, settled.** No formal three-invocation verdict was taken:
+both probes point the same way, and the real light case is ~20 ms *slower*.
+The warmup pays for itself even at light budgets. The light tiles' Liftoff
+time exceeds the ~15 ms the warmup costs. The likely reason is that the
+warmup's tier-up trigger lets TurboFan code arrive during the first wave,
+while tiles alone take most of a wave to consume the budget. No budget
+threshold rescues it: at i500 (the immediate-render class) the gain is zero.
+Re-open only if V8's wasm tiering changes (e.g. wasm OSR or eager tier-up from
+the code cache).
+
+**Harness note.** Ad-hoc e2e corpora work via `run-e2e.mjs --corpus <file>`
+with grid-regression's case shape. The stress set's four synthetic light cases
+are a cheap guard for any future change to light-view startup.
