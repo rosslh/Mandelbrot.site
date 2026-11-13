@@ -2947,3 +2947,162 @@ Backlog: perf-experiment gains a "WebGPU lane" section (precision table,
 measurement rules, the response contract a GPU kernel must reproduce) and
 GPU items G1–G6 at the top of the backlog, starting with G1: make the
 harness and correctness gates GPU-capable, which blocks every GPU verdict.
+
+## 2026-11-13 — IN PROGRESS (awaiting a quiet machine): G1 harness + G2 lane skeleton (df32), switched off
+
+Machine: Apple M1 Pro (8 cores, pool of 7), Chrome for Testing 136.0.7103.94,
+WebGPU adapter `apple / metal-3` (gpu-probe exit 0). rustc 1.100.0 (`rustup
+update stable` this run: 1.99.1 → 1.100.0; `node src/build.mjs baseline`
+builds clean). The compiler alone moved the fast-lane wasm from 396.1 to
+391.3 KiB. The machine was busy all run (load 6–26: a Time Machine backup and
+a VM), so **no timing verdict was taken**. Quiet-machine runs toward the
+verdict so far: 0 of 3. Every GPU number below comes from one Apple GPU;
+output and speed on other vendors are unmeasured.
+
+**G1, harness — shipped to `main` (4748476 and this commit; bench and skill
+files only).**
+- run-e2e runs the gpu-probe inside the browser it times with (on a separate
+  origin, page closed before timing), records `meta.gpu`, and refuses to time
+  without a hardware adapter. `--no-gpu` (Chrome `--disable-gpu`) times the
+  wasm fallback lane; `--allow-no-gpu` times anyway.
+- gpu-probe.mjs exports `probeGpu()`.
+- smoke-live.mjs counts loaded tiles by `data-lane` and takes
+  `--expect-lane gpu|wasm`. The live site has no marker yet and reports
+  "none".
+
+**G2 skeleton — branch `perf/gpu-lane-skeleton` (976dc59, c0f03fe,
+d947b07; pushed, not shipped).**
+- `client/js/gpu.js` is a lazy chunk, loaded only when the lane is on. It
+  uses one device per worker. Its WGSL kernel reproduces
+  `calculate_escape_iterations_quadratic`: z0 = c, `|z|² < 9`, and the
+  cardioid/bulb test, all in **double-single (df32)** arithmetic.
+- Pixel coordinates are computed in f64 on the CPU exactly as linspace does,
+  then uploaded as df32 pairs.
+- The kernel returns (count, z). The CPU smooths in f64, and wasm
+  `recolor_tile` colors the result.
+- Coverage: power 2, escape-time coloring, pixel spacing ≥ 2^-29 (measured,
+  below), maxIterations ≤ 100k, ≤ 512² px, and pixels × budget ≤ 2^32 (a
+  GPU-watchdog guard: there is no periodicity check or rect_in_set). Any GPU
+  error renders that tile through wasm, and a lost device turns the lane off
+  for that worker.
+- `renderLane.ts` adds `?lane=gpu|wasm` and `&gpuFail=shader|lost|tile`,
+  honored only on localhost. **No production view turns the lane on**, so
+  production does not fetch the chunk or touch the GPU. The service worker
+  precaches the extra ~5 KB chunk, an accepted cost.
+- Responses carry `lane`, and tile canvases carry `data-lane`.
+- bench additions:
+  - `src/lane-check.mjs`: counts tiles by lane and fails on a missing or
+    errored tile, a page or console error, or a lane mismatch.
+  - run-e2e `dist:gpu` / `dist:wasm` variants, which count GPU tiles per pass
+    and warn when a `:gpu` variant rendered none.
+  - **`src/gpu-check.mjs`**: G1's GPU statistical gate. It loads gpu.js
+    into the bench page and judges GPU values against the pinned anchor with
+    `diffValuesStatistical`, runs a GPU A/A check on every case, and takes
+    `--force` (ignore the cutoff) and `--holdout N [--seed S]`.
+
+**Precision findings (gpu-check, statistical tier vs anchor @3517e56).**
+- **Plain f32 fails even at zoom 2**: 4/6 covered corpus cases, including
+  syn-direct-z3-home and user-z2.
+  - The failure is a delta-sign imbalance: a one-directional shift, mostly
+    from deltas of a few f32 ulps on a regular pixel grid.
+  - Moving the smoothing from the shader to f64 on the CPU did not change
+    it.
+  - So f32 rounding on this grid is structured, not re-roll noise.
+- **The Metal backend compiles with fast math.** A two-sum's error term
+  came back 0, because reassociation folds error-free transformations away.
+  - An opaque barrier fixes it: `bitcast<f32>(bitcast<u32>(x) ^ zero)`,
+    with `zero` from a uniform, on every intermediate, including the final
+    sum of the two error terms.
+  - `fma()` is truly fused on this GPU, so two-product uses it.
+  - Mechanism note for every future GPU kernel: no extended-precision
+    arithmetic without these barriers.
+- **df32 passes.** At the 2^-38 provisional cutoff all 11 covered corpus
+  cases pass, including user-z28-543f9cfa (8,250 balanced flips, the same
+  re-roll class the FMA lane passed).
+  - `--force` deeper: user-z37 (+74/−2) and user-z38 (+876/−30) fail on
+    one-directional sign; z44+ and every perturbation-depth case fail
+    outright.
+  - Holdout (seed 2026-11-13, 80 views): z ≤ 25 all pass, while z26, z27
+    and z29 fail on the sign axis alone (no flips, quantile drift 0.00%).
+    Further seeds put the first failures at z25–z29, mixed with passes.
+  - Computing coordinates on the CPU instead of in the shader, and folding
+    the df32 multiply's cross terms in with fma, both left those failures
+    unchanged. The source of the z25–z29 bias is open.
+- **Measured cutoff: pixel spacing ≥ 2^-29.** At 200px tiles the spacing is
+  2^-(zoom+5), so that is zoom 24.
+  - At it, gpu-check passes 9/9 corpus cases and 355/355 holdout views over
+    five seeds (2026-11-13, gpu-b, gpu-c, gpu-d, gpu-e).
+  - Every GPU A/A pair is byte-identical.
+  - grid-z28 is outside that coverage.
+
+**Lane gates on the branch (gpu-dist, 1600×900, 45 tiles each, 0 errors).**
+- typecheck, lint, format:check, test and build pass.
+- verify-e2e passes 8/8 after the review fixes. The later df32 change
+  touches only the lazy GPU chunk; lane-check re-ran on it.
+- lane-check routing:
+  - all-GPU: `lane=gpu` at z5, and grid-z20's view.
+  - all-wasm: `lane=wasm`, `--no-gpu`, each of `gpuFail=shader|lost|tile`,
+    no parameter, and uncovered z28/z30 views. A 200k-iteration z9 view
+    also stays on wasm, under the work cap.
+- The matrix caught two WGSL bugs: a constant +Inf, and `smooth` being a
+  reserved word.
+
+**Adversarial review (fresh opus agent, read-only).** It found no
+systematic output differences and no change to production behaviour. Its
+concurrency analysis: the threads pool runs one task per worker, and
+`configureLane` completes before the worker takes any tile. Fixed:
+- buffer capacity was recorded before allocation, outside an error scope;
+- dispatch work was unbounded (the pixel and pixels × budget caps above);
+- run-e2e never checked that `:gpu` tiles came from the GPU;
+- lane-check missed errored tiles and console errors;
+- the warmup ran a loop-free all-escaping view (now a boundary view at
+  200px).
+One bug the review missed, found while fixing: `{ ...created }` copied the
+lane's `usable` getter as a frozen `true`, so a lost device never turned the
+lane off. The lane object is now kept as is. Dismissed: the ~5 KB precache
+growth.
+
+**Indicative timing (busy machine, 5 rounds; void as a verdict;
+`gpu-dist:wasm` → `gpu-dist:gpu`, lane forced on):**
+
+| view | wasm → GPU | change |
+|---|---|---|
+| adhoc z5-i500 | 165 → 153 ms | −7% |
+| adhoc z9-i2000 | 169 → 203 ms | +20% |
+| adhoc z11-i20000 | 336 → 570 ms | +70% |
+| grid-z20-i1600 | 287 → 315 ms | +10% |
+
+The earlier f32 kernel was 12% and 7% faster on z9 and z11. **df32 with
+barriers is correct but slower than the f64 wasm kernels**, so the lane must
+stay off for these views. The cost is about 10× the f32 op count, plus
+barriers, with seven workers each driving their own device. The skeleton's
+job was to measure fixed costs, and that part still holds: lane init and the
+first dispatch did not show up as a startup cost (cold times tracked warm).
+
+**What this means for G3 (re-ranked).** Perturbation with **plain f32
+deltas** around a reference orbit should be both fast and accurate where it
+matters:
+- the delta error is relative to the delta, about 24 sub-pixel bits at any
+  depth;
+- f64 direct has 53 − log2(1/spacing) sub-pixel bits: 24 at z24, 20 at z28.
+So f32 perturbation should beat f64 direct precision from about z24 down, at
+plain-f32 speed, which is exactly the range df32 could not reach and where
+the heavy cases sit. df32 direct stays a candidate only for z ≤ 24 views,
+and only if one GPU owner or batched dispatches remove the per-worker
+overhead (measure first).
+
+**Next run.**
+1. On a quiet machine:
+   - build `base-dist` and `base-dist2` at the merge base (after rebasing
+     the branch onto this commit) and `exp-dist` from the branch;
+   - take three verdict invocations of `run-e2e --variants
+     base-dist,base-dist2,exp-dist` over grid-regression, with the lane off;
+   - the gate is "uncovered views byte-identical and as fast". If it holds,
+     the lane code ships switched off, together with the two-lane smoke test.
+2. Decompose GPU tile time inside the e2e span: device and pipeline at
+   spawn, then submit, kernel, readback and recolor per tile. Compare one
+   GPU owner (or batched multi-tile dispatches) against per-worker devices.
+   That decides whether any direct view is worth turning on.
+3. Start G3: f32-delta perturbation over the wasm reference orbit, gated by
+   gpu-check (which needs a reference-orbit export from wasm). Targets:
+   grid-z28 (~3 s), z36–z46, then the pf64 grids.

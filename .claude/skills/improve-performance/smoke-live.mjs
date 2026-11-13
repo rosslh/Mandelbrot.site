@@ -6,8 +6,13 @@
 // spawns), so the visit sends no analytics and stays out of the real-view data the benchmark
 // corpus is built from.
 //
-//   node .claude/skills/improve-performance/smoke-live.mjs [--no-gpu] [url]
+//   node .claude/skills/improve-performance/smoke-live.mjs [--no-gpu] [--expect-lane gpu|wasm] [url]
 //     (default url https://mandelbrot.site/)
+//
+// The summary counts loaded tiles by the lane that rendered them (the tile canvas's data-lane
+// marker: "gpu" or "wasm"; "none" on builds that predate the marker). --expect-lane fails the run
+// unless every loaded tile came from that lane: use it on a view the GPU lane covers, to confirm
+// the deployed lane is actually serving tiles.
 //
 // --no-gpu launches Chrome with --disable-gpu: navigator.gpu still exists but requestAdapter()
 // returns null, the "no usable GPU" case, so the run exercises the wasm fallback lane. Without
@@ -23,7 +28,10 @@ const puppeteer = require('puppeteer');
 
 const args = process.argv.slice(2);
 const noGpu = args.includes('--no-gpu');
-const url = args.find((arg) => !arg.startsWith('--')) ?? 'https://mandelbrot.site/';
+const expectLaneIndex = args.indexOf('--expect-lane');
+const expectLane = expectLaneIndex >= 0 ? args[expectLaneIndex + 1] : null;
+const url =
+  args.find((arg, index) => !arg.startsWith('--') && index !== expectLaneIndex + 1) ?? 'https://mandelbrot.site/';
 const host = new URL(url).hostname;
 const MIN_TILES = 8;
 const QUIET_MS = 2500; // the same "grid is done" rule as bench/src/run-e2e.mjs
@@ -56,8 +64,23 @@ while (Date.now() - started < TIMEOUT_MS) {
   await new Promise((r) => setTimeout(r, 250));
 }
 const elapsedMs = Date.now() - started;
+const lanes = await page.evaluate(() => {
+  const counts = {};
+  for (const tile of document.querySelectorAll('.leaflet-tile-loaded')) {
+    const lane = tile.dataset.lane ?? 'none';
+    counts[lane] = (counts[lane] ?? 0) + 1;
+  }
+  return counts;
+});
 await browser.close();
 
-const ok = tiles >= MIN_TILES && pageErrors.length === 0;
-console.log(JSON.stringify({ ok, url, gpu: !noGpu, tiles_loaded: tiles, elapsed_ms: elapsedMs, page_errors: pageErrors }, null, 2));
+const laneOk = !expectLane || (Object.keys(lanes).length === 1 && lanes[expectLane] > 0);
+const ok = tiles >= MIN_TILES && pageErrors.length === 0 && laneOk;
+console.log(
+  JSON.stringify(
+    { ok, url, gpu: !noGpu, tiles_loaded: tiles, lanes, elapsed_ms: elapsedMs, page_errors: pageErrors },
+    null,
+    2,
+  ),
+);
 process.exit(ok ? 0 : 1);

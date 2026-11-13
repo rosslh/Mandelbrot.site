@@ -612,7 +612,12 @@ policy above. Replace these estimates with measurements as items run.
     `--allow-no-gpu` times anyway. gpu-probe.mjs exports `probeGpu()`.
   - the client-side items below (forced-lane switch, lane marker, failure
     injection) need lane code to switch, so they land with G2's first
-    (turned-off) ship rather than on their own;
+    (turned-off) ship rather than on their own. **Built 2026-11-13 on
+    branch `perf/gpu-lane-skeleton`** (LOG entry): `?lane=gpu|wasm` and
+    `&gpuFail=shader|lost|tile` (localhost only), `data-lane` on tiles,
+    `src/lane-check.mjs`, run-e2e `dist:gpu`/`dist:wasm` variants, and
+    **`src/gpu-check.mjs`**, the GPU statistical gate vs the anchor with a
+    GPU A/A check and `--holdout`; smoke-live `--expect-lane` is on `main`;
   - a forced-lane switch for A/B runs and correctness checks, so one
     build can be made to render all-wasm or GPU-where-covered (a build
     define or a dev-only query parameter that production ignores —
@@ -642,9 +647,25 @@ policy above. Replace these estimates with measurements as items run.
   (device creation, pipeline compile, submit + readback per tile) against
   the ~190 ms per-load dispatch floor and the light grids (grid-z20). Find
   the measured f32 precision cutoff against the anchor here.
+  **Status 2026-11-13 (LOG): built on `perf/gpu-lane-skeleton`, switched
+  off, awaiting the lane-off no-regression verdict (0/3 quiet runs).**
+  Measured: plain f32 fails the statistical tier even at z2 (structured
+  one-directional sub-ulp deltas), so the kernel is df32. The Metal backend
+  reassociates floats, so every error-free-transform intermediate needs an
+  opaque XOR barrier; fma() is truly fused. df32's measured cutoff is pixel
+  spacing 2^-29 (zoom 24; 355/355 holdout views pass). z25–z29 views fail
+  intermittently on sign balance, cause open. Forced on, df32 is slower
+  than wasm on light views (indicative: z11-i20000 +70%, grid-z20 +10%), so
+  turning it on for any view needs item 2 of the LOG's next steps first
+  (decompose GPU tile time; one GPU owner vs per-worker devices).
 - **G3. GPU perturbation, quadratic (the big one).** Reference orbit from
   the existing wasm orbit code uploaded as a storage buffer; f32 pixel
-  deltas with rebasing; covers z ≳ 13 into the pf64 range. Targets:
+  deltas with rebasing; covers z ≳ 13 into the pf64 range. Precision case
+  (LOG 2026-11-13): f32 deltas keep ~24 sub-pixel bits at any depth, while
+  f64 direct has 53 − log2(1/spacing) (24 at z24, 20 at z28), so f32
+  perturbation should pass the tier from about z24 down at plain-f32 speed,
+  exactly the range df32 direct could not reach. gpu-check needs a
+  reference-orbit export from the wasm to gate it. Targets:
   grid-z28-i50000 (~3 s), z36-i51200, z46, grid-z47-i50000 (~45 s),
   grid-z48-i48000, z48-i20k. Compare against a df32 direct kernel for the
   z13–40 range before committing to either there. Interior-heavy tiles:
