@@ -83,7 +83,9 @@ function parseArgs(argv) {
     else throw new Error(`Unexpected argument: ${arg}`);
   }
   if (!opts.variants || opts.variants.length === 0) {
-    throw new Error("Usage: node src/run-e2e.mjs --variants a[,b,...] [options]");
+    throw new Error(
+      "Usage: node src/run-e2e.mjs --variants a[,b,...] [options]",
+    );
   }
   return opts;
 }
@@ -92,7 +94,9 @@ function parseArgs(argv) {
 function parseVariant(name) {
   const [dist, lane = null, ...rest] = name.split(":");
   if (rest.length > 0 || (lane !== null && lane !== "gpu" && lane !== "wasm")) {
-    throw new Error(`Bad variant "${name}": expected <dist> or <dist>:gpu|wasm`);
+    throw new Error(
+      `Bad variant "${name}": expected <dist> or <dist>:gpu|wasm`,
+    );
   }
   return { dist, lane };
 }
@@ -102,7 +106,7 @@ function readDistMeta(name) {
   const dir = join(benchDir, "artifacts", dist);
   if (!existsSync(join(dir, "dist", "index.html"))) {
     throw new Error(
-      `Variant "${name}" has no built dist; run: node src/build-dist.mjs ${name} [--ref <git-ref>]`,
+      `Variant "${name}" has no built dist; run: node src/build-dist.mjs ${dist} [--ref <git-ref>]`,
     );
   }
   return { ...JSON.parse(readFileSync(join(dir, "meta.json"), "utf8")), lane };
@@ -126,11 +130,12 @@ function caseUrl(port, benchCase, lane = null) {
 // Leaflet tile gains the leaflet-tile-loaded class (i.e. its done callback
 // ran and the canvas holds pixels).
 const TILE_TRACKER = `
-  window.__tileBench = { total: 0, loaded: 0, lastLoadedAt: 0 };
+  window.__tileBench = { total: 0, loaded: 0, lastLoadedAt: 0, gpuTiles: 0 };
   new MutationObserver(() => {
     const bench = window.__tileBench;
     const total = document.querySelectorAll(".leaflet-tile").length;
     const loaded = document.querySelectorAll(".leaflet-tile-loaded").length;
+    bench.gpuTiles = document.querySelectorAll('.leaflet-tile-loaded[data-lane="gpu"]').length;
     if (loaded > bench.loaded) bench.lastLoadedAt = performance.now();
     bench.total = total;
     bench.loaded = loaded;
@@ -138,7 +143,10 @@ const TILE_TRACKER = `
 `;
 
 async function measurePass(page, url) {
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: PASS_TIMEOUT_MS });
+  await page.goto(url, {
+    waitUntil: "domcontentloaded",
+    timeout: PASS_TIMEOUT_MS,
+  });
   const deadline = Date.now() + PASS_TIMEOUT_MS;
   let last = { total: 0, loaded: 0, lastLoadedAt: 0 };
   let stableSince = Date.now();
@@ -155,7 +163,11 @@ async function measurePass(page, url) {
     }
     const complete = last.total > 0 && last.loaded >= last.total;
     if (complete && Date.now() - stableSince >= QUIET_MS) {
-      return { ms: last.lastLoadedAt, tileCount: last.total };
+      return {
+        ms: last.lastLoadedAt,
+        tileCount: last.total,
+        gpuTiles: last.gpuTiles,
+      };
     }
     if (Date.now() > deadline) {
       throw new Error(
@@ -186,7 +198,10 @@ function formatComparison(output) {
       if (name !== base) {
         const baseMed = median(baseline.samplesMs);
         const pct = ((med - baseMed) / baseMed) * 100;
-        const threshold = Math.max(3, (200 * (mad(baseline.samplesMs) + spread)) / baseMed);
+        const threshold = Math.max(
+          3,
+          (200 * (mad(baseline.samplesMs) + spread)) / baseMed,
+        );
         delta = `  ${pct >= 0 ? "+" : ""}${pct.toFixed(1)}% vs ${base}${Math.abs(pct) >= threshold ? " *" : ""}`;
         const coldPct = ((v.coldMs - baseline.coldMs) / baseline.coldMs) * 100;
         delta += `  (cold ${coldPct >= 0 ? "+" : ""}${coldPct.toFixed(1)}%)`;
@@ -202,13 +217,18 @@ function formatComparison(output) {
       const baseMed = median(caseResult.variants[base].samplesMs);
       return median(caseResult.variants[name].samplesMs) / baseMed;
     });
-    const geomean = Math.exp(ratios.reduce((a, r) => a + Math.log(r), 0) / ratios.length);
+    const geomean = Math.exp(
+      ratios.reduce((a, r) => a + Math.log(r), 0) / ratios.length,
+    );
     lines.push(
       `\n${name} vs ${base} overall geomean (nav → grid rendered): ${((geomean - 1) * 100).toFixed(1)}%`,
     );
   }
   const sizes = variants
-    .map((name) => `${name} wasm ${(output.meta.variants[name].wasmSize / 1024).toFixed(1)} KiB`)
+    .map(
+      (name) =>
+        `${name} wasm ${(output.meta.variants[name].wasmSize / 1024).toFixed(1)} KiB`,
+    )
     .join(", ");
   lines.push(sizes);
   return lines.join("\n");
@@ -220,7 +240,8 @@ async function main() {
   let cases = corpus.cases;
   if (opts.filter) {
     cases = cases.filter((benchCase) => benchCase.id.includes(opts.filter));
-    if (cases.length === 0) throw new Error(`--filter "${opts.filter}" matched no cases`);
+    if (cases.length === 0)
+      throw new Error(`--filter "${opts.filter}" matched no cases`);
   }
   for (const benchCase of cases) {
     const problems = validateCase(benchCase);
@@ -247,7 +268,7 @@ async function main() {
       // fetches (ipapi.co, github buttons), no network noise. Page-level
       // request interception can't do this — it never sees requests made
       // inside dedicated workers and stalls them instead.
-      '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1',
+      "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
       "--disable-background-timer-throttling",
       "--disable-renderer-backgrounding",
       "--disable-backgrounding-occluded-windows",
@@ -264,7 +285,9 @@ async function main() {
     webglRenderer: gpuReport.webgl?.renderer ?? null,
     disabledByFlag: opts.noGpu,
   };
-  console.log(`GPU: ${gpu.adapter}${gpu.hardware ? " (hardware)" : ""}${opts.noGpu ? " [--no-gpu]" : ""}`);
+  console.log(
+    `GPU: ${gpu.adapter}${gpu.hardware ? " (hardware)" : ""}${opts.noGpu ? " [--no-gpu]" : ""}`,
+  );
   if (!gpu.hardware && !opts.noGpu && !opts.allowNoGpu) {
     await browser.close();
     for (const name of opts.variants) servers[name].server.close();
@@ -283,34 +306,66 @@ async function main() {
   const results = [];
   try {
     for (const benchCase of cases) {
-      console.log(`\n${benchCase.id} (z=${benchCase.zoom}, i=${benchCase.iterations})`);
+      console.log(
+        `\n${benchCase.id} (z=${benchCase.zoom}, i=${benchCase.iterations})`,
+      );
       const perVariant = Object.fromEntries(
-        opts.variants.map((name) => [name, { samplesMs: [], coldMs: 0, tileCounts: new Set() }]),
+        opts.variants.map((name) => [
+          name,
+          { samplesMs: [], coldMs: 0, tileCounts: new Set(), gpuTiles: [] },
+        ]),
       );
 
       // Cold pass: first visit to this origin for perturbation regions the
       // orbit is fresh; for the very first case it is also SW install + first
       // wasm compile.
       for (const name of opts.variants) {
-        const cold = await measurePass(page, caseUrl(servers[name].port, benchCase, variantMetas[name].lane));
+        const cold = await measurePass(
+          page,
+          caseUrl(servers[name].port, benchCase, variantMetas[name].lane),
+        );
         perVariant[name].coldMs = cold.ms;
         perVariant[name].tileCounts.add(cold.tileCount);
-        console.log(`  ${name.padEnd(10)} cold ${cold.ms.toFixed(0)} ms (${cold.tileCount} tiles)`);
+        perVariant[name].gpuTiles.push(cold.gpuTiles);
+        console.log(
+          `  ${name.padEnd(10)} cold ${cold.ms.toFixed(0)} ms (${cold.tileCount} tiles)`,
+        );
       }
 
       for (let i = 0; i < opts.warmup; i++) {
         for (const name of opts.variants) {
-          await measurePass(page, caseUrl(servers[name].port, benchCase, variantMetas[name].lane));
+          await measurePass(
+            page,
+            caseUrl(servers[name].port, benchCase, variantMetas[name].lane),
+          );
         }
       }
 
       for (let round = 0; round < opts.rounds; round++) {
         for (const name of opts.variants) {
-          const pass = await measurePass(page, caseUrl(servers[name].port, benchCase, variantMetas[name].lane));
+          const pass = await measurePass(
+            page,
+            caseUrl(servers[name].port, benchCase, variantMetas[name].lane),
+          );
           perVariant[name].samplesMs.push(pass.ms);
           perVariant[name].tileCounts.add(pass.tileCount);
+          perVariant[name].gpuTiles.push(pass.gpuTiles);
           console.log(
             `  round ${round + 1}/${opts.rounds} ${name.padEnd(10)} ${pass.ms.toFixed(0)} ms`,
+          );
+        }
+      }
+
+      // A :gpu variant whose passes rendered no GPU tile timed wasm: the case
+      // is outside the lane's coverage, or the device failed. Say so rather
+      // than letting it pass as a GPU number.
+      for (const name of opts.variants) {
+        if (
+          variantMetas[name].lane === "gpu" &&
+          Math.max(...perVariant[name].gpuTiles) === 0
+        ) {
+          console.warn(
+            `  WARNING: ${name} rendered no tile through the GPU lane on this case`,
           );
         }
       }
@@ -337,6 +392,7 @@ async function main() {
               samplesMs: perVariant[name].samplesMs,
               median: median(perVariant[name].samplesMs),
               mad: mad(perVariant[name].samplesMs),
+              gpuTiles: perVariant[name].gpuTiles,
             },
           ]),
         ),
@@ -353,7 +409,9 @@ async function main() {
       kind: "e2e",
       chromeVersion,
       gpu,
-      gitSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+      gitSha: execFileSync("git", ["rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).trim(),
       host: `${hostname()} ${platform()}/${arch()} ${cpus()[0]?.model ?? ""}`.trim(),
       cores: cpus().length,
       viewport: opts.viewport,
@@ -371,7 +429,7 @@ async function main() {
     join(
       benchDir,
       "results",
-      `${new Date().toISOString().replace(/[:.]/g, "-")}-e2e-${opts.variants.join("_")}.json`,
+      `${new Date().toISOString().replace(/[:.]/g, "-")}-e2e-${opts.variants.join("_").replace(/:/g, "-")}.json`,
     );
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, JSON.stringify(output, null, 2) + "\n");

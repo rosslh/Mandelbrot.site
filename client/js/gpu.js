@@ -25,15 +25,23 @@ const TILE_SPACE_SCALE = 200 / 128;
 const ESCAPE_RADIUS = 3;
 
 // Finest pixel spacing the f32 kernel covers. Provisional: plain f32 has a
-// 24-bit mantissa, and pixel coordinates near |c| ~ 1 resolve to ~2^-24, so
-// 2^-18 leaves ~6 bits of sub-pixel resolution (about zoom 11 at 200px
-// tiles). To be replaced by a cutoff measured against the anchor.
+// 24-bit mantissa, so pixel coordinates with |c| < 2 resolve to ~2^-23 or
+// better: 2^-18 leaves ~5-6 bits of sub-pixel resolution there (about 4 for
+// |re| in [2, 4)); about zoom 11 at 200px tiles. To be replaced by a cutoff
+// measured against the anchor.
 export const GPU_F32_MIN_PIXEL_SPACING = 2 ** -18;
 
-// Largest iteration budget the lane accepts per tile. Long-running dispatches
-// risk the browser's GPU watchdog (a lost device); until dispatches are split
-// into bounded chunks, heavy budgets stay on wasm.
+// Largest iteration budget and worst-case work (pixels x budget) the lane
+// accepts per tile. Long-running dispatches risk the GPU watchdog, and a
+// GPU-process reset can take every worker's device and the page's canvases
+// with it, so until dispatches are split into bounded chunks, heavy tiles
+// stay on wasm. The kernel has no periodicity check or rect_in_set shortcut,
+// so a fully interior tile costs its whole budget per pixel: 2^32 steps is
+// about a second on an M1 Pro (the probe runs ~5G steps/s). The pixel cap
+// keeps image exports (tall columns) and buffer sizes on wasm too.
 const GPU_MAX_ITERATIONS = 100000;
+const GPU_MAX_WORK = 2 ** 32;
+const GPU_MAX_PIXELS = 512 * 512;
 
 const WORKGROUP = 8;
 
@@ -131,6 +139,9 @@ export function gpuCovers(payload) {
     !coloring.distanceEstimate &&
     !coloring.atomDomain &&
     payload.maxIterations <= GPU_MAX_ITERATIONS &&
+    payload.imageWidth * payload.imageHeight <= GPU_MAX_PIXELS &&
+    payload.imageWidth * payload.imageHeight * payload.maxIterations <=
+      GPU_MAX_WORK &&
     payload.imageWidth > 1 &&
     payload.imageHeight > 1 &&
     pixelSpacing(payload) >= GPU_F32_MIN_PIXEL_SPACING
@@ -195,16 +206,21 @@ export async function createGpuLane({ inject = null } = {}) {
       GPUBufferUsage.COPY_DST,
   });
   // Value and readback buffers are reused across tiles and regrown when a
-  // larger tile arrives; one tile is in flight per worker at a time.
+  // larger tile arrives; one tile is in flight per worker at a time (the
+  // threads pool runs one task per worker). Capacity is recorded only once
+  // the buffers allocated cleanly, so a failed allocation is retried rather
+  // than reused.
   let capacity = 0;
   let valuesBuffer = null;
   let readback = null;
   let bindGroup = null;
-  const ensureCapacity = (pixels) => {
+  const ensureCapacity = async (pixels) => {
     if (pixels <= capacity) return;
     valuesBuffer?.destroy();
     readback?.destroy();
-    capacity = pixels;
+    capacity = 0;
+    device.pushErrorScope("out-of-memory");
+    device.pushErrorScope("validation");
     valuesBuffer = device.createBuffer({
       size: pixels * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
@@ -221,6 +237,15 @@ export async function createGpuLane({ inject = null } = {}) {
         { binding: 2, resource: { buffer: statsBuffer } },
       ],
     });
+    const validationError = await device.popErrorScope();
+    const memoryError = await device.popErrorScope();
+    const allocationError = validationError ?? memoryError;
+    if (allocationError) {
+      throw new Error(
+        `GPU buffer allocation failed: ${allocationError.message}`,
+      );
+    }
+    capacity = pixels;
   };
 
   if (inject === "lost") device.destroy();
@@ -247,7 +272,7 @@ export async function createGpuLane({ inject = null } = {}) {
     const imMax = originIm - tileOffset(bounds.yMin, bounds.zoom, zoomOffset);
     const imMin = originIm - tileOffset(bounds.yMax, bounds.zoom, zoomOffset);
     const pixels = width * height;
-    ensureCapacity(pixels);
+    await ensureCapacity(pixels);
 
     const paramBytes = new ArrayBuffer(48);
     const floats = new Float32Array(paramBytes, 0, 4);

@@ -38,30 +38,27 @@ const browser = await puppeteer.launch({
     "--disable-background-timer-throttling",
     "--disable-renderer-backgrounding",
     "--disable-backgrounding-occluded-windows",
+    ...(process.env.CI ? ["--no-sandbox"] : []),
     ...(noGpu ? ["--disable-gpu"] : []),
   ],
 });
 const pageErrors = [];
+// Worker exceptions and unhandled rejections never reach "pageerror"; Chrome
+// reports them as error-level console messages, which count as errors here
+// (except blocked off-localhost fetches, which every run makes).
+const consoleErrors = [];
 const warnings = [];
 let summary;
 try {
   const page = await browser.newPage();
   await page.setViewport({ width: 1600, height: 900, deviceScaleFactor: 1 });
   page.on("pageerror", (error) => pageErrors.push(String(error).slice(0, 300)));
-  page.on("workercreated", (worker) => {
-    worker.on("console", (message) => {
-      if (
-        message.type() === "warn" ||
-        message.type() === "warning" ||
-        message.type() === "error"
-      ) {
-        warnings.push(`[worker] ${message.text().slice(0, 300)}`);
-      }
-    });
-  });
   page.on("console", (message) => {
-    if (message.type() === "warning" || message.type() === "error") {
-      warnings.push(message.text().slice(0, 200));
+    const text = message.text().slice(0, 300);
+    if (message.type() === "error" && !text.includes("ERR_NAME_NOT_RESOLVED")) {
+      consoleErrors.push(text);
+    } else if (message.type() === "warn" || message.type() === "warning") {
+      warnings.push(text);
     }
   });
   const params = new URLSearchParams({
@@ -120,7 +117,10 @@ const lanes = Object.keys(summary.lanes);
 let ok =
   summary.total > 0 &&
   summary.loaded === summary.total &&
-  pageErrors.length === 0;
+  // Leaflet marks errored tiles loaded too; they carry no data-lane.
+  !summary.lanes.none &&
+  pageErrors.length === 0 &&
+  consoleErrors.length === 0;
 if (expect === "gpu" || expect === "wasm")
   ok &&= lanes.length === 1 && lanes[0] === expect;
 if (expect === "mixed") ok &&= lanes.includes("gpu") && lanes.includes("wasm");
@@ -130,6 +130,7 @@ console.log(
       ok,
       ...summary,
       pageErrors,
+      consoleErrors,
       warnings: [...new Set(warnings)].slice(0, 5),
     },
     null,

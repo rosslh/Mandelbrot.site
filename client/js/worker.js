@@ -190,36 +190,48 @@ const supportsRelaxedSimd = WebAssembly.validate(
     // tiles; any GPU error renders that tile through wasm instead, and a
     // lost device turns the lane off for this worker.
     let gpuLane = null;
+    let gpuCovers = null;
     const configureLane = async ({ lane, inject }) => {
       if (lane !== "gpu") {
         gpuLane = null;
         return "wasm";
       }
       try {
-        const { createGpuLane, gpuCovers } = await import("./gpu.js");
-        const created = await createGpuLane({ inject });
-        gpuLane = { ...created, covers: gpuCovers };
-        // Compile and run the kernel once on a small view, so the first
-        // real tile does not pay the driver's first-dispatch cost.
-        await created.renderValues({
+        const module = await import("./gpu.js");
+        // Kept as the lane object itself: its `usable` getter must stay
+        // live, so it turns false when the device is lost.
+        gpuLane = await module.createGpuLane({ inject });
+        gpuCovers = module.gpuCovers;
+      } catch (gpuError) {
+        console.warn("GPU lane unavailable, using wasm:", gpuError);
+        gpuLane = null;
+        return "wasm";
+      }
+      try {
+        // Compile and run the kernel once on a boundary-crossing view at
+        // the default tile size, so the first real tile neither pays the
+        // driver's first-dispatch cost nor regrows the buffers.
+        await gpuLane.renderValues({
           originRe: "-0.75",
           originIm: "0",
-          bounds: { xMin: 0, xMax: 1, yMin: 0, yMax: 1, zoom: 2 },
+          bounds: { xMin: 2.5, xMax: 3, yMin: 2.4, yMax: 2.9, zoom: 2 },
           zoomOffset: 0,
           maxIterations: 200,
           power: 2,
-          imageWidth: 64,
-          imageHeight: 64,
+          imageWidth: 200,
+          imageHeight: 200,
           smoothColoring: true,
         });
-        return "gpu";
       } catch (gpuError) {
-        console.warn("GPU lane unavailable, using wasm:", gpuError);
-        // A device that initialized but failed its first dispatch is kept
-        // so tiles exercise the per-tile fallback ("lost" injection).
-        if (!gpuLane) return "wasm";
-        return "gpu";
+        // The device initialized but its first dispatch failed. Keep the
+        // lane: tiles still try it and fall back per tile (this is the
+        // "lost" injection's path), and a lost device turns it off.
+        console.warn(
+          "GPU lane warmup failed; tiles fall back per tile:",
+          gpuError,
+        );
       }
+      return "gpu";
     };
 
     const getGpuTile = async (params) => {
@@ -236,7 +248,7 @@ const supportsRelaxedSimd = WebAssembly.validate(
     };
 
     const getTile = async (params) => {
-      if (gpuLane && gpuLane.usable && gpuLane.covers(params)) {
+      if (gpuLane && gpuLane.usable && gpuCovers(params)) {
         try {
           return await getGpuTile(params);
         } catch (gpuError) {
