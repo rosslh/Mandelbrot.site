@@ -17,15 +17,13 @@
 // one, so a runner can refuse to time a GPU variant on it.
 //
 // Usage: node src/gpu-probe.mjs [--json] [-- <extra chrome flags>]
+//
+// run-e2e.mjs imports probeGpu() and runs the same probe inside the browser
+// it times with, so every e2e result records the adapter it ran on.
 
+import { pathToFileURL } from "node:url";
 import puppeteer from "puppeteer";
 import { startServer } from "./server.mjs";
-
-const argv = process.argv.slice(2);
-const dashIndex = argv.indexOf("--");
-const extraFlags = dashIndex >= 0 ? argv.slice(dashIndex + 1) : [];
-const ownArgs = dashIndex >= 0 ? argv.slice(0, dashIndex) : argv;
-const asJson = ownArgs.includes("--json");
 
 const PROBE = async () => {
   const out = { webgpu: null, webgl: null, dispatch: null };
@@ -141,62 +139,102 @@ const PROBE = async () => {
   return out;
 };
 
-const server = await startServer();
-const browser = await puppeteer.launch({
-  args: [
-    "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
-    "--disable-background-timer-throttling",
-    "--disable-renderer-backgrounding",
-    "--disable-backgrounding-occluded-windows",
-    ...(process.env.CI ? ["--no-sandbox"] : []),
-    ...extraFlags,
-  ],
-});
+const SOFTWARE = /swiftshader|llvmpipe|software|basic render/i;
 
-let report;
-try {
+// True when the report shows a hardware WebGPU adapter (not a fallback
+// adapter, not a software rasterizer behind WebGPU or WebGL).
+export function isHardwareWebGPU(report) {
+  const gpu = report.webgpu;
+  return (
+    gpu?.available === true &&
+    !gpu.isFallbackAdapter &&
+    !SOFTWARE.test(`${gpu.vendor} ${gpu.architecture} ${gpu.description}`) &&
+    !SOFTWARE.test(report.webgl?.renderer ?? "")
+  );
+}
+
+// Runs the probe in a fresh page of an already-launched browser, on its own
+// localhost origin (the bench page server), so it shares no cache or
+// service worker with the origins a runner times. Closes the page and the
+// server before returning.
+export async function probeGpu(browser) {
+  const server = await startServer();
   const page = await browser.newPage();
-  await page.goto(`http://127.0.0.1:${server.port}/bench/page/index.html`);
-  report = await page.evaluate(PROBE);
-  report.chrome = await browser.version();
-  report.extraFlags = extraFlags;
-} finally {
-  await browser.close();
-  server.server.close();
+  try {
+    await page.goto(`http://127.0.0.1:${server.port}/bench/page/index.html`);
+    const report = await page.evaluate(PROBE);
+    report.chrome = await browser.version();
+    report.hardwareWebGPU = isHardwareWebGPU(report);
+    return report;
+  } finally {
+    await page.close();
+    server.server.close();
+  }
 }
 
-const software = /swiftshader|llvmpipe|software|basic render/i;
-const gpu = report.webgpu;
-const hardware =
-  gpu?.available === true &&
-  !gpu.isFallbackAdapter &&
-  !software.test(`${gpu.vendor} ${gpu.architecture} ${gpu.description}`) &&
-  !software.test(report.webgl?.renderer ?? "");
-report.hardwareWebGPU = hardware;
-
-if (asJson) {
-  console.log(JSON.stringify(report, null, 2));
-} else {
-  console.log(`Chrome: ${report.chrome}${extraFlags.length ? ` (extra flags: ${extraFlags.join(" ")})` : ""}`);
-  console.log(`WebGL2 renderer: ${report.webgl?.renderer ?? report.webgl?.error ?? "unavailable"}`);
-  if (!gpu) console.log("WebGPU: navigator.gpu missing");
-  else if (!gpu.available) console.log("WebGPU: no adapter");
-  else {
-    console.log(
-      `WebGPU adapter: ${gpu.vendor} / ${gpu.architecture}${gpu.description ? ` (${gpu.description})` : ""}` +
-        `${gpu.isFallbackAdapter ? " [FALLBACK ADAPTER]" : ""}`,
-    );
-    console.log(`  features: ${gpu.features.join(", ") || "(none)"}`);
-    console.log(`  limits: ${JSON.stringify(gpu.limits)}`);
-    console.log(`  WebGPU in workers: ${gpu.workerAvailable}`);
-  }
-  if (report.dispatch) {
-    const d = report.dispatch;
-    console.log(
-      `Dispatch (${d.pixels} px, ${d.maxIterations} max iter, readback incl.): first ${d.firstMs.toFixed(1)} ms, ` +
-        `median ${d.medianMs.toFixed(2)} ms, iteration sum ${d.iterationSum}`,
-    );
-  }
-  console.log(hardware ? "OK: hardware WebGPU adapter." : "NOT OK: no hardware WebGPU adapter; do not time GPU variants.");
+// One-line adapter summary for logs and result metadata.
+export function describeAdapter(report) {
+  const gpu = report.webgpu;
+  if (!gpu) return "navigator.gpu missing";
+  if (!gpu.available) return "no adapter";
+  return (
+    `${gpu.vendor} / ${gpu.architecture}${gpu.description ? ` (${gpu.description})` : ""}` +
+    `${gpu.isFallbackAdapter ? " [FALLBACK ADAPTER]" : ""}`
+  );
 }
-process.exit(hardware ? 0 : 1);
+
+async function main() {
+  const argv = process.argv.slice(2);
+  const dashIndex = argv.indexOf("--");
+  const extraFlags = dashIndex >= 0 ? argv.slice(dashIndex + 1) : [];
+  const ownArgs = dashIndex >= 0 ? argv.slice(0, dashIndex) : argv;
+  const asJson = ownArgs.includes("--json");
+
+  const browser = await puppeteer.launch({
+    args: [
+      "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
+      "--disable-background-timer-throttling",
+      "--disable-renderer-backgrounding",
+      "--disable-backgrounding-occluded-windows",
+      ...(process.env.CI ? ["--no-sandbox"] : []),
+      ...extraFlags,
+    ],
+  });
+
+  let report;
+  try {
+    report = await probeGpu(browser);
+    report.extraFlags = extraFlags;
+  } finally {
+    await browser.close();
+  }
+
+  const gpu = report.webgpu;
+  const hardware = report.hardwareWebGPU;
+  if (asJson) {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    console.log(`Chrome: ${report.chrome}${extraFlags.length ? ` (extra flags: ${extraFlags.join(" ")})` : ""}`);
+    console.log(`WebGL2 renderer: ${report.webgl?.renderer ?? report.webgl?.error ?? "unavailable"}`);
+    if (!gpu || !gpu.available) console.log(`WebGPU: ${describeAdapter(report)}`);
+    else {
+      console.log(`WebGPU adapter: ${describeAdapter(report)}`);
+      console.log(`  features: ${gpu.features.join(", ") || "(none)"}`);
+      console.log(`  limits: ${JSON.stringify(gpu.limits)}`);
+      console.log(`  WebGPU in workers: ${gpu.workerAvailable}`);
+    }
+    if (report.dispatch) {
+      const d = report.dispatch;
+      console.log(
+        `Dispatch (${d.pixels} px, ${d.maxIterations} max iter, readback incl.): first ${d.firstMs.toFixed(1)} ms, ` +
+          `median ${d.medianMs.toFixed(2)} ms, iteration sum ${d.iterationSum}`,
+      );
+    }
+    console.log(hardware ? "OK: hardware WebGPU adapter." : "NOT OK: no hardware WebGPU adapter; do not time GPU variants.");
+  }
+  process.exit(hardware ? 0 : 1);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}

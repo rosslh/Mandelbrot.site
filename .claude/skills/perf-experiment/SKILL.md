@@ -605,8 +605,14 @@ prerequisites first. These ship incrementally under the "WebGPU lane"
 policy above. Replace these estimates with measurements as items run.
 
 - **G1. GPU-capable harness (prerequisite for every GPU verdict).**
-  - run-e2e: record the gpu-probe adapter in the results meta and refuse
-    to time when the probe fails;
+  - ~~run-e2e: record the gpu-probe adapter in the results meta and refuse
+    to time when the probe fails~~ **done 2026-11-13**: `meta.gpu`
+    (adapter, hardware, worker availability); refuses without a hardware
+    adapter; `--no-gpu` (Chrome `--disable-gpu`) times the fallback lane,
+    `--allow-no-gpu` times anyway. gpu-probe.mjs exports `probeGpu()`.
+  - the client-side items below (forced-lane switch, lane marker, failure
+    injection) need lane code to switch, so they land with G2's first
+    (turned-off) ship rather than on their own;
   - a forced-lane switch for A/B runs and correctness checks, so one
     build can be made to render all-wasm or GPU-where-covered (a build
     define or a dev-only query parameter that production ignores —
@@ -785,10 +791,11 @@ now run fused bare recurrences in the fast lane; no rounding-lane
 candidates remain in the direct tier.
 
 Since then the client was rebuilt on Preact with signal-based state
-(2806422, after the last e2e verdict) and production moved to rustc
-1.99 (local now matches). No e2e ranking has been taken on that client,
-so the next direct-tier targets come from discovery (startup, dispatch,
-main-thread work while tiles stream), not from this list.
+(2806422), and production builds with the latest stable rustc (1.100.0
+since 2026-11-09; local matches as of 2026-11-13). The 2026-11-09..12
+startup experiments took their e2e verdicts on that client; the next
+direct-tier targets come from discovery (startup, dispatch, main-thread
+work while tiles stream), not from this list.
 
 1. z0 whole-set small-tile wave/gather overhead — micro (accepted
    +0.6 ms/tile from the Mariani ship); only if whole-set loads ever

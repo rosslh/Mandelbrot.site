@@ -31,7 +31,10 @@ Run from this directory (`npm install` first):
 
 `src/run-e2e.mjs` measures end-to-end page-load-to-rendered time (the
 standard test for anything touching startup), and `src/run-grid.mjs` runs
-full-grid regression workloads.
+full-grid regression workloads. run-e2e runs the gpu-probe in its own
+browser first, records the adapter in the results meta, and refuses to
+time without a hardware WebGPU adapter; `--no-gpu` times the wasm fallback
+lane (Chrome `--disable-gpu`), and `--allow-no-gpu` times anyway.
 
 ## Corpus
 

@@ -17,6 +17,15 @@
 //   node src/run-e2e.mjs --variants old,head
 //     [--corpus corpus/grid-regression.json] [--filter <id-substring>]
 //     [--viewport 1600x900] [--rounds 5] [--warmup 1] [--out results/....json]
+//     [--no-gpu | --allow-no-gpu]
+//
+// GPU check: before timing, the gpu-probe (src/gpu-probe.mjs) runs inside
+// the same browser on a separate origin, and the adapter it found is
+// recorded in the results meta. The runner refuses to time when the probe
+// finds no hardware WebGPU adapter (a software or fallback adapter makes
+// GPU-lane numbers meaningless while still "working"). --no-gpu launches
+// Chrome with --disable-gpu instead (no adapter: the wasm fallback lane);
+// --allow-no-gpu times anyway and records what the probe found.
 //
 // Per case x variant: 1 cold pass (first visit on a fresh origin: service
 // worker install, uncached wasm compile), warmup passes, then measured passes
@@ -31,6 +40,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import puppeteer from "puppeteer";
 import { validateCase } from "./normalize.mjs";
+import { describeAdapter, probeGpu } from "./gpu-probe.mjs";
 import { startServer } from "./server.mjs";
 import { median, mad } from "./stats.mjs";
 
@@ -48,6 +58,8 @@ function parseArgs(argv) {
     rounds: 5,
     warmup: 1,
     out: null,
+    noGpu: false,
+    allowNoGpu: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -60,6 +72,8 @@ function parseArgs(argv) {
     } else if (arg === "--rounds") opts.rounds = Number(argv[++i]);
     else if (arg === "--warmup") opts.warmup = Number(argv[++i]);
     else if (arg === "--out") opts.out = resolve(argv[++i]);
+    else if (arg === "--no-gpu") opts.noGpu = true;
+    else if (arg === "--allow-no-gpu") opts.allowNoGpu = true;
     else throw new Error(`Unexpected argument: ${arg}`);
   }
   if (!opts.variants || opts.variants.length === 0) {
@@ -140,7 +154,8 @@ function formatComparison(output) {
   const base = variants[0];
   lines.push(
     `End-to-end: navigation → last tile done, real client dist in Chrome, ` +
-      `viewport ${output.meta.viewport.width}x${output.meta.viewport.height} ` +
+      `viewport ${output.meta.viewport.width}x${output.meta.viewport.height}, ` +
+      `GPU ${output.meta.gpu?.adapter ?? "not recorded"}${output.meta.gpu?.disabledByFlag ? " (--no-gpu)" : ""} ` +
       `(complete-build comparison: includes client JS and service worker differences)`,
   );
   for (const caseResult of output.results) {
@@ -220,8 +235,28 @@ async function main() {
       "--disable-renderer-backgrounding",
       "--disable-backgrounding-occluded-windows",
       ...(process.env.CI ? ["--no-sandbox"] : []),
+      ...(opts.noGpu ? ["--disable-gpu"] : []),
     ],
   });
+
+  const gpuReport = await probeGpu(browser);
+  const gpu = {
+    hardware: gpuReport.hardwareWebGPU,
+    adapter: describeAdapter(gpuReport),
+    workerAvailable: gpuReport.webgpu?.workerAvailable ?? false,
+    webglRenderer: gpuReport.webgl?.renderer ?? null,
+    disabledByFlag: opts.noGpu,
+  };
+  console.log(`GPU: ${gpu.adapter}${gpu.hardware ? " (hardware)" : ""}${opts.noGpu ? " [--no-gpu]" : ""}`);
+  if (!gpu.hardware && !opts.noGpu && !opts.allowNoGpu) {
+    await browser.close();
+    for (const name of opts.variants) servers[name].server.close();
+    throw new Error(
+      "No hardware WebGPU adapter in the benchmark Chrome (see node src/gpu-probe.mjs); refusing to time. " +
+        "Pass --no-gpu to time the wasm fallback lane, or --allow-no-gpu to time anyway.",
+    );
+  }
+
   const page = await browser.newPage();
   await page.setViewport({ ...opts.viewport, deviceScaleFactor: 1 });
   await page.evaluateOnNewDocument(TILE_TRACKER);
@@ -300,6 +335,7 @@ async function main() {
       date: new Date().toISOString(),
       kind: "e2e",
       chromeVersion,
+      gpu,
       gitSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
       host: `${hostname()} ${platform()}/${arch()} ${cpus()[0]?.model ?? ""}`.trim(),
       cores: cpus().length,
