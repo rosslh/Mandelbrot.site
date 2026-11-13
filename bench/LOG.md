@@ -2892,3 +2892,58 @@ the code cache).
 **Harness note.** Ad-hoc e2e corpora work via `run-e2e.mjs --corpus <file>`
 with grid-regression's case shape. The stress set's four synthetic light cases
 are a cheap guard for any future change to light-view startup.
+
+## 2026-11-12 — DIRECTIVE (Ross): WebGPU rendering lane becomes the performance focus
+
+Decisions (Ross, 2026-11-12):
+
+- **Role:** the GPU renders final tiles where a hardware WebGPU adapter is
+  available, gated by the statistical-equivalence tier against the pinned
+  anchor (as the relaxed-FMA lane is). Not a preview layer. The wasm
+  fallback lane stays byte-exact and keeps tracking the anchor.
+- **API:** WebGPU compute, falling back to the existing dual wasm build
+  (per tile, on any GPU error or uncovered request). No WebGL2 lane.
+- **Priority:** GPU items outrank wasm items; the 2026-07-09 direct-f64
+  focus directive now governs only the wasm lanes, which become the
+  fallback and regression guards.
+- **Shipping (Ross, same day):** GPU work may keep shipping to `main`
+  without a hold, as long as the deployed site always works well and is
+  not buggy. GPU-lane ships inside this policy are pre-approved, gated by
+  improve-performance's "GPU ship gates":
+  - both lanes pass the correctness and verify-e2e checks;
+  - a no-adapter run and an injected GPU failure both fall back to wasm
+    cleanly;
+  - uncovered views stay byte-identical and as fast;
+  - after deploy, the live smoke test passes with and without a GPU.
+
+  Lane code lands turned off, then turns on one view class at a time.
+  Anchor or budget changes, wasm-lane output changes, new dependencies
+  and taxes are still held.
+
+Re-opened by the changed criteria (output policy and compute substrate):
+the "grid-z47-i50000 ~45 s is irreducible exact work" verdict, which was a
+byte-exact CPU verdict. All other settled verdicts stand.
+
+Machine probe (new `src/gpu-probe.mjs`, Chrome for Testing 136.0.7103.94,
+puppeteer default headless, same flags as run-e2e): hardware adapter
+`apple / metal-3` (M1 Pro; WebGL2 renderer "ANGLE Metal Renderer: Apple
+M1 Pro"), WebGPU available inside dedicated workers, features include
+`shader-f16`, `subgroups` and `timestamp-query`. One 256×256 f32 escape
+dispatch (max 1000 iterations, 16.3M iterations total, readback included):
+first 4.9 ms, median 3.0 ms. No GPU timing flags are needed in headless
+Chrome on this machine. Chrome `--disable-gpu` gives the no-adapter case
+(navigator.gpu present, requestAdapter() null), now `smoke-live.mjs
+--no-gpu`; `--disable-features=WebGPU`, `--disable-webgpu` and
+`--disable-blink-features=WebGPU` leave WebGPU on in Chrome 136. The live
+site passed the smoke test both ways (54 tiles, no page errors).
+
+Traffic by zoom (events export, deduped on re/im/zoom/iterations, 22,748
+views): z ≤ 12 35.4%, z13–20 29.5%, z21–38 19.9%, z39–45 5.6%, z ≥ 46
+9.5%. Plain f32 covers only the first bucket (light, startup-dominated
+views); the heavy cases (z28 ~3 s, z36–46, the pf64 grids up to ~45 s)
+need GPU perturbation or double-single arithmetic.
+
+Backlog: perf-experiment gains a "WebGPU lane" section (precision table,
+measurement rules, the response contract a GPU kernel must reproduce) and
+GPU items G1–G6 at the top of the backlog, starting with G1: make the
+harness and correctness gates GPU-capable, which blocks every GPU verdict.

@@ -1,9 +1,9 @@
 ---
 name: perf-experiment
-description: Run WebAssembly-in-Chrome performance experiments for Mandelbrot tile generation - build wasm variants with alternative compiler/optimizer flags, benchmark them against a baseline across real and synthetic workloads, verify correctness, and apply measured winners to the production config. Use when asked to optimize tile generation, wasm performance, or run/interpret benchmarks.
+description: Run performance experiments for Mandelbrot tile generation in Chrome - the WebGPU rendering lane (the active focus) and the WebAssembly lanes it falls back to; build variants (shader/kernel changes, alternative compiler/optimizer flags, client changes), benchmark them against a baseline across real and synthetic workloads, verify correctness, and apply measured winners to the production config. Use when asked to optimize tile generation, GPU or wasm performance, or run/interpret benchmarks.
 ---
 
-# Mandelbrot wasm performance experiments
+# Mandelbrot tile-rendering performance experiments (WebGPU and wasm)
 
 All benchmarking lives in `bench/` (own package.json; run `npm ci` there once).
 There are three runners, in decreasing order of realism:
@@ -77,6 +77,114 @@ tier is unaffected.
   Safari) only selects the faster artifact - do not add wasm features
   beyond these without flagging the compat change.
 
+## WebGPU lane — the active focus (2026-11-12 directive)
+
+Decided by Ross 2026-11-12 (LOG entry of the same date). The wasm lanes have
+had their byte-exact headroom mined (see the settled verdicts below); the
+next large wins are expected from rendering tiles on the GPU.
+
+- **Role: final tiles, not previews.** Where a hardware WebGPU adapter is
+  available, the GPU renders the tile the user keeps. Its output is judged
+  by the **statistical-equivalence tier against the pinned anchor**
+  (`--statistical`, same budgets as the relaxed-FMA lane); it can never be
+  byte-exact (WGSL has no f64, and shader compilers may contract or
+  reorder float ops differently per driver). The wasm fallback lane stays
+  byte-exact, and the anchor and blessed enrich hashes keep tracking it.
+- **API: WebGPU compute, wasm fallback.** No WebGL2 lane unless a later
+  decision adds one. Detect in the worker (`navigator.gpu`, then
+  `requestAdapter()`; treat `adapter.info.isFallbackAdapter` and a
+  failed/lost device as "no GPU"), and fall back to today's wasm path
+  per tile on any GPU error — a GPU failure must never cost the user a
+  tile. WebGPU works in dedicated workers in Chrome (verified by
+  `gpu-probe.mjs`), so the lane can live beside `render_tile` in
+  client/js/worker.js. Browsers without WebGPU (and every view the GPU
+  lane does not cover) keep the current dual wasm build unchanged.
+- **Priority: GPU items outrank wasm items.** The 2026-07-09 direct-f64
+  focus directive is superseded: the wasm tiers become the fallback lane
+  and regression guards. A wasm change still ships on its merits, but the
+  backlog's top items are GPU items.
+- **GPU work ships to `main` incrementally, and the live site must keep
+  working.** Ross pre-approved GPU-lane ships that stay inside this policy
+  (2026-11-12), so they are not held. Each must pass improve-performance's
+  "GPU ship gates", including both lanes, an injected GPU failure, and the
+  two-lane live smoke test after deploy. Land lane code turned off first,
+  then turn it on one view class at a time. That keeps every step small
+  enough to verify and to revert. Anything outside the policy (anchor or
+  budget changes, a wasm-lane output change, a new dependency, a tax) is
+  still held.
+
+### Precision and pathway coverage
+
+WGSL has f32 (and f16 behind `shader-f16`), no f64. Pixel spacing at the
+corpus-default 200px tiles is about 2^-(zoom+7), so (rough guides, to be
+replaced by measured thresholds — never ship a cutoff that was not
+measured against the anchor):
+
+| technique | covers about | notes |
+|---|---|---|
+| plain f32 direct | zoom ≲ 12 | 24-bit mantissa; light views, startup-dominated |
+| double-single (df32) direct | zoom ≲ 35–40 | ~2x f32 ops per op, ~48-bit mantissa (< f64's 53) |
+| f32 perturbation (deltas on GPU, reference orbit from wasm) | zoom ≳ 13 up to ~120 | rebasing (Zhuoran) for glitches; f32 exponent range ends near 2^-126 |
+| rescaled/extended-exponent deltas | deeper | float-exp analogue; traffic-gated like the z400+ item |
+
+The reference orbit already exists in the wasm (perturbation.rs, cached
+per origin/exponent/precision); a GPU perturbation lane uploads it as a
+storage buffer rather than reimplementing bignum math in a shader.
+Deduped share/save views by zoom (events export, 2026-11-12; 22,748
+distinct re/im/zoom/iterations): z ≤ 12 35%, z13–20 30%, z21–38 20%,
+z39–45 6%, z ≥ 46 9.5%. The heavy absolute-time cases are z28 (direct,
+~3 s), z36–z46 and the pf64 grids (grid-z47-i50000 ~45 s): those are
+where a GPU kernel can save seconds, so rank by them, not by view share.
+
+**Re-opened by this directive (criteria changed: output policy and compute
+substrate):** "grid-z47-i50000's ~45 s is irreducible exact work" was a
+byte-exact CPU verdict; it does not bind a statistically gated GPU lane.
+BLA/series approximation stay settled negative on the CPU, but are worth a
+fresh look on the GPU only if plain GPU perturbation leaves deep heavies
+slow. Every other settled verdict stands.
+
+### What the GPU lane must reproduce
+
+A tile response is more than RGBA: `includeValues` returns the smoothed
+escape values the histogram, recolor pass, PointTooltip and image export
+use; coloring methods (smooth/non-smooth, distance estimate, atom domain),
+multibrot exponents, supersampling and palette settings all change what
+`render_tile` produces (client/js/protocol.ts). A GPU kernel may cover a
+subset — route uncovered requests to wasm explicitly, and test that the
+routing is right — but whatever it covers must match the wasm contract,
+including the tier reported to tierOverlay.
+
+### Measuring GPU work (rules on top of the wasm rules)
+
+- **Confirm real hardware before every GPU timing run:** `node
+  src/gpu-probe.mjs` (from `bench/`) must exit 0. Headless Chrome can fall
+  back to SwiftShader or a fallback adapter that still "works"; numbers
+  from it are void. Record the adapter line (e.g. `apple / metal-3`, M1
+  Pro) in the LOG entry. A/A pairs remain the noise gate; GPU work from
+  other processes (simulators, video) shows up there.
+- **Time to completion, not submission.** A tile is done when its pixels
+  are on the canvas: readback (`mapAsync`) or a canvas present must be
+  inside the measured span. `queue.submit` returning proves nothing.
+- **Count the GPU's cold costs.** Adapter/device creation, shader-module
+  compile and pipeline creation are the GPU's tier-up: measure them in the
+  e2e cold pass, and warm them at pool spawn (the standing warmup rule
+  applies — conditional on the view when they cost light loads).
+- **One GPU, many workers.** Seven workers submitting to one device
+  contend; measure whether one GPU-owning worker (or the main thread with
+  OffscreenCanvas) beats per-worker devices before building on either.
+- **One machine's GPU is not the population.** The bench runs on one Apple
+  GPU; output and speed differ on other vendors. State that limit in every
+  GPU LOG entry, and design kernels that do not depend on driver-specific
+  float behaviour (no reliance on FMA contraction either way).
+- The wasm-level runners (run.mjs, run-grid.mjs) and the correctness tools
+  (pixel-check, validate, enrich) only load wasm artifacts today. Teaching
+  them to render through a GPU variant is backlog item G1 and blocks every
+  GPU verdict; until then a GPU prototype is measured only through
+  run-e2e and ad-hoc probes.
+- client/js/worker.js is plain JS (not type-checked), so GPU code there
+  needs no type package; TypeScript 5.9's lib.dom has no WebGPU types, and
+  adding `@webgpu/types` is a new dependency (held for Ross).
+
 ## Workflow
 
 Iterate with the wasm-level runners, then confirm with the standard e2e test:
@@ -146,7 +254,11 @@ A small regression on a millisecond-scale case is an acceptable price for
 seconds off a heavyweight case — say so explicitly in the log rather than
 letting a geomean average it away.
 
-**Focus directive (2026-07-09, user): prioritize the direct (plain-f64)
+**Focus directive (2026-11-12, Ross): the WebGPU lane comes first** (see
+"WebGPU lane" above). The 2026-07-09 directive below now governs only the
+wasm lanes, which are the fallback and regression guards.
+
+**Former focus directive (2026-07-09, user): prioritize the direct (plain-f64)
 pathway.** It serves ~91% of real views (16,644 of 18,370 deduped export
 views) and, after the 2026-07-07/09 deep-zoom ships, it is where the
 un-mined headroom is: pick direct-tier targets first, treat the deep tiers
@@ -486,7 +598,61 @@ requires an explicit output-policy decision (perceptual-equivalence gate
 instead of byte-exactness), taken deliberately by the user, not as a side
 effect of an experiment.
 
-### Direct (f64) tier — the active focus (2026-07-09 directive)
+### WebGPU lane — the active focus (2026-11-12 directive)
+
+Ranked by the absolute time each could save on the slowest e2e cases,
+prerequisites first. These ship incrementally under the "WebGPU lane"
+policy above. Replace these estimates with measurements as items run.
+
+- **G1. GPU-capable harness (prerequisite for every GPU verdict).**
+  - run-e2e: record the gpu-probe adapter in the results meta and refuse
+    to time when the probe fails;
+  - a forced-lane switch for A/B runs and correctness checks, so one
+    build can be made to render all-wasm or GPU-where-covered (a build
+    define or a dev-only query parameter that production ignores —
+    never a user-visible setting);
+  - pixel-check / validate / enrich `--statistical`: render corpus cases
+    through the GPU lane (via the built client or a page that loads the
+    shader module) and diff the values buffer against the anchor;
+  - a GPU A/A check: two runs of one GPU build must be identical on this
+    machine, or the gate cannot tell kernel changes from GPU
+    nondeterminism;
+  - the safety hooks the GPU ship gates rely on: an observable marker of
+    which lane rendered a tile (for the live smoke test), a test-build
+    way to inject a GPU failure (device lost, invalid shader), and
+    smoke-live.mjs checking the marker. `smoke-live.mjs --no-gpu`
+    (Chrome `--disable-gpu`: no adapter) already covers the fallback
+    lane. Chrome 136's `--disable-features=WebGPU`, `--disable-webgpu`
+    and `--disable-blink-features=WebGPU` do not hide WebGPU, so don't
+    rely on them.
+- **G2. Lane skeleton + f32 direct quadratic kernel (end-to-end proof).**
+  - adapter/device per worker vs one GPU owner (measure, see the rules
+    above);
+  - compute pass writing escape values, readback, existing wasm coloring
+    of the returned values (or a shader coloring pass, measured);
+  - warmup at pool spawn, per-tile wasm fallback on any GPU error.
+  Covers only shallow views (z ≲ 12, 35% of views but ms-scale tiles), so
+  the win, if any, is small; its job is to measure the lane's fixed costs
+  (device creation, pipeline compile, submit + readback per tile) against
+  the ~190 ms per-load dispatch floor and the light grids (grid-z20). Find
+  the measured f32 precision cutoff against the anchor here.
+- **G3. GPU perturbation, quadratic (the big one).** Reference orbit from
+  the existing wasm orbit code uploaded as a storage buffer; f32 pixel
+  deltas with rebasing; covers z ≳ 13 into the pf64 range. Targets:
+  grid-z28-i50000 (~3 s), z36-i51200, z46, grid-z47-i50000 (~45 s),
+  grid-z48-i48000, z48-i20k. Compare against a df32 direct kernel for the
+  z13–40 range before committing to either there. Interior-heavy tiles:
+  check whether brute force on the GPU beats wasm's Mariani–Silver fills;
+  if not, keep fills on the CPU or port the rectangle test.
+- **G4. Multibrot exponents on the GPU** (grid-z30-e6, the e52 view): the
+  general-exponent step, direct and perturbation. After G3.
+- **G5. Deep tiers (float-exp, z ≥ 250).** Extended-exponent or rescaled
+  deltas; traffic-gated like the wasm z400+ item.
+- **G6. Shader-side coloring and direct canvas present.** Skip the values
+  readback when `includeValues` is off; only once G2/G3 show readback or
+  wasm coloring in the profile.
+
+### Direct (f64) wasm tier — fallback lane and regression guard (was the focus under the 2026-07-09 directive)
 
 Item #1 (direct multibrot modernization) **shipped 2026-07-10** — see the
 LOG entry: sqrt drop + `stream_escape_general` (powu-exact SIMD, fused
@@ -639,7 +805,7 @@ flip-class, escalation-only. Smooth-coloring/post-processing math now
 has a sanctioned lane but stays closed on absolute-time grounds
 (~2.2 ms/tile).
 
-### Deep tiers — deprioritized under the f64 focus directive (status unchanged)
+### Deep wasm tiers — regression guards (GPU coverage of these depths is G3/G5 above)
 
 - Ultra-deep small-mode cost: at effective zoom ≳ 400 the hybrid's
   ComplexExp phase dominates again (syn-fexp-z500-needle −58% not −85%;

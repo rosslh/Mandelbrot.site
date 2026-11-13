@@ -25,6 +25,9 @@ Run from this directory (`npm install` first):
   matches the case's externally verified pixel expectation. Rust twins of
   these cases live in `mandelbrot/src/perturbation_test.rs`.
 - `npm run ingest`: turn exported analytics rows into corpus cases.
+- `npm run gpu-probe`: report the WebGPU adapter and WebGL renderer the
+  benchmark Chrome gets, and time one compute dispatch. Exits non-zero on a
+  software or fallback adapter; run it before any GPU timing.
 
 `src/run-e2e.mjs` measures end-to-end page-load-to-rendered time (the
 standard test for anything touching startup), and `src/run-grid.mjs` runs

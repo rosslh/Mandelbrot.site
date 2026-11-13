@@ -6,7 +6,12 @@
 // spawns), so the visit sends no analytics and stays out of the real-view data the benchmark
 // corpus is built from.
 //
-//   node .claude/skills/improve-performance/smoke-live.mjs [url]   (default https://mandelbrot.site/)
+//   node .claude/skills/improve-performance/smoke-live.mjs [--no-gpu] [url]
+//     (default url https://mandelbrot.site/)
+//
+// --no-gpu launches Chrome with --disable-gpu: navigator.gpu still exists but requestAdapter()
+// returns null, the "no usable GPU" case, so the run exercises the wasm fallback lane. Without
+// it, headless Chrome on this machine gets the hardware WebGPU adapter (bench/src/gpu-probe.mjs).
 //
 // Exit 0 with a JSON summary when at least MIN_TILES tiles finished and no page error fired;
 // exit 1 otherwise.
@@ -16,7 +21,9 @@ import { createRequire } from 'node:module';
 const require = createRequire(new URL('../../../bench/package.json', import.meta.url));
 const puppeteer = require('puppeteer');
 
-const url = process.argv[2] ?? 'https://mandelbrot.site/';
+const args = process.argv.slice(2);
+const noGpu = args.includes('--no-gpu');
+const url = args.find((arg) => !arg.startsWith('--')) ?? 'https://mandelbrot.site/';
 const host = new URL(url).hostname;
 const MIN_TILES = 8;
 const QUIET_MS = 2500; // the same "grid is done" rule as bench/src/run-e2e.mjs
@@ -24,7 +31,10 @@ const TIMEOUT_MS = 90_000;
 
 const browser = await puppeteer.launch({
   headless: true,
-  args: [`--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE ${host}, EXCLUDE www.mandelbrot.site, EXCLUDE mandelbrot.site`],
+  args: [
+    `--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE ${host}, EXCLUDE www.mandelbrot.site, EXCLUDE mandelbrot.site`,
+    ...(noGpu ? ['--disable-gpu'] : []),
+  ],
 });
 const page = await browser.newPage();
 await page.setViewport({ width: 1600, height: 900 });
@@ -49,5 +59,5 @@ const elapsedMs = Date.now() - started;
 await browser.close();
 
 const ok = tiles >= MIN_TILES && pageErrors.length === 0;
-console.log(JSON.stringify({ ok, url, tiles_loaded: tiles, elapsed_ms: elapsedMs, page_errors: pageErrors }, null, 2));
+console.log(JSON.stringify({ ok, url, gpu: !noGpu, tiles_loaded: tiles, elapsed_ms: elapsedMs, page_errors: pageErrors }, null, 2));
 process.exit(ok ? 0 : 1);

@@ -9,7 +9,8 @@
     "verify-e2e": "node src/verify-e2e.mjs",
     "compare": "node src/compare.mjs",
     "pixel-check": "node src/pixel-check.mjs",
-    "ingest": "node src/ingest.mjs"
+    "ingest": "node src/ingest.mjs",
+    "gpu-probe": "node src/gpu-probe.mjs"
   },
   "devDependencies": {
     "puppeteer": "24.9.0",

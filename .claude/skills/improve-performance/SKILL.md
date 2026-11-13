@@ -1,7 +1,7 @@
 ---
 name: improve-performance
 description: "Make Mandelbrot.site measurably faster, one experiment per run: finish an experiment already in progress, take the top item of the perf-experiment backlog, or, when the backlog is spent, measure where real views spend their time and add new ranked items. Runs the experiment through the perf-experiment harness and gates, ships a winner to main (which deploys) only after it reproduces on a quiet machine, and records every result in bench/LOG.md. Pass 'routine' when a schedule runs it: trade-offs that need Ross are then held, not shipped; run manually, it first puts held items to him."
-argument-hint: "'routine' when run by a schedule; otherwise an optional focus, e.g. 'direct tier only', 'discovery', or a backlog item"
+argument-hint: "'routine' when run by a schedule; otherwise an optional focus, e.g. 'gpu', 'direct tier only', 'discovery', or a backlog item"
 user-invocable: true
 disable-model-invocation: false
 ---
@@ -34,8 +34,8 @@ a gate, a threshold or an output policy there.
 
 The goal is less wall-clock time waiting for tiles on real views, weighted by absolute time
 saved on the slowest cases in each pathway tier, as perf-experiment describes. Its standing
-focus directive (direct f64 tier first, deep tiers as regression guards) and every verdict it
-or the LOG marks settled stay in force. Re-open a settled question only when a criterion it was
+focus directive (since 2026-11-12: the WebGPU lane first, the wasm lanes as fallback and
+regression guards) and every verdict it or the LOG marks settled stay in force. Re-open a settled question only when a criterion it was
 judged on has changed, and say which.
 
 ## Mode: manual or routine
@@ -82,6 +82,30 @@ not ship them:
 - a wasm size increase over 5% in either artifact, or any new dependency;
 - anything perf-experiment or the LOG marks as waiting on a user decision.
 
+**The WebGPU lane is pre-approved within its policy (Ross, 2026-11-12).** Ross has said GPU
+work may keep shipping to `main`, as long as the deployed site always works well and is not
+buggy. So the GPU-lane changes the lane's design already needs are exempt from the output and
+browser-coverage bullets above:
+
+- landing lane code;
+- turning the lane on for a class of views, or widening which views or browsers it covers;
+- moving a measured precision cutoff;
+- GPU output that passes the statistical tier against the pinned anchor.
+
+Each one ships in routine mode like any other winner, provided it passes the "GPU ship gates"
+in step 4 and the two-lane deploy check in step 6. Still held:
+
+- a tax;
+- a new dependency, `@webgpu/types` included;
+- any change to the anchor, its pin or the statistical budgets;
+- any change to the wasm fallback lane's output;
+- a GPU API other than WebGPU, or removing the wasm fallback for any browser;
+- anything the "Held for Ross" list covers that is not GPU-lane work.
+
+Ship the lane in small steps. Lane code can land on `main` turned off (covering no views), and
+each later ship turns it on for one more class of views. Each step is then easy to verify, and
+easy to revert on its own.
+
 ## 0. Put held items to Ross (manual mode only)
 
 Search `bench/LOG.md` for `**Held for Ross**` entries with no later resolution. Put them to
@@ -124,7 +148,10 @@ is only as good as the machine was quiet while it ran. Two checks:
 - **The A/A pair inside every verdict run (step 4) is the real noise gate.** A run whose A/A
   pair flags any case was taken on a noisy machine, whatever the load said.
 
-A run that fails either check is void and counts toward nothing. **When the machine is not
+For a GPU timing run, also run `node src/gpu-probe.mjs` from `bench/`: it must exit 0 (a
+hardware WebGPU adapter, not SwiftShader or a fallback adapter). Record its adapter line.
+
+A run that fails any check is void and counts toward nothing. **When the machine is not
 quiet, do not record a timing verdict.** Spend the run on work that needs none:
 
 - correctness gates for the experiment in hand (`cargo test`, pixel-check, `verify-e2e`);
@@ -153,7 +180,9 @@ Take the first that applies:
      within each tier, as perf-experiment says;
    - decompose the slowest two or three by direct measurement (cold vs warm, orbit vs pixel
      loop, wasm vs client time) before forming a hypothesis;
-   - look beyond the wasm kernels too: bundle parse and startup, worker spawn and warmups, wasm
+   - for GPU-lane views, split GPU time into device and pipeline setup, submit, kernel and
+     readback before guessing at the kernel;
+   - look beyond the kernels too: bundle parse and startup, worker spawn and warmups, wasm
      compile and tier-up, tile scheduling and cancellation in Leaflet, the service worker, and
      main-thread work while tiles stream in;
    - add each candidate to the backlog ranked by the absolute time it could save, with the
@@ -230,6 +259,26 @@ again.
     the fix touches.
 - the change is not on the "Held for Ross" list.
 
+**GPU ship gates.** A change that touches the WebGPU lane (its code, its coverage, or anything
+it shares with the wasm path, such as worker.js dispatch) also needs all of these before it
+ships, because users will not file a bug for a blank or wrong tile, they just leave:
+
+- `gpu-probe.mjs` exits 0, and the verdict and gates ran on that hardware adapter;
+- both lanes pass on the built dist: `npm run verify-e2e`, the correctness gates and the
+  smoke test (step 6) run once with the GPU lane and once forced to wasm (G1's forced-lane
+  switch). Also run once with Chrome `--disable-gpu` (no adapter), which proves feature
+  detection falls back cleanly;
+- the per-tile fallback works: with a GPU failure injected (a device lost or an invalid
+  shader in a test build), every tile still renders through wasm, with no page error and no
+  missing tile;
+- GPU output for every view class the change turns on passes the statistical tier against
+  the pinned anchor, on the fixed corpus and the holdout;
+- the views the lane does not cover give byte-identical output and unchanged speed, compared
+  against the merge-base baseline (no regression beyond the significance threshold);
+- the adversarial reviewer also checks the lane's routing (which requests go to the GPU),
+  device loss, buffer lifetimes and leaks across many tiles, and cancellation while GPU
+  work is in flight.
+
 Every experiment, shipped or not, gets a LOG entry in perf-experiment's format, plus the
 `rustc` version, and the backlog is updated to match: shipped, settled negative, re-ranked, or
 new items from what the experiment taught. Keep the mechanism notes that will help the next
@@ -264,8 +313,14 @@ LOG-only push, so check after each one:
 3. Confirm every `.wasm` file the new service worker lists returns 200, then run the smoke test
    again.
 
-Revert only on evidence that this push broke the site: the smoke test passed before the push
-and fails after it, on a ship. Then revert the commit on `main` and push the revert. That is in
+Once the WebGPU lane exists on `main`, every smoke test in these steps runs twice: as is (this
+machine's hardware WebGPU adapter) and with `--no-gpu` (no adapter, wasm fallback). Both must
+pass. Once a ship turns the lane on for some views, also load one of those views on the live
+site and confirm its tiles actually came from the GPU lane. G1 has to give the lane an
+observable marker for this; extend smoke-live.mjs to check it.
+
+Revert only on evidence that this push broke the site: a smoke test (either lane) passed before
+the push and fails after it, on a ship. Then revert the commit on `main` and push the revert. That is in
 scope without asking, because the revert restores what was running. Verify again and report
 it. If the smoke test already failed before the push, the cause is not this change: report it,
 and do not revert. If it fails after a LOG-only push, the source did not change, so report it
