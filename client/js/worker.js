@@ -182,7 +182,72 @@ const supportsRelaxedSimd = WebAssembly.validate(
         imageHeight: 128,
       });
 
-    const getTile = (params) => {
+    // WebGPU lane (backlog G2). Off unless the main thread switches it on
+    // with a "configureLane" request; today only the localhost-only
+    // forced-lane switch does (see renderLane.ts), so production loads never
+    // touch the GPU. When on, covered tiles render their escape values on
+    // the GPU and color them through the same wasm recolor path as cached
+    // tiles; any GPU error renders that tile through wasm instead, and a
+    // lost device turns the lane off for this worker.
+    let gpuLane = null;
+    const configureLane = async ({ lane, inject }) => {
+      if (lane !== "gpu") {
+        gpuLane = null;
+        return "wasm";
+      }
+      try {
+        const { createGpuLane, gpuCovers } = await import("./gpu.js");
+        const created = await createGpuLane({ inject });
+        gpuLane = { ...created, covers: gpuCovers };
+        // Compile and run the kernel once on a small view, so the first
+        // real tile does not pay the driver's first-dispatch cost.
+        await created.renderValues({
+          originRe: "-0.75",
+          originIm: "0",
+          bounds: { xMin: 0, xMax: 1, yMin: 0, yMax: 1, zoom: 2 },
+          zoomOffset: 0,
+          maxIterations: 200,
+          power: 2,
+          imageWidth: 64,
+          imageHeight: 64,
+          smoothColoring: true,
+        });
+        return "gpu";
+      } catch (gpuError) {
+        console.warn("GPU lane unavailable, using wasm:", gpuError);
+        // A device that initialized but failed its first dispatch is kept
+        // so tiles exercise the per-tile fallback ("lost" injection).
+        if (!gpuLane) return "wasm";
+        return "gpu";
+      }
+    };
+
+    const getGpuTile = async (params) => {
+      const { values, minIter, maxIter } = await gpuLane.renderValues(params);
+      const image = wasm.recolor_tile(values, params.coloring);
+      return {
+        image,
+        values: params.includeValues ? values : null,
+        minIter,
+        maxIter,
+        tier: 0,
+        lane: "gpu",
+      };
+    };
+
+    const getTile = async (params) => {
+      if (gpuLane && gpuLane.usable && gpuLane.covers(params)) {
+        try {
+          return await getGpuTile(params);
+        } catch (gpuError) {
+          console.warn("GPU tile failed, rendering with wasm:", gpuError);
+          if (!gpuLane.usable) gpuLane = null;
+        }
+      }
+      return getWasmTile(params);
+    };
+
+    const getWasmTile = (params) => {
       const tile = computeTile(params);
 
       // Copy the fields out and free the wasm-bindgen struct; it is not
@@ -195,6 +260,7 @@ const supportsRelaxedSimd = WebAssembly.validate(
         // Precision tier that rendered this tile, for the diagnostics
         // overlay (issue #50).
         tier: tile.tier,
+        lane: "wasm",
       };
       tile.free();
       return result;
@@ -245,7 +311,9 @@ const supportsRelaxedSimd = WebAssembly.validate(
     expose(async (request) => {
       switch (request.type) {
         case "calculate":
-          return getTile(request.payload);
+          return await getTile(request.payload);
+        case "configureLane":
+          return await configureLane(request.payload);
         case "julia":
           return getJulia(request.payload);
         case "distanceEstimate":

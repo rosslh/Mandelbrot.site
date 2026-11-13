@@ -155,7 +155,18 @@ export type WarmupDeepRequest = { type: "warmupDeep" };
 // Sent once per worker at pool spawn when the view is already at float-exp
 // depth (power 2, effective zoom >= FLOAT_EXP_THRESHOLD).
 export type WarmupFloatExpRequest = { type: "warmupFloatExp" };
+// Switches the worker's WebGPU lane (bench/LOG.md 2026-11-12, backlog G2)
+// on or off; returns the lane the worker ended up on ("wasm" when no usable
+// GPU exists). Sent at pool spawn only by the localhost-only forced-lane
+// switch (renderLane.ts) until the lane covers views in production.
+// `inject` is a test-only GPU failure mode (see gpu.js createGpuLane).
+export type RenderLane = "wasm" | "gpu";
+export type ConfigureLaneRequest = {
+  type: "configureLane";
+  payload: { lane: RenderLane; inject: string | null };
+};
 export type WorkerRequest =
+  | ConfigureLaneRequest
   | CalculateRequest
   | JuliaRequest
   | DistanceEstimateRequest
@@ -180,6 +191,10 @@ export type MandelbrotResponse = {
   // (see tierOverlay.ts / the Rust `RenderTier` enum). Drives the diagnostics
   // overlay (issue #50).
   tier: number;
+  // Which lane rendered the tile: the GPU lane or wasm. Exposed on the tile
+  // canvas as data-lane, so tests and the live smoke test can tell them
+  // apart.
+  lane: RenderLane;
 };
 export type OptimiseResponse = ArrayBuffer;
 export type RecolorResponse = Uint8Array;
@@ -191,6 +206,7 @@ export type DistanceEstimateResponse = number;
 export type PeriodResponse = number;
 export type WorkerResponse =
   | MandelbrotResponse
+  | RenderLane
   | DistanceEstimateResponse
   | PeriodResponse
   | OptimiseResponse

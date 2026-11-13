@@ -229,6 +229,7 @@ class MandelbrotLayer extends L.GridLayer {
         scaledTileSize,
       );
       context.putImageData(imageData, 0, 0);
+      canvas.dataset.lane = response.lane;
       // Diagnostics: tint the tile by the precision tier that rendered it
       // (issue #50). Drawn on top of the pixels; a later toggle repaints from
       // the cached escape values, so it never has to be "undrawn".

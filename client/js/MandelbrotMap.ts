@@ -24,6 +24,7 @@ import {
 } from "./protocol";
 import { decimalDigitsForZoom, offsetCoordinate } from "./highPrecision";
 import { drawTierOverlay } from "./tierOverlay";
+import { forcedRenderLane } from "./renderLane";
 
 type QueuedTileTask = {
   id: string;
@@ -814,6 +815,11 @@ class MandelbrotMap extends L.Map {
     });
     this.pool = Pool(async () => {
       const worker = await spawn(new Worker("./worker.js"));
+      // WebGPU lane: switched on only by the localhost-only forced-lane
+      // switch until it covers views in production (renderLane.ts).
+      if (forcedRenderLane) {
+        await worker({ type: "configureLane", payload: forcedRenderLane });
+      }
       if (warmGeneralKernel) {
         await worker({ type: "warmupGeneral" });
       }

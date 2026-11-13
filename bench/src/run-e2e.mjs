@@ -19,6 +19,12 @@
 //     [--viewport 1600x900] [--rounds 5] [--warmup 1] [--out results/....json]
 //     [--no-gpu | --allow-no-gpu]
 //
+// A variant may carry a forced render lane: `gpu-dist:gpu` loads every case
+// with `&lane=gpu` (GPU lane wherever it covers a tile), `gpu-dist:wasm`
+// with `&lane=wasm` (all wasm). The client honors the switch only on
+// localhost (client/js/renderLane.ts). Each variant entry still gets its own
+// origin, so `x:gpu` and `x:wasm` share no caches.
+//
 // GPU check: before timing, the gpu-probe (src/gpu-probe.mjs) runs inside
 // the same browser on a separate origin, and the adapter it found is
 // recorded in the results meta. The runner refuses to time when the probe
@@ -82,17 +88,27 @@ function parseArgs(argv) {
   return opts;
 }
 
+// "dist[:lane]" -> { dist, lane }.
+function parseVariant(name) {
+  const [dist, lane = null, ...rest] = name.split(":");
+  if (rest.length > 0 || (lane !== null && lane !== "gpu" && lane !== "wasm")) {
+    throw new Error(`Bad variant "${name}": expected <dist> or <dist>:gpu|wasm`);
+  }
+  return { dist, lane };
+}
+
 function readDistMeta(name) {
-  const dir = join(benchDir, "artifacts", name);
+  const { dist, lane } = parseVariant(name);
+  const dir = join(benchDir, "artifacts", dist);
   if (!existsSync(join(dir, "dist", "index.html"))) {
     throw new Error(
       `Variant "${name}" has no built dist; run: node src/build-dist.mjs ${name} [--ref <git-ref>]`,
     );
   }
-  return JSON.parse(readFileSync(join(dir, "meta.json"), "utf8"));
+  return { ...JSON.parse(readFileSync(join(dir, "meta.json"), "utf8")), lane };
 }
 
-function caseUrl(port, benchCase) {
+function caseUrl(port, benchCase, lane = null) {
   const params = new URLSearchParams({
     re: benchCase.re,
     im: benchCase.im,
@@ -102,6 +118,7 @@ function caseUrl(port, benchCase) {
   if (benchCase.exponent && benchCase.exponent !== 2) {
     params.set("e", String(benchCase.exponent));
   }
+  if (lane) params.set("lane", lane);
   return `http://127.0.0.1:${port}/?${params}`;
 }
 
@@ -218,7 +235,7 @@ async function main() {
   const servers = {};
   for (const name of opts.variants) {
     servers[name] = await startServer({
-      root: join(benchDir, "artifacts", name, "dist"),
+      root: join(benchDir, "artifacts", parseVariant(name).dist, "dist"),
       crossOriginIsolate: false,
     });
     console.log(`${name}: serving dist on port ${servers[name].port}`);
@@ -275,7 +292,7 @@ async function main() {
       // orbit is fresh; for the very first case it is also SW install + first
       // wasm compile.
       for (const name of opts.variants) {
-        const cold = await measurePass(page, caseUrl(servers[name].port, benchCase));
+        const cold = await measurePass(page, caseUrl(servers[name].port, benchCase, variantMetas[name].lane));
         perVariant[name].coldMs = cold.ms;
         perVariant[name].tileCounts.add(cold.tileCount);
         console.log(`  ${name.padEnd(10)} cold ${cold.ms.toFixed(0)} ms (${cold.tileCount} tiles)`);
@@ -283,13 +300,13 @@ async function main() {
 
       for (let i = 0; i < opts.warmup; i++) {
         for (const name of opts.variants) {
-          await measurePass(page, caseUrl(servers[name].port, benchCase));
+          await measurePass(page, caseUrl(servers[name].port, benchCase, variantMetas[name].lane));
         }
       }
 
       for (let round = 0; round < opts.rounds; round++) {
         for (const name of opts.variants) {
-          const pass = await measurePass(page, caseUrl(servers[name].port, benchCase));
+          const pass = await measurePass(page, caseUrl(servers[name].port, benchCase, variantMetas[name].lane));
           perVariant[name].samplesMs.push(pass.ms);
           perVariant[name].tileCounts.add(pass.tileCount);
           console.log(
