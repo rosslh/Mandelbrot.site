@@ -50,6 +50,7 @@ export async function startSession(variantNames) {
 
   return {
     page,
+    browser,
     chromeVersion: await browser.version(),
     close: async () => {
       await browser.close();

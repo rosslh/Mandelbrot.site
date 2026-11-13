@@ -7,12 +7,24 @@
 // as its own lazy chunk, only when the lane is switched on for this worker,
 // so loads that never use the GPU pay nothing for it.
 //
-// Coverage (see `gpuCovers`): exponent 2, escape-time coloring, and pixel
-// spacing coarse enough for plain f32 arithmetic. Everything else goes to
-// wasm. The output can never be byte-exact against the f64 wasm lanes; it is
+// Arithmetic: double-single ("df32", a value as an unevaluated sum hi + lo
+// of two f32s, ~48 significant bits), because plain f32 failed the
+// statistical tier even at zoom 2: its rounding is structured on a regular
+// pixel grid, so sub-ulp deltas came out one-directional (bench/LOG.md
+// 2026-11-13). Coverage (see `gpuCovers`): exponent 2, escape-time coloring,
+// and pixel spacing coarse enough for df32. Everything else goes to wasm.
+// The output can never be byte-exact against the f64 wasm lanes; it is
 // judged by the statistical-equivalence tier against the pinned anchor, and
-// the f32 cutoff below must be measured against that anchor before the lane
+// the cutoff below must be measured against that anchor before the lane
 // covers real views.
+//
+// The Metal backend compiles shaders with fast math: it reassociates float
+// expressions, which silently turns the error-free transformations df32 is
+// built on into zero (measured: a two-sum's error term came back 0). Every
+// intermediate of those transformations therefore passes through
+// `opaque()`, an XOR with a zero the compiler cannot see, which pins it to
+// an f32 value in program order. fma() is a true fused operation there, so
+// two-product uses it.
 //
 // Failure policy: a GPU failure must never cost the user a tile. Every error
 // (device creation, shader compile, device loss, a rejected readback) is
@@ -24,12 +36,15 @@
 const TILE_SPACE_SCALE = 200 / 128;
 const ESCAPE_RADIUS = 3;
 
-// Finest pixel spacing the f32 kernel covers. Provisional: plain f32 has a
-// 24-bit mantissa, so pixel coordinates with |c| < 2 resolve to ~2^-23 or
-// better: 2^-18 leaves ~5-6 bits of sub-pixel resolution there (about 4 for
-// |re| in [2, 4)); about zoom 11 at 200px tiles. To be replaced by a cutoff
-// measured against the anchor.
-export const GPU_F32_MIN_PIXEL_SPACING = 2 ** -18;
+// Finest pixel spacing the df32 kernel covers, measured against the anchor
+// with the statistical tier (bench/src/gpu-check.mjs, bench/LOG.md
+// 2026-11-13). Pixel spacing at 200px tiles is 2^-(zoom + 5). Across four
+// 80-view holdout seeds and the corpus, every view at zoom <= 24 passes;
+// from z25 to z29 a few views per seed fail (mostly a one-directional
+// sub-ulp delta-sign imbalance with no flips) while most pass, and z32+
+// fails outright. 2^-29 is zoom 24. Moving it deeper needs that z25-z29
+// bias explained first.
+export const GPU_MIN_PIXEL_SPACING = 2 ** -29;
 
 // Largest iteration budget and worst-case work (pixels x budget) the lane
 // accepts per tile. Long-running dispatches risk the GPU watchdog, and a
@@ -47,71 +62,161 @@ const WORKGROUP = 8;
 
 // z starts at c and iterates while |z|^2 < R^2 and i < max, exactly like the
 // scalar wasm loop (calculate_escape_iterations_quadratic), so escape counts
-// agree wherever f32 rounding does not move them. The main cardioid and
-// period-2 bulb are interior by test, as in wasm. Writes the smoothed escape
-// value (or the plain count), +Inf for interior pixels, and folds escaped
-// counts into a global min/max for the tile's iteration stats.
+// agree wherever df32 rounding does not move them. The main cardioid and
+// period-2 bulb are interior by test, as in wasm (evaluated in df32: an f32
+// test misclassifies pixels hugging the cardioid, which are interior-vs-
+// escaper flips). Each pixel writes five words: the escape count (u32 bits;
+// maxIterations marks interior) and the final z as two df32 pairs.
+// Smoothing happens on the CPU in f64 (`smoothValues`), not in the shader:
+// GPU log/length are fast-math approximations.
 const SHADER = /* wgsl */ `
 struct Params {
-  reMin: f32,
-  imMax: f32,
-  reStep: f32,
-  imStep: f32,
   width: u32,
   height: u32,
   maxIterations: u32,
-  smoothColoring: u32,
-  // +Inf's bit pattern, passed in because WGSL rejects a constant
-  // expression that evaluates to infinity.
-  infBits: u32,
+  zero: u32,
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
-@group(0) @binding(1) var<storage, read_write> values: array<f32>;
-@group(0) @binding(2) var<storage, read_write> stats: array<atomic<u32>, 2>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+// Pixel coordinates as df32 pairs: width real parts, then height imaginary
+// parts (see pixelCoordinates).
+@group(0) @binding(2) var<storage, read> coords: array<vec2<f32>>;
 
-fn inCardioidOrBulb(c: vec2<f32>) -> bool {
-  let x = c.x - 0.25;
-  let q = x * x + c.y * c.y;
-  if (q * (q + x) <= 0.25 * c.y * c.y) { return true; }
-  let x1 = c.x + 1.0;
-  return x1 * x1 + c.y * c.y <= 0.0625;
+fn opaque(x: f32) -> f32 { return bitcast<f32>(bitcast<u32>(x) ^ params.zero); }
+
+fn twoSum(a: f32, b: f32) -> vec2<f32> {
+  let s = opaque(a + b);
+  let bb = opaque(s - a);
+  return vec2<f32>(s, opaque(a - opaque(s - bb)) + opaque(b - bb));
+}
+
+fn quickTwoSum(a: f32, b: f32) -> vec2<f32> {
+  let s = opaque(a + b);
+  return vec2<f32>(s, opaque(b - opaque(s - a)));
+}
+
+fn dfAdd(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
+  let s = twoSum(a.x, b.x);
+  let t = twoSum(a.y, b.y);
+  let u = quickTwoSum(s.x, opaque(s.y + t.x));
+  return quickTwoSum(u.x, opaque(u.y + t.y));
+}
+
+fn dfNeg(a: vec2<f32>) -> vec2<f32> { return -a; }
+
+fn dfMul(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
+  let p = opaque(a.x * b.x);
+  let e = fma(a.x, b.x, -p);
+  let e1 = fma(a.x, b.y, e);
+  let e2 = fma(a.y, b.x, e1);
+  return quickTwoSum(p, e2);
+}
+
+fn df(x: f32) -> vec2<f32> { return vec2<f32>(x, 0.0); }
+
+// Cardioid / period-2 bulb test (in_main_cardioid_or_bulb) in df32.
+fn inCardioidOrBulb(cr: vec2<f32>, ci: vec2<f32>) -> bool {
+  let ci2 = dfMul(ci, ci);
+  let x = dfAdd(cr, df(-0.25));
+  let q = dfAdd(dfMul(x, x), ci2);
+  let lhs = dfMul(q, dfAdd(q, x));
+  let cardioid = dfAdd(lhs, dfNeg(dfMul(df(0.25), ci2)));
+  if (cardioid.x + cardioid.y <= 0.0) { return true; }
+  let x1 = dfAdd(cr, df(1.0));
+  let bulb = dfAdd(dfAdd(dfMul(x1, x1), ci2), df(-0.0625));
+  return bulb.x + bulb.y <= 0.0;
 }
 
 @compute @workgroup_size(${WORKGROUP}, ${WORKGROUP})
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   if (id.x >= params.width || id.y >= params.height) { return; }
-  let c = vec2<f32>(
-    params.reMin + f32(id.x) * params.reStep,
-    params.imMax - f32(id.y) * params.imStep,
-  );
-  let index = id.y * params.width + id.x;
-  let interior = bitcast<f32>(params.infBits);
-  if (inCardioidOrBulb(c)) {
-    values[index] = interior;
-    return;
-  }
-  var z = c;
+  let cr = coords[id.x];
+  let ci = coords[params.width + id.y];
+  let base = 5u * (id.y * params.width + id.x);
+  var zr = cr;
+  var zi = ci;
   var i = 0u;
-  loop {
-    if (dot(z, z) >= ${ESCAPE_RADIUS * ESCAPE_RADIUS}.0 || i >= params.maxIterations) { break; }
-    z = vec2<f32>(z.x * z.x - z.y * z.y + c.x, 2.0 * z.x * z.y + c.y);
-    i = i + 1u;
-  }
-  if (i >= params.maxIterations) {
-    values[index] = interior;
-    return;
-  }
-  atomicMin(&stats[0], i);
-  atomicMax(&stats[1], i);
-  if (params.smoothColoring != 0u) {
-    let lnR = log(${ESCAPE_RADIUS}.0);
-    values[index] = f32(i) - log(log(length(z)) / lnR) / log(2.0);
+  if (inCardioidOrBulb(cr, ci)) {
+    i = params.maxIterations;
   } else {
-    values[index] = f32(i);
+    loop {
+      let zr2 = dfMul(zr, zr);
+      let zi2 = dfMul(zi, zi);
+      if (zr2.x + zi2.x >= ${ESCAPE_RADIUS * ESCAPE_RADIUS}.0 || i >= params.maxIterations) { break; }
+      let zri = dfMul(zr, zi);
+      zr = dfAdd(dfAdd(zr2, dfNeg(zi2)), cr);
+      zi = dfAdd(zri * 2.0, ci);
+      i = i + 1u;
+    }
   }
+  out[base] = bitcast<f32>(i);
+  out[base + 1u] = zr.x;
+  out[base + 2u] = zr.y;
+  out[base + 3u] = zi.x;
+  out[base + 4u] = zi.y;
 }
 `;
+
+// The tile's pixel coordinates exactly as the wasm direct path computes
+// them in f64 (itertools-num linspace: start + step * i, inclusive ends),
+// each stored as the nearest df32 pair (hi = nearest f32, lo = the f32
+// nearest the rest). Computing them in the shader with df32 arithmetic
+// instead left a structured coordinate error that came out as a one-
+// directional sub-ulp shift on z26-z29 holdout views (bench/LOG.md
+// 2026-11-13).
+function pixelCoordinates(reMin, reMax, imMax, imMin, width, height) {
+  const coords = new Float32Array(2 * (width + height));
+  const put = (index, value) => {
+    const hi = Math.fround(value);
+    coords[2 * index] = hi;
+    coords[2 * index + 1] = Math.fround(value - hi);
+  };
+  const reStep = (reMax - reMin) / (width - 1);
+  for (let x = 0; x < width; x++) put(x, reMin + reStep * x);
+  const imStep = (imMin - imMax) / (height - 1);
+  for (let y = 0; y < height; y++) put(width + y, imMax + imStep * y);
+  return coords;
+}
+
+const LN_ESCAPE_RADIUS = Math.log(ESCAPE_RADIUS);
+
+// Turns the kernel's (count, z) triples into the tile's f32 values buffer
+// and iteration stats, with smoothed_escape_value's f64 formula (exponent
+// 2): +Inf for interior pixels, `i - ln(ln|z| / ln R) / ln 2` (or the plain
+// count) for escapers; min/max over escaped counts, null when none escaped
+// (TileIterationStats).
+function smoothValues(raw, pixels, maxIterations, smoothColoring) {
+  const counts = new Uint32Array(raw.buffer, raw.byteOffset, pixels * 5);
+  const values = new Float32Array(pixels);
+  let minIter = Infinity;
+  let maxIter = -Infinity;
+  for (let p = 0; p < pixels; p++) {
+    const iterations = counts[5 * p];
+    if (iterations >= maxIterations) {
+      values[p] = Infinity;
+      continue;
+    }
+    if (iterations < minIter) minIter = iterations;
+    if (iterations > maxIter) maxIter = iterations;
+    if (smoothColoring) {
+      const norm = Math.hypot(
+        raw[5 * p + 1] + raw[5 * p + 2],
+        raw[5 * p + 3] + raw[5 * p + 4],
+      );
+      values[p] =
+        iterations - Math.log(Math.log(norm) / LN_ESCAPE_RADIUS) / Math.LN2;
+    } else {
+      values[p] = iterations;
+    }
+  }
+  const escaped = maxIter >= 0;
+  return {
+    values,
+    minIter: escaped ? minIter : null,
+    maxIter: escaped ? maxIter : null,
+  };
+}
 
 // Mirrors perturbation::pixel_spacing: the finer of the two axes.
 function pixelSpacing(payload) {
@@ -144,7 +249,7 @@ export function gpuCovers(payload) {
       GPU_MAX_WORK &&
     payload.imageWidth > 1 &&
     payload.imageHeight > 1 &&
-    pixelSpacing(payload) >= GPU_F32_MIN_PIXEL_SPACING
+    pixelSpacing(payload) >= GPU_MIN_PIXEL_SPACING
   );
 }
 
@@ -195,15 +300,8 @@ export async function createGpuLane({ inject = null } = {}) {
   }
 
   const uniform = device.createBuffer({
-    size: 48,
+    size: 16,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
-  const statsBuffer = device.createBuffer({
-    size: 8,
-    usage:
-      GPUBufferUsage.STORAGE |
-      GPUBufferUsage.COPY_SRC |
-      GPUBufferUsage.COPY_DST,
   });
   // Value and readback buffers are reused across tiles and regrown when a
   // larger tile arrives; one tile is in flight per worker at a time (the
@@ -211,30 +309,40 @@ export async function createGpuLane({ inject = null } = {}) {
   // the buffers allocated cleanly, so a failed allocation is retried rather
   // than reused.
   let capacity = 0;
+  let axisCapacity = 0;
+  let coordsBuffer = null;
   let valuesBuffer = null;
   let readback = null;
   let bindGroup = null;
-  const ensureCapacity = async (pixels) => {
-    if (pixels <= capacity) return;
+  const ensureCapacity = async (pixels, axisLength) => {
+    if (pixels <= capacity && axisLength <= axisCapacity) return;
+    pixels = Math.max(pixels, capacity);
+    axisLength = Math.max(axisLength, axisCapacity);
     valuesBuffer?.destroy();
     readback?.destroy();
+    coordsBuffer?.destroy();
     capacity = 0;
+    axisCapacity = 0;
     device.pushErrorScope("out-of-memory");
     device.pushErrorScope("validation");
     valuesBuffer = device.createBuffer({
-      size: pixels * 4,
+      size: pixels * 20,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
     });
     readback = device.createBuffer({
-      size: pixels * 4 + 8,
+      size: pixels * 20,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    });
+    coordsBuffer = device.createBuffer({
+      size: axisLength * 8,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
     bindGroup = device.createBindGroup({
       layout: pipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: uniform } },
         { binding: 1, resource: { buffer: valuesBuffer } },
-        { binding: 2, resource: { buffer: statsBuffer } },
+        { binding: 2, resource: { buffer: coordsBuffer } },
       ],
     });
     const validationError = await device.popErrorScope();
@@ -246,6 +354,7 @@ export async function createGpuLane({ inject = null } = {}) {
       );
     }
     capacity = pixels;
+    axisCapacity = axisLength;
   };
 
   if (inject === "lost") device.destroy();
@@ -272,26 +381,18 @@ export async function createGpuLane({ inject = null } = {}) {
     const imMax = originIm - tileOffset(bounds.yMin, bounds.zoom, zoomOffset);
     const imMin = originIm - tileOffset(bounds.yMax, bounds.zoom, zoomOffset);
     const pixels = width * height;
-    await ensureCapacity(pixels);
+    await ensureCapacity(pixels, width + height);
 
-    const paramBytes = new ArrayBuffer(48);
-    const floats = new Float32Array(paramBytes, 0, 4);
-    const ints = new Uint32Array(paramBytes, 16, 5);
-    floats.set([
-      reMin,
-      imMax,
-      (reMax - reMin) / (width - 1),
-      (imMax - imMin) / (height - 1),
-    ]);
-    ints.set([
-      width,
-      height,
-      payload.maxIterations,
-      payload.smoothColoring ? 1 : 0,
-      0x7f800000,
-    ]);
-    device.queue.writeBuffer(uniform, 0, paramBytes);
-    device.queue.writeBuffer(statsBuffer, 0, new Uint32Array([0xffffffff, 0]));
+    device.queue.writeBuffer(
+      uniform,
+      0,
+      new Uint32Array([width, height, payload.maxIterations, 0]),
+    );
+    device.queue.writeBuffer(
+      coordsBuffer,
+      0,
+      pixelCoordinates(reMin, reMax, imMax, imMin, width, height),
+    );
 
     device.pushErrorScope("validation");
     const encoder = device.createCommandEncoder();
@@ -303,24 +404,21 @@ export async function createGpuLane({ inject = null } = {}) {
       Math.ceil(height / WORKGROUP),
     );
     pass.end();
-    encoder.copyBufferToBuffer(valuesBuffer, 0, readback, 0, pixels * 4);
-    encoder.copyBufferToBuffer(statsBuffer, 0, readback, pixels * 4, 8);
+    encoder.copyBufferToBuffer(valuesBuffer, 0, readback, 0, pixels * 20);
     device.queue.submit([encoder.finish()]);
     const submitError = device.popErrorScope().catch(() => null);
 
-    await readback.mapAsync(GPUMapMode.READ, 0, pixels * 4 + 8);
+    await readback.mapAsync(GPUMapMode.READ, 0, pixels * 20);
     try {
       const error = await submitError;
       if (error) throw new Error(`GPU dispatch error: ${error.message}`);
-      const mapped = readback.getMappedRange(0, pixels * 4 + 8);
-      const values = new Float32Array(mapped.slice(0, pixels * 4));
-      const [minIter, maxIter] = new Uint32Array(mapped.slice(pixels * 4));
-      const escaped = minIter !== 0xffffffff;
-      return {
-        values,
-        minIter: escaped ? minIter : null,
-        maxIter: escaped ? maxIter : null,
-      };
+      const raw = new Float32Array(readback.getMappedRange(0, pixels * 20));
+      return smoothValues(
+        raw,
+        pixels,
+        payload.maxIterations,
+        payload.smoothColoring,
+      );
     } finally {
       readback.unmap();
     }
