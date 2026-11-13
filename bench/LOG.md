@@ -3091,10 +3091,20 @@ the heavy cases sit. df32 direct stays a candidate only for z ≤ 24 views,
 and only if one GPU owner or batched dispatches remove the per-worker
 overhead (measure first).
 
+**Verdict builds are ready (machine-local, reuse them).** The branch is
+rebased onto ff73d47, the merge base. `base-dist` and `base-dist2` were built
+at ff73d47, and `exp-dist` at the branch head 30a6b0a. All three were built
+with `--ref`, and their wasm files are byte-identical (same content hashes).
+
+Harness lesson: build every verdict dist with `--ref`, the experiment
+included. An in-tree `exp-dist` came out 5 KB smaller than the `--ref`
+baselines from identical Rust, because panic-location strings embed the
+build path and the temp worktree path is longer. A size or code-layout
+difference like that would confound the A/B.
+
 **Next run.**
-1. On a quiet machine:
-   - build `base-dist` and `base-dist2` at the merge base (after rebasing
-     the branch onto this commit) and `exp-dist` from the branch;
+1. On a quiet machine (rebuild only if `origin/main` has moved past
+   ff73d47 or the branch has changed):
    - take three verdict invocations of `run-e2e --variants
      base-dist,base-dist2,exp-dist` over grid-regression, with the lane off;
    - the gate is "uncovered views byte-identical and as fast". If it holds,
