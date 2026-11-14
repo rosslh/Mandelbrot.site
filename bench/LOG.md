@@ -3116,3 +3116,127 @@ difference like that would confound the A/B.
 3. Start G3: f32-delta perturbation over the wasm reference orbit, gated by
    gpu-check (which needs a reference-orbit export from wasm). Targets:
    grid-z28 (~3 s), z36–z46, then the pf64 grids.
+
+## 2026-11-14 — SHIPPED (switched off): G1 harness + G2 WebGPU lane skeleton (df32); lane-off verdict holds
+
+Machine: Apple M1 Pro (8 cores, pool of 7), on AC power, Chrome for Testing
+136.0.7103.94, WebGPU adapter `apple / metal-3` (gpu-probe exit 0, recorded
+in every run's meta), rustc 1.100.0. This closes the 2026-11-13 in-progress
+entry. Quiet-machine runs toward the verdict: 3 of 3, all valid. Each started
+at 1-minute load ≤ 4.0; a Time Machine backup and a VM came and went, but no
+A/A pair flagged any case. Every GPU number here comes from one Apple GPU.
+
+**What ships.** Branch `perf/gpu-lane-skeleton`, rebased onto 7a148a5:
+- the WebGPU lane: `client/js/gpu.js` (lazy df32 chunk) and the routing in
+  worker.js;
+- the localhost-only forced-lane switch (`renderLane.ts`);
+- the `lane` field and `data-lane` marker;
+- the bench tools lane-check, gpu-check and run-e2e `:gpu`/`:wasm`.
+
+**No production view turns the lane on.** This ship covers no views. It is
+the "land lane code turned off" step of the 2026-11-12 policy.
+
+**Builds.** All three were built with `--ref`:
+- `base-dist` and `base-dist2` at the merge base 7a148a5;
+- `exp-dist` at 06127ff.
+
+The three wasm files are byte-identical across all of them (same content
+hashes: fast lane 396.4 KiB, fallback 391.9 KiB, and the third 160.3 KiB).
+**Size delta: 0 on the wasm.** The service worker precaches the extra ~5 KB
+gpu chunk, an accepted cost.
+
+**Verdict.** Three invocations of `run-e2e --variants
+base-dist,base-dist2,exp-dist`, full grid-regression corpus, 5 rounds, 1600×900
+(results/e2e-gpuoff-v{1,2,3}.json).
+- A/A: no case flagged in any run.
+- exp-dist: no case significant in any run, in either direction.
+- exp-dist rendered 0 GPU tiles on every pass. That is direct evidence that a
+  load with no parameter never routes to the GPU.
+
+Medians across the three runs, base → exp. Cold change is listed per run
+(v1 / v2 / v3).
+
+| case | base → exp | change | cold v1 / v2 / v3 |
+|---|---|---|---|
+| grid-z47-i50000 | 45334 → 44982 ms | −0.8% | −2.1 / +0.8 / −7.5% |
+| grid-z48-i48000 | 15359 → 15438 ms | +0.5% | +0.1 / −1.9 / +0.8% |
+| grid-z28-i50000 | 3212 → 3251 ms | +1.2% | −0.5 / +2.6 / −2.7% |
+| grid-z48-i20000 | 1759 → 1803 ms | +2.5% | +3.4 / −0.7 / −8.5% |
+| grid-z259-i1600 | 1084 → 1098 ms | +1.3% | +7.3 / −9.1 / −1.6% |
+| grid-z48-i800 | 710 → 720 ms | +1.5% | −7.3 / −1.0 / −2.3% |
+| grid-z85-i200 | 462 → 466 ms | +0.8% | −4.6 / +2.5 / −2.5% |
+| grid-z36-i51200 | 447 → 445 ms | −0.5% | −17.9 / −3.0 / −19.8% |
+| grid-z45-i6400 | 396 → 399 ms | +0.9% | +1.1 / −0.8 / +4.3% |
+| grid-z20-i1600 | 263 → 267 ms | +1.3% | −1.0 / −2.0 / −3.9% |
+
+The small positive medians are inside each case's threshold (3.0–12.7%) in
+every run, and the A/A pair shows the same spread (+0.3% to +2.9% on light
+cases). This is not a speed-up, and none was expected: the gate for a
+switched-off lane is "uncovered views byte-identical and as fast", and it
+holds.
+
+**Gates (this run, on the rebased branch).**
+- client: typecheck, lint, format:check, test (cargo tests included: 87 pass,
+  4 ignored) and build all pass.
+- `npm run verify-e2e` passes 8/8 on the fresh client/dist.
+- lane-check on exp-dist, 45/45 tiles each, 0 page errors:
+  - all-GPU: z5 and a z15-i1600 seahorse view;
+  - all-wasm:
+    - `lane=wasm`;
+    - `--no-gpu`;
+    - each of `gpuFail=shader|lost|tile`;
+    - an uncovered z28-i5000 view.
+- lane-check defaults to `--lane gpu`, so it cannot test the no-parameter
+  case. The verdict runs' 0 GPU tiles cover that case instead.
+- No view class is turned on, so the statistical tier has nothing new to gate.
+  gpu-check's 2026-11-13 results (9/9 corpus, 355/355 holdout at the 2^-29
+  cutoff) stand for the kernel as shipped.
+- Live smoke test before the push: passed with the GPU and with `--no-gpu`
+  (54 tiles each, no page errors, lane marker "none").
+
+**Second adversarial review** (fresh opus agent, read-only; the full diff,
+including the df32 commit the first review never saw). Its verdict: nothing
+changes what production does with the lane off. Two caveats, both accepted:
+- every tile canvas now carries `data-lane="wasm"`, and every response
+  carries `lane`. Nothing reads them in production.
+- the service worker precaches gpu.js, so production downloads it once and
+  never runs it. "Production does not fetch the chunk" (2026-11-13) was
+  wrong; production does not *execute* it.
+
+Fixed in this ship (harness only):
+- gpu-check now exits 1 when no covered case was judged, so a "0/0 pass" no
+  longer passes.
+- run-e2e now warns when a `:gpu` pass rendered fewer GPU tiles than tiles,
+  instead of only when every pass rendered none.
+
+**Must fix before any view turns the lane on** (now in backlog G2):
+1. `gpu.js` two-product relies on `fma()` being fused. WGSL allows an
+   unfused fma, and Dawn on D3D can lower it to `mad`. That silently drops
+   the multiply to f32 precision. Fix: Dekker split with barriers, or a
+   startup self-test that turns the lane off when the error terms come back
+   zero.
+2. `GPU_MAX_WORK = 2^32` was sized for the f32 kernel. df32 is about 10×
+   slower, so one covered dispatch can run for seconds, risking a
+   GPU-process reset. Fix: re-measure, then split into chunks or lower the
+   cap.
+3. No timeout on lane start-up. A hung `requestAdapter`, `requestDevice` or
+   pipeline creation would stall pool spawn and render no tiles. Fix: race
+   it against about 2 s, then fall back to wasm.
+
+Also noted:
+- counts are stored as f32 subnormal bit patterns, which a backend that
+  flushes subnormals would zero; use a u32 binding;
+- GPU tiles report tier 0, so the overlay shows them as Direct;
+- the escape test reads only the hi parts (statistical-tier class);
+- lane-check without `--expect` passes an all-fallback GPU run, so gate runs
+  must pass `--expect`;
+- gpu-check does not compare minIter/maxIter.
+
+**Next run.**
+1. Verify this deploy if the post-push check below did not finish.
+2. G2 item 2 from 2026-11-13: decompose GPU tile time inside the e2e span
+   (device and pipeline at spawn, then submit, kernel, readback and recolor),
+   and compare one GPU owner against per-worker devices.
+3. Then start G3: f32-delta perturbation.
+
+Fix items 1–3 above in whichever change first turns the lane on.

@@ -617,7 +617,8 @@ policy above. Replace these estimates with measurements as items run.
     `&gpuFail=shader|lost|tile` (localhost only), `data-lane` on tiles,
     `src/lane-check.mjs`, run-e2e `dist:gpu`/`dist:wasm` variants, and
     **`src/gpu-check.mjs`**, the GPU statistical gate vs the anchor with a
-    GPU A/A check and `--holdout`; smoke-live `--expect-lane` is on `main`;
+    GPU A/A check and `--holdout`; smoke-live `--expect-lane` is on `main`.
+    **All on `main` since 2026-11-14** (shipped with G2, switched off);
   - a forced-lane switch for A/B runs and correctness checks, so one
     build can be made to render all-wasm or GPU-where-covered (a build
     define or a dev-only query parameter that production ignores —
@@ -648,7 +649,12 @@ policy above. Replace these estimates with measurements as items run.
   the ~190 ms per-load dispatch floor and the light grids (grid-z20). Find
   the measured f32 precision cutoff against the anchor here.
   **Status 2026-11-13 (LOG): built on `perf/gpu-lane-skeleton`, switched
-  off, awaiting the lane-off no-regression verdict (0/3 quiet runs).**
+  off.** **Shipped to `main` switched off 2026-11-14** (LOG): three valid
+  lane-off verdict runs, no case significant, 0 GPU tiles on a no-parameter
+  load, wasm byte-identical. Before any view turns the lane on, fix the
+  2026-11-14 review's three items: an fma-free (or self-tested) df32
+  two-product, a work cap re-measured for df32 (or chunked dispatch), and
+  a timeout on lane start-up. Run lane-check gate runs with `--expect`.
   Measured: plain f32 fails the statistical tier even at z2 (structured
   one-directional sub-ulp deltas), so the kernel is df32. The Metal backend
   reassociates floats, so every error-free-transform intermediate needs an

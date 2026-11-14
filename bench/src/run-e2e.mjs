@@ -356,16 +356,17 @@ async function main() {
         }
       }
 
-      // A :gpu variant whose passes rendered no GPU tile timed wasm: the case
-      // is outside the lane's coverage, or the device failed. Say so rather
-      // than letting it pass as a GPU number.
+      // A :gpu variant pass that rendered fewer GPU tiles than tiles timed
+      // (partly) wasm: the case is outside the lane's coverage, or the device
+      // failed mid-run. Say so rather than letting it pass as a GPU number.
       for (const name of opts.variants) {
-        if (
-          variantMetas[name].lane === "gpu" &&
-          Math.max(...perVariant[name].gpuTiles) === 0
-        ) {
+        if (variantMetas[name].lane !== "gpu") continue;
+        const counts = perVariant[name].gpuTiles;
+        const minGpu = Math.min(...counts);
+        const total = Math.max(...perVariant[name].tileCounts);
+        if (minGpu < total) {
           console.warn(
-            `  WARNING: ${name} rendered no tile through the GPU lane on this case`,
+            `  WARNING: ${name} rendered ${minGpu}/${total} tiles through the GPU lane in its worst pass (per pass: ${counts.join(", ")})`,
           );
         }
       }

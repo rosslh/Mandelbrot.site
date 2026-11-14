@@ -288,6 +288,12 @@ async function main() {
           `${results.filter((r) => !r.covered && !r.skipped).length} pass`
         : ""),
   );
+  if (judged.length === 0) {
+    console.error(
+      "FAIL: no covered case was judged (filter, holdout or cutoff left nothing)",
+    );
+    process.exit(1);
+  }
   process.exit(failed > 0 ? 1 : 0);
 }
 
