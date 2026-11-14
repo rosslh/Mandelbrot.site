@@ -3240,3 +3240,39 @@ Also noted:
 3. Then start G3: f32-delta perturbation.
 
 Fix items 1–3 above in whichever change first turns the lane on.
+
+**Deploy check (2026-11-14, after pushing b6aecfb).**
+- Before the push, the live smoke test passed with the GPU and with
+  `--no-gpu`.
+- After the push, the live service worker did not change in over 50 minutes
+  of polling. The site's `last-modified` is still Wed 11 Nov 18:34 GMT, so
+  **no new deploy was observed**. The 12–13 Nov pushes (bench and LOG only)
+  show no deploy either. Pushes are reaching main: GitHub's Tests and Code
+  Quality checks passed on b6aecfb.
+- The live site (old build) still passes the smoke test both ways: 54 tiles,
+  no page errors, lane marker "none". No revert: nothing broke.
+- Checked locally that the source builds and runs as production would:
+  - `docker build --platform linux/amd64` of the repo Dockerfile at b6aecfb
+    succeeds;
+  - the resulting nginx image, served on localhost, passes `smoke-live
+    --expect-lane wasm` both with the GPU and with `--no-gpu` (54/54 tiles on
+    `lane=wasm`, no page errors).
+
+**Two findings for Ross about the deploy environment** (not changed here):
+1. **The Coolify deploy appears stalled since 11 Nov.** Check its build log
+   or its webhook. This ship (lane switched off, no visible change) is not
+   live until it redeploys.
+2. **The Dockerfile copies `Cargo.toml` but not `Cargo.lock`.** Production
+   therefore re-resolves crates at every build:
+   - the image compiled wasm-bindgen 0.2.130, against 0.2.100 in Cargo.lock,
+     so the deployed bytes are not the benchmarked bytes;
+   - on arm64 the floated wasm-bindgen's prebuilt CLI needs glibc 2.38,
+     which bookworm (2.36) lacks, so `docker build` fails at `npm run build`
+     on an arm64 builder; amd64 builds fine.
+
+   Copying Cargo.lock would pin the build. It is a deploy change, so it is
+   Ross's call.
+
+The perf branch `perf/gpu-lane-skeleton` is merged into main. It stays until a
+deploy of b6aecfb or later is observed and smoke-tested; the next run deletes
+it then.
