@@ -3428,9 +3428,18 @@ truth.**
     sub-pixel bits left, and its per-pixel f64 coordinate rounding comes
     out one-directional. The GPU kernel is exact on 395–399 of 400 samples.
   - So the anchor-relative sign axis rejects the more accurate renderer at
-    depth. This is likely also behind df32's open "z25–z29 bias" from
-    2026-11-13: an anchor-side error interacting with a second f32 grid.
-    That is untested; gpu-truth can test it.
+    depth.
+  - **df32's open "z25–z29 bias" (2026-11-13) is df32's own error, not
+    the anchor's.** Tested with gpu-truth on three failing holdout views
+    (seed 2026-11-13, `--min-zoom 25 --max-zoom 29`, 600 samples each):
+    - z26 e010e8c8: anchor 560/600 exact (+18/−22), df32 365/600
+      (+129/−106);
+    - z27 6243cb91: anchor 505/600 exact (+48/−47), df32 265/600
+      (+182/−153);
+    - z29 8976c036: anchor 552/600 exact (+23/−25), df32 219/600
+      (+163/−218).
+    df32's ~48-bit mantissa runs out before f64's does. The 2^-29 cutoff
+    stands.
   - Sample caveat: pixels are drawn from anchor escapers, so GPU-interior
     flips are counted but anchor-interior ones are not. On long chaotic
     orbits (grid-z28 at 50k) both sides re-roll against the truth, and the
