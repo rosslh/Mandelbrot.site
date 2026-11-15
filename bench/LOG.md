@@ -3276,3 +3276,191 @@ Fix items 1–3 above in whichever change first turns the lane on.
 The perf branch `perf/gpu-lane-skeleton` is merged into main. It stays until a
 deploy of b6aecfb or later is observed and smoke-tested; the next run deletes
 it then.
+
+## 2026-11-15 — MEASURED (no ship): GPU tile time decomposed; df32 direct is compute-bound and loses; f32 perturbation (G3 prototype) is faster on grid-z28 and more accurate than the anchor past ~z35
+
+Machine: Apple M1 Pro (8 cores), on AC power, Chrome for Testing
+136.0.7103.94, WebGPU adapter `apple / metal-3` (gpu-probe exit 0), rustc
+1.100.0 (stable, up to date). The machine was busy all run: a Time Machine
+backup (backupd) and a VM kept the 1-minute load at 4–10. **Every timing
+below is indicative, not a verdict.** No e2e verdict was attempted, and none
+was needed: nothing here changes the client. Every GPU number comes from one
+Apple GPU; other vendors are unmeasured.
+
+Deploy check carried over from 2026-11-14: the live site's `last-modified` is
+still Wed 11 Nov 18:34 GMT, so b6aecfb (lane switched off) is **still not
+deployed**. `perf/gpu-lane-skeleton` stays until a deploy is observed.
+
+**New bench tools (bench only; client unchanged):**
+- `src/gpu-decompose.mjs`: loads client/js/gpu.js with in-memory timing
+  patches (each patch point must match exactly once). It times lane
+  start-up, per-tile prep / wait (kernel + copy + mapAsync) / smoothing /
+  recolor, and the fixed round trip of a 1-iteration tile. It then times
+  grid wall time four ways: wasm fast lane on 7 workers, GPU with one device
+  per worker, one GPU owner with every tile in flight, and one owner with
+  one submit.
+- `src/gpu-throughput.mjs`: one GPU owner and a view's full 45-tile grid.
+  Reports Giter/s from each kernel's own counts for df32 (the shipped
+  kernel), plain f32 direct, an f32 perturbation kernel and the G3
+  prototype module, against the wasm fast lane on 7 workers.
+- `page/gpu-perturb.js`: **G3 precision prototype**, never shipped. Same
+  interface as gpu.js. Plain-f32 deltas around a reference orbit at the view
+  origin. The orbit is computed in BigInt fixed point in JS (no Rust change)
+  and stored as f32 hi+lo. The step mirrors
+  `perturbed_escape_iterations_f64` exactly: the first step is not counted,
+  and rebasing uses the same rule. Strided Brent periodicity on (dz, n) is
+  optional.
+- `src/gpu-truth.mjs`: arbiter for a GPU-vs-anchor disagreement. It
+  iterates a sample of anchor-escaper pixels in BigInt fixed point (exact
+  linspace grid, zoom + 160 bits) and reports each side's signed error
+  against that truth.
+- gpu-check: `--module <url>` gates another lane module the same way;
+  `--min-zoom` and `--max-zoom` bound the holdout's zoom range.
+
+**1. Decomposition of the shipped df32 lane** (gpu-decompose, 5 rounds,
+45 tiles of 200 px; results/gpu-decompose-v1.json). Times are ms.
+
+| view | wasm pool (7) | GPU, device per worker (7) | one owner, all in flight | one-tile wait | fixed round trip |
+|---|---|---|---|---|---|
+| z5-i500 | 29 | 35 | 60 | 2.8 | 2.8 |
+| z9-i2000 | 43 | 54 | 68 | 2.8 | 2.8 |
+| z11-i20000 | 90 | 343 | 339 | 2.9 | 2.8 |
+| grid-z20-i1600 | 113 | 182 | 188 | 6.3 | 2.8 |
+| z24-i5000 | 91 | 583 | 569 | 17.5 | 2.8 |
+
+- **Fixed costs are small.** Lane start-up is adapter ~2–5 ms, device
+  ~0.5–1.3 ms and pipeline ~3–4 ms per worker. A 7-worker GPU pool spawns in
+  ~46–69 ms, against ~45–56 ms for the wasm pool. Per-tile prep (coordinates,
+  writeBuffer, encode, submit) is ≤ 0.1 ms. The fixed submit → mapAsync
+  round trip is **2.8 ms per tile**, which sets the floor on light views
+  (z5: the kernel is ~0).
+- **One GPU owner vs per-worker devices: no difference in GPU time.** Seven
+  devices in seven workers and one device with all 45 tiles in flight
+  finish together (z11 343 vs 339 ms, z24 583 vs 569 ms). The GPU is
+  saturated either way, so the kernel is the bottleneck. One submit for all
+  tiles is slower (z24 648 ms), because nothing returns until the last tile
+  does. One owner also serializes smoothing and recolor on its thread (CPU
+  57–123 ms per grid). **Keep one device per worker:** it is simpler and
+  keeps coloring parallel.
+- **df32 direct is 4–6× slower than the wasm pool wherever it has work**
+  (z11, z20, z24). That rules out turning it on for any view class this
+  lane covers today.
+
+**2. Kernel throughput** (gpu-throughput, 3 rounds; Giter/s from each
+kernel's own escape counts, interior pixels included at full budget; wasm
+times its own shortcuts, so compare wasm by wall time;
+results/gpu-throughput-v1…v4.json). Wall time for 45 tiles, in ms:
+
+| view | wasm pool (7) | df32 | f32 direct (speed only) | f32 perturb | G3 prototype (hi/lo orbit + f64 smoothing) |
+|---|---|---|---|---|---|
+| z9-i20000 | 64–67 | 239–248 | 367 | 536–548 | 628–651 |
+| z11-i20000 | 92–102 | 332–367 | 204 | 297–304 | 360–363 |
+| grid-z20-i1600 | 113–127 | 171–184 | 38 | 51 | 96–107 |
+| z24-i5000 | 85–92 | 594–600 | 108 | 167 | 210 |
+| grid-z28-i50000 | 3072–3544 | 7610–8077 | 1186 | 2233–2242 | **3010–3067** |
+
+- **df32 costs 5–8× plain f32 per iteration** (z24: 9.9 vs 55 Giter/s;
+  grid-z28: 9.3 vs 60). The df32 multiply, plus opaque barriers on every
+  intermediate, is the cost.
+- **f32 perturbation runs ~32–35 Giter/s**, about 55–60% of f32 direct.
+  The extra cost is the per-step orbit read and the rebase test.
+- **On grid-z28 the G3 prototype beats the wasm fast lane** (3010 vs
+  3544 ms and 3067 vs 3072 ms in two runs), with periodicity off, so the
+  15.6% interior pixels run their whole 50k budget. The hi/lo orbit costs
+  ~35% over a hi-only orbit (2240 → 3010 ms).
+- On light or interior-heavy views wasm wins by 2–10×. Its interior
+  shortcuts (cardioid test, rect_in_set, Mariani–Silver, periodicity) skip
+  work the GPU brute-forces. The interior share runs from 54% on z9 to 61%
+  on z24.
+- **Periodicity on the GPU is unresolved.** A per-iteration Brent check took
+  z9 from 651 to 193 ms but grid-z28 from 3010 to 4218 ms. A stride-32 check
+  measured slower than none even on z9 (891 vs 628 ms), which makes no sense
+  on its face; the load was 9 during that run. Re-measure on a quiet
+  machine before drawing a conclusion. Candidates: per-workgroup retirement
+  (a warp runs until its slowest lane finishes), a CPU-side rect_in_set or
+  Mariani pass that sends only boundary rectangles to the GPU, or fewer live
+  registers.
+
+**3. Precision: f32 perturbation against the anchor, and against the
+truth.**
+- gpu-check `--module /bench/page/gpu-perturb.js`, fixed corpus, z13–z45:
+  - **user-z28-543f9cfa passes** (5028/4911 balanced flips, the FMA lane's
+    re-roll class). df32 direct could not reach z28 at all.
+  - user-z37 and user-z38 pass. user-z38 passes only with the hi+lo orbit:
+    with a hi-only orbit it failed on sign balance (+2081/−921), because f32
+    rounding of Z_n is common to every pixel and shifts the whole tile one
+    way.
+  - user-z14-b86f9dbc and user-z20 sit on their budgets (quantile drift
+    2.09%, budget 1.5%; tile KS 0.0102, budget 0.01). The verdict flips
+    between runs, so they are marginal re-rolls. These depths are df32's
+    range anyway.
+  - user-z44 fails on sign balance (+6797/−14450, zero flips, ≤ 4 f32 ulp).
+- Holdout (seed 2026-11-15, 80 views, z25–z45): **48/80 pass**. z25–z27
+  pass 13/13. z28–z31 pass 14/18. Failures rise with depth from there: by
+  z41–z45, 12 of 15 fail. Almost every failure is a sign imbalance with few
+  or no flips.
+- **gpu-truth settles which side is biased** (400–600 sampled escapers per
+  view; "exact" means equal to the f32-rounded truth):
+
+  | view | anchor exact, signs | GPU exact, signs |
+  |---|---|---|
+  | hold-z28-031d9444 | 398/400, +0/−2 | 357/400, +24/−19 |
+  | hold-z30-38f46158 | 598/600, +0/−2 | 553/600, +24/−23 |
+  | hold-z31-4ec8173a | 499/600, +41/−60 | 290/600, +168/−142 |
+  | hold-z32-71860576 (needle) | 96/400, +194/−110 | 123/400, +156/−121 |
+  | hold-z35-5359dffd (needle) | 82/400, +118/−200 | 278/400, +60/−62 |
+  | user-z38-ca7e190c | 399/400 | 392/400 |
+  | hold-z41-bcbbf087 | 11/400, +259/−130 | 395/400, +2/−3 |
+  | user-z44-b1cf403c | 186/400, +140/−74 | 399/400, +0/−1 |
+  | grid-z45 view (i6400) | 4/400, 132 counts moved | 190/400, 58 counts moved |
+
+  - **Up to ~z31 the f64-direct anchor is the more precise side.** The GPU
+    lane carries a small, mostly balanced error there: f32 pixel deltas and
+    an f32 delta recurrence give ~1e-4 to 1e-5 px, against the anchor's
+    53 − (zoom + 5) sub-pixel bits.
+  - **From ~z35 the anchor is the biased side.** At z41–z45 it has 4–8
+    sub-pixel bits left, and its per-pixel f64 coordinate rounding comes
+    out one-directional. The GPU kernel is exact on 395–399 of 400 samples.
+  - So the anchor-relative sign axis rejects the more accurate renderer at
+    depth. This is likely also behind df32's open "z25–z29 bias" from
+    2026-11-13: an anchor-side error interacting with a second f32 grid.
+    That is untested; gpu-truth can test it.
+  - Sample caveat: pixels are drawn from anchor escapers, so GPU-interior
+    flips are counted but anchor-interior ones are not. On long chaotic
+    orbits (grid-z28 at 50k) both sides re-roll against the truth, and the
+    truth's own precision is not proven there.
+
+**Held for Ross: how to gate GPU perturbation output at depth.** Today's
+gate, the statistical tier against the f64-direct anchor, cannot pass a
+perturbation-depth GPU lane at z ≳ 32. That is not because the lane is
+wrong: gpu-truth shows it beating the anchor there. The z32+ heavies are
+G3's targets (grid-z36, z45/z46, the pf64 grids). Options:
+- (a) Judge perturbation-depth GPU tiles against a reference that is
+  accurate at depth. Either render the pinned anchor sha through the wasm
+  perturbation path at those depths (exact dc, f64 deltas), or gate on
+  sampled BigInt truth with budgets on the GPU's own error. Either one
+  changes the gate, or adds an anchor rendering mode.
+- (b) Keep the gate. G3 then covers only views where it passes against the
+  f64 anchor (about z25–z27, light views where the GPU is slower than wasm),
+  and stops short of where it is fast.
+- Recommended: (a), with gpu-truth's per-view comparison kept as the
+  arbiter whenever the two disagree. Moving the anchor or its budgets is
+  Ross's call (improve-performance "Held for Ross").
+
+Separately, within policy, G3 also needs a lower cutoff. In z28–z31 the GPU
+carries the small error itself (table above), so its passes against the
+anchor there are close calls.
+
+**Next run.**
+1. Verify the deploy (still none since 11 Nov). Delete
+   `perf/gpu-lane-skeleton` once a deploy of b6aecfb or later is live and
+   smoke-tested.
+2. On a quiet machine, re-run gpu-throughput and settle GPU periodicity
+   (per-iteration vs strided vs per-workgroup), plus the cost of the hi/lo
+   orbit (try reading the lo part only where Z meets dz).
+3. Interior handling for G3: measure a CPU-side rect_in_set/Mariani pass
+   that sends only boundary work to the GPU, against brute force.
+4. Without a gate decision, G3 can still progress on correctness and speed.
+   Its first possible turn-on is a heavy-view class that passes against
+   today's anchor; grid-z28-i50000's view passes, but z28–z31 is marginal on
+   the holdout, so that needs a wider holdout first.

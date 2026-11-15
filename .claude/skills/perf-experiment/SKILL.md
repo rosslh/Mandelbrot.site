@@ -177,10 +177,18 @@ including the tier reported to tierOverlay.
   GPU LOG entry, and design kernels that do not depend on driver-specific
   float behaviour (no reliance on FMA contraction either way).
 - The wasm-level runners (run.mjs, run-grid.mjs) and the correctness tools
-  (pixel-check, validate, enrich) only load wasm artifacts today. Teaching
-  them to render through a GPU variant is backlog item G1 and blocks every
-  GPU verdict; until then a GPU prototype is measured only through
-  run-e2e and ad-hoc probes.
+  (pixel-check, validate, enrich) only load wasm artifacts. GPU work has its
+  own tools:
+  - `gpu-check` (statistical tier vs the anchor; `--module` for a prototype
+    kernel, `--holdout`);
+  - `gpu-truth` (BigInt arbiter when the GPU and the anchor disagree);
+  - `gpu-decompose` and `gpu-throughput` (where GPU time goes);
+  - `lane-check` and run-e2e `:gpu`/`:wasm` on built dists.
+- **The anchor is f64 direct, so its own precision runs out with depth**
+  (53 − log2(1/spacing) sub-pixel bits). From about z35 it is less accurate
+  than an f32-perturbation GPU kernel, and its coordinate rounding comes out
+  one-directional, which the tier's sign axis flags. Before calling a deep
+  GPU failure a kernel bug, run gpu-truth on it (LOG 2026-11-15).
 - client/js/worker.js is plain JS (not type-checked), so GPU code there
   needs no type package; TypeScript 5.9's lib.dom has no WebGPU types, and
   adding `@webgpu/types` is a new dependency (held for Ross).
@@ -661,10 +669,32 @@ policy above. Replace these estimates with measurements as items run.
   opaque XOR barrier; fma() is truly fused. df32's measured cutoff is pixel
   spacing 2^-29 (zoom 24; 355/355 holdout views pass). z25–z29 views fail
   intermittently on sign balance, cause open. Forced on, df32 is slower
-  than wasm on light views (indicative: z11-i20000 +70%, grid-z20 +10%), so
-  turning it on for any view needs item 2 of the LOG's next steps first
-  (decompose GPU tile time; one GPU owner vs per-worker devices).
-- **G3. GPU perturbation, quadratic (the big one).** Reference orbit from
+  than wasm on light views (indicative: z11-i20000 +70%, grid-z20 +10%).
+  **Decomposed 2026-11-15 (LOG; `src/gpu-decompose.mjs`,
+  `src/gpu-throughput.mjs`):** start-up is ~5–8 ms per worker, the fixed
+  submit→readback round trip is 2.8 ms per tile, and one GPU owner equals
+  per-worker devices on GPU time, because the GPU is saturated either way
+  (keep per-worker: coloring stays parallel). df32 costs 5–8× plain f32 per
+  iteration and is 4–6× slower than the wasm pool wherever it has work, so
+  **turning df32 direct on is settled negative on this GPU.** Re-open only
+  for a cheaper extended-precision scheme, or if wasm's interior shortcuts
+  are matched on the GPU and a view class then wins.
+- **G3. GPU perturbation, quadratic (the big one).** **Prototype measured
+  2026-11-15 (LOG):** `bench/page/gpu-perturb.js`, gated with `gpu-check
+  --module`, uses a BigInt orbit in JS, stored as f32 hi+lo. A hi-only
+  orbit shifts whole tiles one way, because Z_n's rounding is common to
+  every pixel. Speed: ~32–35 Giter/s. On grid-z28 it is 3010–3067 ms
+  against wasm's 3072–3544, brute-forcing interior pixels. On
+  interior-heavy light views wasm wins 2–10× through its shortcuts, so
+  interior handling is the next speed item (GPU periodicity unresolved on
+  a busy machine; CPU-side rect/Mariani pass). Precision: user-z28 passes
+  the tier. Holdout z25–z45 passes 48/80: z25–z27 13/13, z28–z31 14/18,
+  failing more with depth. `src/gpu-truth.mjs` shows why: up to ~z31 the
+  f64-direct anchor is the more precise side, and from ~z35 the anchor is
+  the biased side (z41/z44: GPU exact on 395–399 of 400 samples, anchor
+  biased +259/−130 and +140/−74). **Held for Ross: gating perturbation-depth
+  GPU output needs a reference accurate at depth (anchor through the wasm
+  perturbation path, or sampled BigInt truth); see the LOG.** Reference orbit from
   the existing wasm orbit code uploaded as a storage buffer; f32 pixel
   deltas with rebasing; covers z ≳ 13 into the pf64 range. Precision case
   (LOG 2026-11-13): f32 deltas keep ~24 sub-pixel bits at any depth, while

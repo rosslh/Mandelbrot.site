@@ -9,6 +9,7 @@
 //
 //   node src/gpu-check.mjs [--corpus corpus/corpus.json] [--filter <s>]
 //     [--force] [--json <out.json>] [--holdout N [--seed S]]
+//     [--module <url>] [--min-zoom Z] [--max-zoom Z]
 //
 // By default only cases the lane covers (gpuCovers) are judged; the rest are
 // listed as skipped. --force renders every exponent-2 case regardless of the
@@ -19,6 +20,12 @@
 // the events export (events_rows.csv at the repo root) that the lane covers
 // and the corpus does not contain: the anti-overfitting gate for the lane's
 // cutoff. The seed defaults to today's date, like validate.mjs.
+// --min-zoom/--max-zoom bound the holdout's zoom range (default 0..31).
+//
+// --module swaps the lane module for another with the same interface
+// (createGpuLane, gpuCovers), served from the repo root: a bench-only
+// prototype kernel such as /bench/page/gpu-perturb.js (G3) is gated the
+// same way the shipped lane is.
 //
 // Exit 1 when a judged case fails, or when no hardware adapter is present.
 
@@ -50,6 +57,9 @@ function parseArgs(argv) {
     json: null,
     holdout: 0,
     seed: new Date().toISOString().slice(0, 10),
+    module: "/client/js/gpu.js",
+    minZoom: 0,
+    maxZoom: 31,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -59,6 +69,9 @@ function parseArgs(argv) {
     else if (arg === "--json") opts.json = resolve(argv[++i]);
     else if (arg === "--holdout") opts.holdout = Number(argv[++i]);
     else if (arg === "--seed") opts.seed = argv[++i];
+    else if (arg === "--module") opts.module = argv[++i];
+    else if (arg === "--min-zoom") opts.minZoom = Number(argv[++i]);
+    else if (arg === "--max-zoom") opts.maxZoom = Number(argv[++i]);
     else throw new Error(`Unexpected argument: ${arg}`);
   }
   return opts;
@@ -115,10 +128,15 @@ function holdoutCases(opts, corpusCases) {
       candidateKeyFor({ ...row, exponent: row.overrides?.exponent ?? 2 }),
     ),
   );
-  // Over-sample to effective zoom 31 (2^-36 at 200px tiles), deeper than
-  // the lane covers today, so --force holdouts also probe past the cutoff.
+  // By default over-sample to effective zoom 31 (2^-36 at 200px tiles),
+  // deeper than the lane covers today, so --force holdouts also probe past
+  // the cutoff.
   const pool = candidates.filter(
-    (c) => c.exponent === 2 && c.zoom <= 31 && !corpusKeys.has(c.key),
+    (c) =>
+      c.exponent === 2 &&
+      c.zoom >= opts.minZoom &&
+      c.zoom <= opts.maxZoom &&
+      !corpusKeys.has(c.key),
   );
   let state = parseInt(fnv1a(`gpu-${opts.seed}`), 16) >>> 0;
   const rng = () => {
@@ -187,8 +205,8 @@ async function main() {
     if (!isHardwareWebGPU(report)) {
       throw new Error("No hardware WebGPU adapter; see node src/gpu-probe.mjs");
     }
-    await session.page.evaluate(async () => {
-      const module = await import("/client/js/gpu.js");
+    await session.page.evaluate(async (moduleUrl) => {
+      const module = await import(moduleUrl);
       window.gpuModule = module;
       window.gpuLane = await module.createGpuLane();
       const toBase64 = (values) => {
@@ -205,7 +223,7 @@ async function main() {
       };
       window.getGpuValues = async (payload) =>
         toBase64((await window.gpuLane.renderValues(payload)).values);
-    });
+    }, opts.module);
 
     console.log(
       `GPU lane vs anchor @${anchor.gitSha.slice(0, 7)} (statistical tier), ` +
