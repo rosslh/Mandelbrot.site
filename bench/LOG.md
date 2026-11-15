@@ -3374,9 +3374,15 @@ results/gpu-throughput-v1…v4.json). Wall time for 45 tiles, in ms:
   on z24.
 - **Periodicity on the GPU is unresolved.** A per-iteration Brent check took
   z9 from 651 to 193 ms but grid-z28 from 3010 to 4218 ms. A stride-32 check
-  measured slower than none even on z9 (891 vs 628 ms), which makes no sense
-  on its face; the load was 9 during that run. Re-measure on a quiet
-  machine before drawing a conclusion. Candidates: per-workgroup retirement
+  measured slower than none even on z9 (891 vs 628 ms). The code explains
+  this, so it is not noise. With saves and checks only at multiples of the
+  stride s, a cycle of period p can only be seen once the Brent window
+  reaches about s·p/gcd(p, s): for p = 200 at s = 32, that is ~6400
+  iterations. The wasm's s = 4 keeps that small. So a strided check on the
+  GPU detects almost nothing and pays its cost anyway. Keep the check
+  per-iteration, and attack its cost on escapers instead. The likely cause
+  is register pressure (saved dz and n per lane) lowering occupancy; a
+  cheap index-first compare is worth a try. Other candidates: per-workgroup retirement
   (a warp runs until its slowest lane finishes), a CPU-side rect_in_set or
   Mariani pass that sends only boundary rectangles to the GPU, or fewer live
   registers.
@@ -3455,9 +3461,10 @@ anchor there are close calls.
 1. Verify the deploy (still none since 11 Nov). Delete
    `perf/gpu-lane-skeleton` once a deploy of b6aecfb or later is live and
    smoke-tested.
-2. On a quiet machine, re-run gpu-throughput and settle GPU periodicity
-   (per-iteration vs strided vs per-workgroup), plus the cost of the hi/lo
-   orbit (try reading the lo part only where Z meets dz).
+2. On a quiet machine, re-run gpu-throughput. Cut the per-iteration
+   periodicity check's cost on escapers; strided checks are ruled out
+   above. Also cut the hi/lo orbit's cost (try reading the lo part only
+   where Z meets dz).
 3. Interior handling for G3: measure a CPU-side rect_in_set/Mariani pass
    that sends only boundary work to the GPU, against brute force.
 4. Without a gate decision, G3 can still progress on correctness and speed.

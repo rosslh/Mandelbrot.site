@@ -149,7 +149,7 @@ export function gpuCovers(payload) {
   );
 }
 
-export async function createGpuLane({ periodicity = 32 } = {}) {
+export async function createGpuLane({ periodicity = 1 } = {}) {
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
   if (!adapter) throw new Error("No WebGPU adapter");
   const device = await adapter.requestDevice();

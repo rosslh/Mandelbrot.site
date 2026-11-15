@@ -148,7 +148,7 @@ async function main() {
         const protoModule = await import("/bench/page/gpu-perturb.js");
         const proto = await protoModule.createGpuLane();
         window.protoStrides = {};
-        for (const stride of [0, 8, 128]) window.protoStrides[stride] = await protoModule.createGpuLane({ periodicity: stride });
+        for (const stride of [0, 32]) window.protoStrides[stride] = await protoModule.createGpuLane({ periodicity: stride });
         window.tp = { gpu, device, pipelines, pool, wasmUrl, workerUrl, proto };
         return true;
       },
@@ -296,7 +296,7 @@ async function main() {
       }
       const med = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
       const row = { id: c.id, tiles: payloads.length, orbitLen: rounds[0].orbitLen, rounds };
-      for (const k of ["df32", "f32-direct", "f32-perturb", "proto", "proto0", "proto8", "proto128", "wasm"]) row[k] = med(rounds.map((r) => r[k].ms));
+      for (const k of ["df32", "f32-direct", "f32-perturb", "proto", "proto0", "proto32", "wasm"]) row[k] = med(rounds.map((r) => r[k].ms));
       for (const k of ["df32", "f32-direct", "f32-perturb"]) {
         row[`${k}Giter`] = rounds[0][k].iterSum / 1e9;
         row[`${k}Interior`] = rounds[0][k].interior;
@@ -306,7 +306,7 @@ async function main() {
       console.log(
         `\n${c.id} (${row.tiles} tiles, orbit ${row.orbitLen}):\n` +
           `  wasm pool(7)  ${row.wasm.toFixed(0)} ms  (${(row.df32Giter / (row.wasm / 1000)).toFixed(1)} Giter/s at df32's count)\n` +
-          `  df32          ${gs("df32")}\n  f32-direct    ${gs("f32-direct")}\n  f32-perturb   ${gs("f32-perturb")}\n  proto (hi/lo orbit + smoothing, one owner), periodicity stride 32: ${row.proto.toFixed(0)} ms; off ${row.proto0.toFixed(0)}, stride 8 ${row.proto8.toFixed(0)}, stride 128 ${row.proto128.toFixed(0)} ms`,
+          `  df32          ${gs("df32")}\n  f32-direct    ${gs("f32-direct")}\n  f32-perturb   ${gs("f32-perturb")}\n  proto (hi/lo orbit + smoothing, one owner), periodicity every iteration: ${row.proto.toFixed(0)} ms; off ${row.proto0.toFixed(0)}, stride 32 ${row.proto32.toFixed(0)} ms`,
       );
     }
   } finally {
