@@ -3364,8 +3364,8 @@ results/gpu-throughput-v1…v4.json). Wall time for 45 tiles, in ms:
   intermediate, is the cost.
 - **f32 perturbation runs ~32–35 Giter/s**, about 55–60% of f32 direct.
   The extra cost is the per-step orbit read and the rebase test.
-- **On grid-z28 the G3 prototype beats the wasm fast lane** (3010 vs
-  3544 ms and 3067 vs 3072 ms in two runs), with periodicity off, so the
+- **On grid-z28 the G3 prototype beats the wasm fast lane** (busy runs:
+  3010 vs 3544 ms and 3067 vs 3072 ms; quiet re-take below: 3043 vs 3438 ms), with periodicity off, so the
   15.6% interior pixels run their whole 50k budget. The hi/lo orbit costs
   ~35% over a hi-only orbit (2240 → 3010 ms).
 - On light or interior-heavy views wasm wins by 2–10×. Its interior
@@ -3386,6 +3386,26 @@ results/gpu-throughput-v1…v4.json). Wall time for 45 tiles, in ms:
   (a warp runs until its slowest lane finishes), a CPU-side rect_in_set or
   Mariani pass that sends only boundary rectangles to the GPU, or fewer live
   registers.
+
+**Quiet-machine re-take** (later the same run; 1-minute load 3.9 at the
+start, gpu-probe exit 0; 5 rounds; results/gpu-throughput-quiet.json). The
+busy-run picture holds:
+
+| view | wasm pool (7) | G3 prototype, no periodicity | per-iteration periodicity | stride 32 |
+|---|---|---|---|---|
+| z9-i20000 | 69 ms | 541 | **201** | 739 |
+| z11-i20000 | 91 | 307 | 299 | 423 |
+| grid-z20-i1600 | 108 | **92** | 105 | 96 |
+| z24-i5000 | 79 | 166 | 220 | 227 |
+| grid-z28-i50000 | 3438 | **3043 (−11%)** | 4951 | 4090 |
+
+- df32 is 9.3–12 Giter/s, against 60–68 for f32 direct.
+- grid-z20 is also slightly faster than wasm without periodicity (92 vs
+  108 ms). That view sits inside df32's range, where df32 passes and f32
+  perturbation is marginal.
+- Per-iteration periodicity is a large win on interior-heavy views and a
+  63% tax on the heavy escaper grid. It has to become cheap, or be chosen
+  per view, before G3 can turn on anywhere.
 
 **3. Precision: f32 perturbation against the anchor, and against the
 truth.**
