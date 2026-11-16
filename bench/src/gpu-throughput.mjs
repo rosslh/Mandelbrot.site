@@ -306,7 +306,7 @@ async function main() {
       console.log(
         `\n${c.id} (${row.tiles} tiles, orbit ${row.orbitLen}):\n` +
           `  wasm pool(7)  ${row.wasm.toFixed(0)} ms  (${(row.df32Giter / (row.wasm / 1000)).toFixed(1)} Giter/s at df32's count)\n` +
-          `  df32          ${gs("df32")}\n  f32-direct    ${gs("f32-direct")}\n  f32-perturb   ${gs("f32-perturb")}\n  proto (hi/lo orbit + smoothing, one owner), periodicity every iteration: ${row.proto.toFixed(0)} ms; off ${row.proto0.toFixed(0)}, stride 32 ${row.proto32.toFixed(0)} ms`,
+          `  df32          ${gs("df32")}\n  f32-direct    ${gs("f32-direct")}\n  f32-perturb   ${gs("f32-perturb")}\n  proto (G3 prototype defaults + smoothing, one owner), branchless per-iteration periodicity: ${row.proto.toFixed(0)} ms; off ${row.proto0.toFixed(0)}, stride 32 ${row.proto32.toFixed(0)} ms`,
       );
     }
   } finally {

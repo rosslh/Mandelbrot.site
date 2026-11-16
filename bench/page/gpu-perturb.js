@@ -10,25 +10,85 @@
 // to f32), dz' = (2Z + dz)dz + dc, z = Z_{n+1} + dz, and the same rebase rule
 // (restart at Z_0 with dz = z when the orbit runs out or |z| < |dz|). The
 // first step is not counted, so counts match the direct renderer's. Brent
-// periodicity on (dz, n) retires interior pixels early (createGpuLane's
-// `periodicity` is the check stride in iterations; 0 turns it off). Smoothing is done on the
-// CPU in f64.
+// periodicity on (dz, n) retires interior pixels early. Smoothing is done on
+// the CPU in f64.
 
 const TILE_SPACE_SCALE = 200 / 128;
 const ESCAPE_RADIUS = 3;
 const MAX_ORBIT_LENGTH = 1 << 20;
 const WORKGROUP = 8;
 
-const shader = (periodicity) => /* wgsl */ `
-const PERIODICITY = ${periodicity > 0};
-const STRIDE = ${Math.max(1, periodicity)}u;
+// One counted step: dz' = (2Z + dz)dz + dc, z = Z_{n+1} + dz, then rebase
+// when the orbit runs out or |z| < |dz|.
+const STEP = /* wgsl */ `
+    let Z = orbit[n];
+    let t = 2.0 * Z.xy + opaque(2.0 * Z.zw + dz);
+    dz = vec2<f32>(t.x * dz.x - t.y * dz.y, t.x * dz.y + t.y * dz.x) + dc;
+    n = n + 1u;
+    let Zn = orbit[n];
+    z = select(Zn.xy + dz, Zn.xy + opaque(Zn.zw + dz), Z_LO);
+    if (n == last || dot(z, z) < dot(dz, dz)) { dz = z; n = 0u; }`;
+
+// Per-iteration Brent periodicity on the full state (dz, n), as in
+// perturbed_escape_iterations_f64: an exact recurrence of the computed state
+// means this arithmetic cycles forever, so the pixel is interior (z is unused
+// for interior pixels). Branchless (LOG 2026-11-16): the uncounted first step
+// is peeled out of the loop, the cycle test is part of the loop's exit
+// condition, and the save at each power-of-two i is a select. On grid-z28
+// this costs ~+19% over no check, against +65% for a branch-and-break check.
+const branchlessBody = /* wgsl */ `
+  {${STEP}
+  }
+  var savedDz = dz;
+  var savedN = n;
+  var cycle = false;
+  loop {
+    if (dot(z, z) >= ${ESCAPE_RADIUS * ESCAPE_RADIUS}.0 || i >= params.maxIterations || cycle) { break; }
+    i = i + 1u;${STEP}
+    cycle = n == savedN && all(dz == savedDz);
+    let save = (i & (i - 1u)) == 0u;
+    savedDz = select(savedDz, dz, save);
+    savedN = select(savedN, n, save);
+  }
+  if (cycle) { i = params.maxIterations; }`;
+
+// No check (STRIDE 0) or a check every STRIDE iterations, saving at 2^k *
+// STRIDE. Kept for measurement: strided checks cost about as much as the
+// per-iteration one on the GPU and detect less (LOG 2026-11-16).
+const stridedBody = /* wgsl */ `
+  var first = true;
+  var savedDz = vec2<f32>(0.0, 0.0);
+  var savedN = 0u;
+  var nextSave = 2u * STRIDE;
+  loop {
+    if (!first) {
+      if (dot(z, z) >= ${ESCAPE_RADIUS * ESCAPE_RADIUS}.0 || i >= params.maxIterations) { break; }
+      i = i + 1u;
+    }${STEP}
+    if (STRIDE > 0u) {
+      if (first) {
+        savedDz = dz; savedN = n;
+      } else if (i % max(STRIDE, 1u) == 0u) {
+        if (all(dz == savedDz) && n == savedN) { i = params.maxIterations; break; }
+        if (i == nextSave) { savedDz = dz; savedN = n; nextSave = nextSave * 2u; }
+      }
+    }
+    first = false;
+  }`;
+
+const shader = (periodicity, zLo) => /* wgsl */ `
+const STRIDE = ${periodicity}u;
+// false: z = Z + dz adds Z's hi part only (the lo part stays in 2Z + dz).
+const Z_LO = ${zLo};
 struct Params { width: u32, height: u32, maxIterations: u32, orbitLen: u32, zero: u32, _p0: u32, _p1: u32, _p2: u32 };
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read_write> out: array<u32>;
 // Z_n as (hi.re, hi.im, lo.re, lo.im): hi the nearest f32, lo the f32
-// nearest the rest. The lo part matters only where Z is added to dz: the
-// f32 rounding of Z is the same for every pixel, so dropping it shifts the
-// whole tile one way (measured: a one-directional sign imbalance at z38/z44).
+// nearest the rest. The f32 rounding of Z is the same for every pixel, so
+// dropping lo shifts the whole tile one way. Measured 2026-11-16: the lo part
+// that matters is the one in the multiplier 2Z + dz (dropping it there
+// reproduces the hi-only z38 imbalance, +2077/-921); dropping it from
+// z = Z + dz (Z_LO false) leaves every fixed-corpus verdict unchanged.
 @group(0) @binding(2) var<storage, read> orbit: array<vec4<f32>>;
 // Per-axis pixel deltas from the origin: width real parts, then height
 // imaginary parts.
@@ -47,34 +107,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   var dz = vec2<f32>(0.0, 0.0);
   var z = vec2<f32>(0.0, 0.0);
   var i = 0u;
-  var first = true;
-  var savedDz = vec2<f32>(0.0, 0.0);
-  var savedN = 0u;
-  var nextSave = 2u * STRIDE;
-  loop {
-    if (!first) {
-      if (dot(z, z) >= ${ESCAPE_RADIUS * ESCAPE_RADIUS}.0 || i >= params.maxIterations) { break; }
-      i = i + 1u;
-    }
-    let Z = orbit[n];
-    let t = 2.0 * Z.xy + opaque(2.0 * Z.zw + dz);
-    dz = vec2<f32>(t.x * dz.x - t.y * dz.y, t.x * dz.y + t.y * dz.x) + dc;
-    n = n + 1u;
-    let Zn = orbit[n];
-    z = Zn.xy + opaque(Zn.zw + dz);
-    if (n == last || dot(z, z) < dot(dz, dz)) { dz = z; n = 0u; }
-    // Brent periodicity on the full state (dz, n), as in
-    // perturbed_escape_iterations_f64: an exact recurrence of the computed
-    // state means this arithmetic cycles forever, so the pixel is interior
-    // (z is unused for interior pixels).
-    if (PERIODICITY) {
-      if (!first && i % STRIDE == 0u) {
-        if (all(dz == savedDz) && n == savedN) { i = params.maxIterations; break; }
-        if (i == nextSave) { savedDz = dz; savedN = n; nextSave = nextSave * 2u; }
-      } else { savedDz = dz; savedN = n; }
-    }
-    first = false;
-  }
+  ${periodicity === 1 ? branchlessBody : stridedBody}
   let base = 3u * (id.y * params.width + id.x);
   out[base] = i;
   out[base + 1u] = bitcast<u32>(z.x);
@@ -149,13 +182,15 @@ export function gpuCovers(payload) {
   );
 }
 
-export async function createGpuLane({ periodicity = 1 } = {}) {
+// periodicity: 1 = per-iteration branchless check (default), 0 = none, N > 1
+// = a check every N iterations. zLo: add Z's lo part in z = Z + dz too.
+export async function createGpuLane({ periodicity = 1, zLo = false } = {}) {
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
   if (!adapter) throw new Error("No WebGPU adapter");
   const device = await adapter.requestDevice();
   const pipeline = await device.createComputePipelineAsync({
     layout: "auto",
-    compute: { module: device.createShaderModule({ code: shader(periodicity) }), entryPoint: "main" },
+    compute: { module: device.createShaderModule({ code: shader(periodicity, zLo) }), entryPoint: "main" },
   });
   let cached = null;
 

@@ -3500,3 +3500,121 @@ anchor there are close calls.
    Its first possible turn-on is a heavy-view class that passes against
    today's anchor; grid-z28-i50000's view passes, but z28–z31 is marginal on
    the holdout, so that needs a wider holdout first.
+
+## 2026-11-16 — MEASURED (no ship): G3 periodicity made cheap (branchless, z28 tax +65% → +16%); the hi/lo orbit's lo is needed only in the multiplier
+
+Machine: Apple M1 Pro (8 cores), on AC power, Chrome for Testing
+136.0.7103.94, WebGPU adapter `apple / metal-3` (gpu-probe exit 0), rustc
+1.100.0 (stable). Quiet at the start (1-minute load 2.5); a Time Machine
+backup and a VM pushed it to 5–10 mid-run, back to 2.9 for the final take.
+Every config is interleaved within each round, so the comparisons below
+hold, but they are indicative timings, not e2e verdicts; none was needed,
+because nothing here changes the client. One Apple GPU; other vendors are
+unmeasured.
+
+Deploy check (carried over): the live site's `last-modified` is still
+Wed 11 Nov 18:34 GMT, and its worker bundles contain no `requestAdapter`.
+b6aecfb (lane switched off) and the four commits since are **still not
+deployed**, although Tests and Code Quality pass on every one. This run's
+push is LOG and bench only, so the cause is not here; the deploy
+environment is Ross's to look at. `perf/gpu-lane-skeleton` (merged) stays
+until a deploy is observed.
+
+**New tool:** `bench/src/gpu-periodicity.mjs` renders each of
+gpu-throughput's five views (45 tiles of 200 px, one GPU owner, every tile
+in flight) once per prototype config, next to the wasm fast lane on 7
+workers. It also checks that every periodicity config's values are
+bit-identical to the no-periodicity config's (an exact state recurrence is
+a true cycle, so the check may only retire pixels that would have used up
+their budget). Every config below passed that check: 0 px differ.
+
+**1. A bug in the prototype's strided check, and the 2026-11-15
+explanation it invalidates.** gpu-perturb.js saved (dz, n) on every
+iteration that was not a check point (`else { savedDz = dz; ... }`, meant
+for the first step only). With stride s > 1, each check compared against
+the state one iteration earlier, so it could detect only fixed points
+(period 1). That, not the lcm(s, p) window argument in the 2026-11-15
+entry, is why stride 32 detected almost nothing. With the bug fixed,
+strided checks detect cycles but are still no cheaper:
+
+| view (interior) | none | per-iteration (old shape) | stride 4 (fixed) | stride 32 (fixed) |
+|---|---|---|---|---|
+| z9-i20000 (54%) | 547 | 196 | 201 | 373 |
+| z24-i5000 (61%) | 177 | 215 | 225 | 276 |
+| grid-z28-i50000 (16%) | 2530 | 4219 | 4128 | 4036 |
+
+ms, 5 rounds (results/gpu-periodicity-v2.json). Even stride 32, which runs
+the compare on 1 iteration in 32, costs grid-z28 +60%. So the tax comes
+from the check being in the loop at all, not from the compares it runs.
+
+**2. What does not help, on grid-z28 (none: ~2500 ms):**
+- index-first compare (`n == savedN` before the floats): slower everywhere
+  (z28 4916 vs 4342 ms for the plain per-iteration check);
+- deferred start (no saves or compares before iteration 256 or 1024):
+  within ±5%, because grid-z28's escapers average ~41k iterations;
+- comparing dz as bits instead of as floats: no change.
+
+**3. What does help: loop shape.**
+- Peel the uncounted first step out of the loop (no `first` flag) and save
+  at power-of-two i (no `nextSave` counter): z28 4201 → 3516 ms.
+- Retire a cycle by setting i to the budget and letting the loop's own
+  test end it (one loop exit): 3445 → 3236 ms.
+- **Branchless** (the default now): the cycle test is part of the exit
+  condition, and the save is a `select`: **2923 ms (+19% over none,
+  against +65% for the old check)**. It is also the fastest periodic shape
+  on every view. Without the peel it is slower (z28 3102, z24 161 vs
+  141 ms).
+
+**4. Hi/lo orbit: the lo part is needed only in the multiplier.** The
+step reads Z_n as hi + lo in two places: the multiplier t = 2Z + dz and
+z = Z_{n+1} + dz. The 2026-11-15 note said lo matters where Z meets dz.
+Measured per site:
+- **lo dropped from the multiplier** (gpu-check, fixed corpus): 4/8 pass.
+  user-z38 fails with +2077/−921, the hi-only orbit's signature from
+  2026-11-15. user-z28 fails on interior fraction (0.650%, budget 0.5%).
+  **Rejected.**
+- **lo dropped from z = Z + dz** (`zLo: false`, now the default): every
+  fixed-corpus verdict is the same as with the full hi/lo orbit (5/8;
+  user-z38 875 px, +486/−389 both ways). On the 2026-11-15 holdout (seed
+  2026-11-15, 80 views, z25–z45) it passes **49/80, against 48/80** for the
+  full hi/lo orbit, which reproduced the 2026-11-15 result exactly. The one
+  view that changed, hold-z34-b96068b1, now passes. gpu-truth gives
+  identical exact counts on user-z38 (392/400), user-z44 (399/400) and
+  syn-direct-z30-seahorse (200 of 398 vs 200 of 395). It is 3–7% faster.
+
+**Final take** (load 2.9 at the start, 5 rounds,
+results/gpu-periodicity-v5.json; ms for 45 tiles):
+
+| view | wasm pool (7) | G3 no periodicity | **G3 new default** (branchless, lo in multiplier only) | G3 as of 2026-11-15 (quiet re-take) |
+|---|---|---|---|---|
+| z9-i20000 | 57 | 521 | **126** | 201 |
+| z11-i20000 | 84 | 299 | **179** | 299 |
+| grid-z20-i1600 | 105 | 96 | **88** | 105 |
+| z24-i5000 | 83 | 165 | **134** | 220 |
+| grid-z28-i50000 | 2847 | 2426 | **2824** | 4951 |
+
+- The per-iteration check now costs +16% on the heavy escaper grid and
+  still cuts interior-heavy views 4×. With it on, G3 ties wasm on grid-z28
+  (2824 vs 2847 ms) and beats it on grid-z20 (88 vs 105 ms).
+- Light interior-heavy views are still 1.6–2.2× slower than wasm, which
+  skips interior work entirely (cardioid test, rect_in_set,
+  Mariani–Silver). Those views take only 57–84 ms, though.
+- Turning periodicity off wins only on grid-z28, by 14% (2426 vs 2847 ms).
+  Choosing per view would take an interior estimate in advance.
+
+**Verdict:** no ship (prototype only; the G3 gate is still held for Ross,
+see 2026-11-15). The prototype's defaults are now branchless per-iteration
+periodicity and lo in the multiplier only; strided checks are settled
+negative on this GPU. `bench/page/gpu-perturb.js` keeps only the strided
+shape (for `periodicity` 0 or N > 1) and the branchless one.
+
+**Next run.**
+1. Verify the deploy (none since 11 Nov). Delete `perf/gpu-lane-skeleton`
+   once a deploy of b6aecfb or later is live and smoke-tested.
+2. Interior handling for G3 (now the top G3 speed item): measure a
+   CPU-side rect_in_set/Mariani pass that sends only boundary rectangles
+   to the GPU, against brute force with branchless periodicity. This is
+   the gap on light interior-heavy views, and it would also drop grid-z28's
+   remaining +16% check cost on fully interior blocks.
+3. Widen the holdout in z28–z31 (G3's first possible turn-on class
+   against today's anchor) with the new defaults.

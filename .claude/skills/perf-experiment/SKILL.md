@@ -183,6 +183,8 @@ including the tier reported to tierOverlay.
     kernel, `--holdout`);
   - `gpu-truth` (BigInt arbiter when the GPU and the anchor disagree);
   - `gpu-decompose` and `gpu-throughput` (where GPU time goes);
+  - `gpu-periodicity` (G3 prototype loop configs, timed and output-checked
+    against no periodicity);
   - `lane-check` and run-e2e `:gpu`/`:wasm` on built dists.
 - **The anchor is f64 direct, so its own precision runs out with depth**
   (53 − log2(1/spacing) sub-pixel bits). From about z35 it is less accurate
@@ -683,11 +685,20 @@ policy above. Replace these estimates with measurements as items run.
   2026-11-15 (LOG):** `bench/page/gpu-perturb.js`, gated with `gpu-check
   --module`, uses a BigInt orbit in JS, stored as f32 hi+lo. A hi-only
   orbit shifts whole tiles one way, because Z_n's rounding is common to
-  every pixel. Speed: ~32–35 Giter/s. On grid-z28 it is 3010–3067 ms
-  against wasm's 3072–3544, brute-forcing interior pixels. On
-  interior-heavy light views wasm wins 2–10× through its shortcuts, so
-  interior handling is the next speed item (GPU periodicity unresolved on
-  a busy machine; CPU-side rect/Mariani pass). Precision: user-z28 passes
+  every pixel. **The lo part is needed only in the multiplier 2Z + dz**
+  (2026-11-16: dropping it from z = Z + dz keeps every verdict and
+  gpu-truth's exact counts, and is 3–7% faster; that is now the default).
+  Speed: ~32–35 Giter/s. **Periodicity settled 2026-11-16 (LOG):**
+  branchless per-iteration Brent (first step peeled, cycle test in the
+  loop exit, select-based power-of-two save) costs grid-z28 +16% over no
+  check (the old branch-and-break shape cost +65%). It cuts interior-heavy
+  views 4×. Strided checks lose on the GPU: the 2026-11-15 strided result
+  came from a save bug, and fixed strides still cost as much. With the new
+  defaults G3 ties wasm on grid-z28 (2824 vs 2847 ms) and beats it on
+  grid-z20 (88 vs 105 ms). Light interior-heavy views are still
+  1.6–2.2× slower than wasm (126–179 vs 57–84 ms), so **interior handling
+  is the next speed item**: a CPU-side rect_in_set/Mariani pass that sends
+  only boundary rectangles to the GPU. Precision: user-z28 passes
   the tier. Holdout z25–z45 passes 48/80: z25–z27 13/13, z28–z31 14/18,
   failing more with depth. `src/gpu-truth.mjs` shows why: up to ~z31 the
   f64-direct anchor is the more precise side, and from ~z35 the anchor is
