@@ -20,13 +20,22 @@ import { readAnchorConfig } from "./tolerance.mjs";
 const benchDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 function parseArgs(argv) {
-  const opts = { module: "/client/js/gpu.js", case: null, view: null, samples: 400 };
+  const opts = {
+    module: "/client/js/gpu.js",
+    case: null,
+    view: null,
+    samples: 400,
+    variant: null,
+  };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--module") opts.module = argv[++i];
     else if (arg === "--case") opts.case = argv[++i];
     else if (arg === "--view") opts.view = argv[++i];
     else if (arg === "--samples") opts.samples = Number(argv[++i]);
+    // A wasm variant to judge in the anchor's place (default: the pinned
+    // anchor), e.g. a current build at depths the anchor's code predates.
+    else if (arg === "--variant") opts.variant = argv[++i];
     else throw new Error(`Unexpected argument: ${arg}`);
   }
   return opts;
@@ -34,17 +43,25 @@ function parseArgs(argv) {
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
-  const corpus = JSON.parse(readFileSync(join(benchDir, "corpus", "corpus.json"), "utf8"));
+  const corpus = JSON.parse(
+    readFileSync(join(benchDir, "corpus", "corpus.json"), "utf8"),
+  );
   let benchCase;
   if (opts.case) benchCase = corpus.cases.find((c) => c.id === opts.case);
   else {
     const [re, im, zoom, iterations] = opts.view.split(",");
-    benchCase = { id: "view", re, im, zoom: Number(zoom), iterations: Number(iterations) };
+    benchCase = {
+      id: "view",
+      re,
+      im,
+      zoom: Number(zoom),
+      iterations: Number(iterations),
+    };
   }
   if (!benchCase) throw new Error("case not found");
   const [payload, args] = caseToWasmArgs(benchCase, corpus.defaults);
   const anchor = readAnchorConfig();
-  const session = await startSession([anchor.variant]);
+  const session = await startSession([opts.variant ?? anchor.variant]);
   try {
     const result = await session.page.evaluate(
       async (moduleUrl, args, payload, samples) => {
@@ -89,16 +106,23 @@ async function main() {
         const decToFixed = (text, bits) => {
           let s = text.trim();
           let neg = false;
-          if (s[0] === "-") { neg = true; s = s.slice(1); }
+          if (s[0] === "-") {
+            neg = true;
+            s = s.slice(1);
+          }
           let exp10 = 0;
           const e = s.search(/e/i);
-          if (e >= 0) { exp10 = Number(s.slice(e + 1)); s = s.slice(0, e); }
+          if (e >= 0) {
+            exp10 = Number(s.slice(e + 1));
+            s = s.slice(0, e);
+          }
           const [w, f = ""] = s.split(".");
           const scale = f.length - exp10;
           const digits = BigInt((w || "0") + f);
-          const v = scale >= 0
-            ? (digits << BigInt(bits)) / 10n ** BigInt(scale)
-            : (digits * 10n ** BigInt(-scale)) << BigInt(bits);
+          const v =
+            scale >= 0
+              ? (digits << BigInt(bits)) / 10n ** BigInt(scale)
+              : (digits * 10n ** BigInt(-scale)) << BigInt(bits);
           return neg ? -v : v;
         };
         const W = payload.imageWidth;
@@ -124,9 +148,11 @@ async function main() {
 
         // Deterministic sample of anchor escapers.
         const candidates = [];
-        for (let p = 0; p < W * H; p++) if (Number.isFinite(anchorValues[p])) candidates.push(p);
+        for (let p = 0; p < W * H; p++)
+          if (Number.isFinite(anchorValues[p])) candidates.push(p);
         let state = 12345;
-        const rng = () => ((state = (Math.imul(state, 1103515245) + 12345) >>> 0) / 4294967296);
+        const rng = () =>
+          (state = (Math.imul(state, 1103515245) + 12345) >>> 0) / 4294967296;
         const picks = [];
         while (picks.length < Math.min(samples, candidates.length)) {
           picks.push(candidates[Math.floor(rng() * candidates.length)]);
@@ -135,8 +161,10 @@ async function main() {
         for (const p of picks) {
           const col = BigInt(p % W);
           const row = BigInt(Math.floor(p / W));
-          const cr = oRe + ((xMin + ((xMax - xMin) * col) / BigInt(W - 1)) >> zo);
-          const ci = oIm + ((yMin + ((yMax - yMin) * row) / BigInt(H - 1)) >> zo);
+          const cr =
+            oRe + ((xMin + ((xMax - xMin) * col) / BigInt(W - 1)) >> zo);
+          const ci =
+            oIm + ((yMin + ((yMax - yMin) * row) / BigInt(H - 1)) >> zo);
           let zr = cr;
           let zi = ci;
           let i = 0;
@@ -150,7 +178,10 @@ async function main() {
             i++;
           }
           if (i >= maxIt) continue;
-          const truth = i - Math.log(Math.log(Math.hypot(toNum(zr), toNum(zi))) / lnR) / Math.LN2;
+          const truth =
+            i -
+            Math.log(Math.log(Math.hypot(toNum(zr), toNum(zi))) / lnR) /
+              Math.LN2;
           rows.push({ truth, anchor: anchorValues[p], gpu: gpuValues[p] });
         }
         return rows;
@@ -166,10 +197,14 @@ async function main() {
       const pos = d.filter((x) => x > 0).length;
       const neg = d.filter((x) => x < 0).length;
       const abs = d.map(Math.abs).sort((a, b) => a - b);
-      const countMoved = both.filter((r) => Math.floor(r[key]) !== Math.floor(r.truth)).length;
+      const countMoved = both.filter(
+        (r) => Math.floor(r[key]) !== Math.floor(r.truth),
+      ).length;
       return `${key}: ${both.length} px, exact ${both.length - pos - neg}, +${pos}/-${neg}, median |Δ| ${abs[Math.floor(abs.length / 2)]?.toExponential(1)}, p90 ${abs[Math.floor(abs.length * 0.9)]?.toExponential(1)}, count moved ${countMoved}`;
     };
-    console.log(`${benchCase.id}: ${result.length} sampled escapers vs BigInt truth`);
+    console.log(
+      `${benchCase.id}: ${result.length} sampled escapers vs BigInt truth`,
+    );
     console.log(`  ${summarize("anchor")}`);
     console.log(`  ${summarize("gpu")}`);
   } finally {

@@ -3618,3 +3618,155 @@ shape (for `periodicity` 0 or N > 1) and the branchless one.
    remaining +16% check cost on fully interior blocks.
 3. Widen the holdout in z28–z31 (G3's first possible turn-on class
    against today's anchor) with the new defaults.
+
+## 2026-11-17 — MEASURED (no ship): GPU Mariani–Silver for G3 — a shallow 20 px block tree halves interior-heavy views at no cost to the heavy grid; the G3 prototype renders the z47/z48 pf64 grids 13–24× faster than wasm
+
+Machine: Apple M1 Pro (8 cores), on AC power, Chrome for Testing
+136.0.7103.94, WebGPU adapter `apple / metal-3` (gpu-probe exit 0), rustc
+1.100.0 (`rustup update stable`: already current). 1-minute load 1.6–3.9 at
+the start of each take. The benchmarks' own workers and a VM pushed it to 5–9
+mid-run, and a few sweep takes started at 4–8. Every config is interleaved
+within each round, so the comparisons hold, but these are prototype timings,
+not e2e verdicts. None was needed, because nothing here changes the client.
+One Apple GPU; other vendors are unmeasured.
+
+Deploy check (carried over): the live site's `last-modified` is still
+Wed 11 Nov 18:34 GMT. b6aecfb and everything since are still not deployed.
+`perf/gpu-lane-skeleton` (merged) stays until a deploy is observed.
+
+**What was built (bench only).**
+- `bench/page/gpu-perturb.js`: the G3 prototype has a GPU Mariani–Silver
+  mode. `marianiTree` builds a static rect tree per tile shape.
+- Each wave is one `ring` dispatch: it computes that level's scheduled
+  pixels, but only for rects whose parent split.
+- A `classify` dispatch follows each wave. It marks a rect FILLED when its
+  whole ring hit the budget, else SPLIT.
+- All waves go in one compute pass, with no CPU round trip. A pixel inside a
+  filled rect is never written and reads back as interior.
+- Two tree shapes:
+  - `mariani: true`: wasm's exact tree (`subdivide_tile_streamed`:
+    midpoint quadrants, leaf ≤ 8 px);
+  - `mariani: [sizes]`: a shallow tree. Rings of fixed-size blocks first,
+    then one leaf wave.
+- `leafPeriodicity` sets the leaf wave's periodicity on its own.
+- gpu-periodicity: `--pool N` times on N devices, each rendering one tile at
+  a time (production's shape: one device per worker). `--deep` adds the
+  z36–z48 grid-regression views.
+- gpu-check: `--lane-options <json>`. gpu-truth: `--variant <wasm build>`,
+  to judge another build in the anchor's place.
+
+**Results** (ms for 45 tiles of 200 px; one GPU owner with every tile in
+flight; median of 7 rounds unless noted; results/gpu-mariani-*.json):
+
+| view (interior) | wasm (7) | brute force, branchless | wasm's tree | blocks 20 | blocks 20, no periodicity | **blocks 20, periodicity in ring wave only** |
+|---|---|---|---|---|---|---|
+| z9-i20000 (54%) | 56 | 125 | 206 | 115 | 179 | **112** |
+| z11-i20000 (28%) | 86 | 181 | 211 | 141 | 150 | **122** |
+| grid-z20-i1600 (9%) | 106 | 103 | 117 | 100 | 97 | **106** |
+| z24-i5000 (61%) | 84 | 134 | 94 | 68 | 69 | **66** |
+| grid-z28-i50000 (16%) | 2940 | 2714 | 3755 | 2748 | 2464 | **2424** |
+
+The wasm's-tree column is from results/gpu-mariani-once-v1.json (5 rounds).
+
+Production shape (`--pool 7`, 5 rounds): brute force → blocks 20 with
+ring-wave periodicity gives z9 124 → 113 ms, z11 176 → 120 ms, z20 106 → 99 ms,
+z24 131 → 79 ms and grid-z28 2429 → 2508 ms (+3%, against −11% with one owner).
+
+What the sweep taught:
+1. **wasm's own tree loses on the GPU.** It has six dependent waves per
+   tile, and each wave waits for its slowest pixel while the GPU sits mostly
+   idle. Seven devices do not hide that: the pool-7 numbers match one owner,
+   so dispatches from different devices do not overlap usefully on this
+   GPU. grid-z28 went 2.7 → 4.5–4.7 s with that tree.
+2. **List each pixel once.** The first shallow trees re-listed ring pixels
+   in the leaf wave, where they exited at once. That left idle lanes in every
+   row, and grid-z28 paid +14%. Every ancestor of an active rect was active,
+   so an earlier ring's pixels are always computed first. Listing each pixel
+   only at its first level removed the tax (blocks 20: 2801 → 2728 ms).
+3. **Block size: 12–25 px are close.** Two-level trees ([40, 20],
+   [50, 25], [100, 25], [200, 25]) cost grid-z28 +10–25% for no gain
+   elsewhere.
+4. **Periodicity in the ring wave only.** The fills retire interior blocks,
+   so the leaf wave can drop the check, which removes its tax on escapers:
+   grid-z28 2748 → 2424 ms. The ring wave keeps the check: interior ring
+   pixels must finish before a block can fill, and without it z9 costs
+   +60%.
+5. **A workgroup-local fill loses** (one 256-thread workgroup per 16–50 px
+   block: ring, barrier, then fill or compute; one dispatch per tile). It
+   lost everywhere: grid-z28 3081–4824 ms, z9 133–330 ms. Each block runs
+   its ring and inside in series, and fewer threads are in flight. Removed
+   from the prototype.
+
+**Output.**
+- **The fills change nothing the gate can see.**
+  - Fixed corpus (gpu-check, z13–z45): blocks 20 gives the same per-case
+    result as brute force on every line, 5/8 pass.
+  - Holdout seed 2026-11-15, 80 views, z25–z45: identical, 49/80 for both
+    (also matching 2026-11-16).
+  - Fresh holdout, seed 2026-11-17, 60 views, z13–z24: 48/60 for both. One
+    failing view (hold-z19-e7381ec6) moved by 5 fill flips, toward the
+    anchor (flip imbalance 72 → 67; the anchor fills too).
+- Every GPU A/A pair is identical: 0 nondeterministic out of 184 renders.
+- Against brute force, 0–5 px differ per 45-tile grid. That is wasm's
+  accepted speck-fill class.
+
+**Deep views** (`--deep`, 1–3 rounds; precision past ~z32 is still held
+for Ross):
+
+| view (interior) | wasm (7) | brute force | blocks 20, ring-wave periodicity |
+|---|---|---|---|
+| grid-z36-i51200 (11%) | 208 | 306 | 296 |
+| grid-z45-i6400 (0%) | 152 | 126 | 129 |
+| grid-z48-i48000 (6%) | **15694** | 1238 | 1247 |
+| grid-z47-i50000 (26%) | **56433** | 2408 | 2315 |
+
+These two pf64 grids are the "irreducible ~45 s exact work" verdict that
+the 2026-11-12 directive re-opened. With f32 deltas they take 1.2–2.3 s on
+this GPU.
+
+**Precision at pf64 depths: an open question for the next run.**
+- At z ≥ 46 the anchor build renders through wasm perturbation, not f64
+  direct, so gpu-check can judge these views as they are. With `--force`,
+  the prototype passes 4 of 10 corpus views at z47–z48 and fails 6:
+  - mostly tile KS or sign balance;
+  - user-z47-953fa585 fails at +1102/−237.
+- gpu-truth then shows the wasm side as the one off the BigInt truth.
+  Judged with the current build (`--variant relaxed-now`), the result is
+  identical to the anchor's:
+
+  | view | wasm exact, signs, counts moved | GPU exact, signs, counts moved |
+  |---|---|---|
+  | user-z47-953fa585 (300 samples) | 0/293, +46/−247, 69 | 114/293, +80/−99, 16 |
+  | z48-i800 (0.3326…, 0.5745…) | 0/300, +125/−175, 71 | 139/300, +76/−85, 6 |
+  | z48-i20000 (−0.8288…, −0.1890…) | 0/200, +93/−107, 120 | 21/200, +81/−98, 51 |
+
+- At 800 iterations a 208-bit truth cannot have lost its precision to chaos,
+  and wasm's deltas are f64. So 0 exact pixels points to a **sub-pixel grid
+  offset between the wasm pf64 frame and the grid that gpu-truth and the
+  prototype share** (both mirror `PerturbedFrame::new`'s formula), not to
+  arithmetic error.
+- Which side is offset is unknown. It is invisible at screen scale, but it
+  decides how every pf64-depth GPU verdict reads.
+- Next step: run the truth on grids shifted by ±½ px and ±1 px on each axis
+  and see which shift matches wasm. Then read wasm's pf64 dc and origin
+  handling at the matching spot.
+
+**Verdict:** no ship (prototype only; the G3 gate is still held for Ross,
+see 2026-11-15).
+- The prototype's default is now blocks 20 with ring-wave periodicity
+  (`mariani: [20], leafPeriodicity: 0`). `mariani: false` gives brute force.
+- G3's speed position on this GPU:
+  - ahead of wasm on grid-z28 (−12..−18% one owner, −12% pool-7), z24
+    (−21% one owner, −2% pool-7) and the pf64 grids (13–24×);
+  - level on grid-z20 and grid-z45;
+  - behind on light views (z9 +100%, z11 +40%) and on grid-z36 (+42%).
+- The light views are near the per-tile floor: about 1.3 ms of round trip
+  per tile, 45 tiles. Fills no longer explain the gap.
+
+**Next run.**
+1. Verify the deploy (none since 11 Nov).
+2. Resolve the pf64 grid-offset question above (gpu-truth with shifted
+   grids). It is the precondition for reading any z ≥ 46 GPU verdict, and
+   those are now G3's biggest wins (grid-z47 56 → 2.3 s).
+3. grid-z36 (GPU 296 vs wasm 208 ms): decompose it (interior 11%; budget
+   51,200; which waves, and whether one long pixel sets the tail).

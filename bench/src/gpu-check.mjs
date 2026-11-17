@@ -9,7 +9,7 @@
 //
 //   node src/gpu-check.mjs [--corpus corpus/corpus.json] [--filter <s>]
 //     [--force] [--json <out.json>] [--holdout N [--seed S]]
-//     [--module <url>] [--min-zoom Z] [--max-zoom Z]
+//     [--module <url>] [--lane-options <json>] [--min-zoom Z] [--max-zoom Z]
 //
 // By default only cases the lane covers (gpuCovers) are judged; the rest are
 // listed as skipped. --force renders every exponent-2 case regardless of the
@@ -25,7 +25,8 @@
 // --module swaps the lane module for another with the same interface
 // (createGpuLane, gpuCovers), served from the repo root: a bench-only
 // prototype kernel such as /bench/page/gpu-perturb.js (G3) is gated the
-// same way the shipped lane is.
+// same way the shipped lane is. --lane-options passes a JSON object to the
+// module's createGpuLane (e.g. '{"mariani":[20],"leafPeriodicity":0}').
 //
 // Exit 1 when a judged case fails, or when no hardware adapter is present.
 
@@ -58,6 +59,7 @@ function parseArgs(argv) {
     holdout: 0,
     seed: new Date().toISOString().slice(0, 10),
     module: "/client/js/gpu.js",
+    laneOptions: {},
     minZoom: 0,
     maxZoom: 31,
   };
@@ -70,6 +72,7 @@ function parseArgs(argv) {
     else if (arg === "--holdout") opts.holdout = Number(argv[++i]);
     else if (arg === "--seed") opts.seed = argv[++i];
     else if (arg === "--module") opts.module = argv[++i];
+    else if (arg === "--lane-options") opts.laneOptions = JSON.parse(argv[++i]);
     else if (arg === "--min-zoom") opts.minZoom = Number(argv[++i]);
     else if (arg === "--max-zoom") opts.maxZoom = Number(argv[++i]);
     else throw new Error(`Unexpected argument: ${arg}`);
@@ -205,25 +208,29 @@ async function main() {
     if (!isHardwareWebGPU(report)) {
       throw new Error("No hardware WebGPU adapter; see node src/gpu-probe.mjs");
     }
-    await session.page.evaluate(async (moduleUrl) => {
-      const module = await import(moduleUrl);
-      window.gpuModule = module;
-      window.gpuLane = await module.createGpuLane();
-      const toBase64 = (values) => {
-        const bytes = new Uint8Array(
-          values.buffer,
-          values.byteOffset,
-          values.byteLength,
-        );
-        let binary = "";
-        for (let i = 0; i < bytes.length; i += 0x8000) {
-          binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-        }
-        return btoa(binary);
-      };
-      window.getGpuValues = async (payload) =>
-        toBase64((await window.gpuLane.renderValues(payload)).values);
-    }, opts.module);
+    await session.page.evaluate(
+      async (moduleUrl, laneOptions) => {
+        const module = await import(moduleUrl);
+        window.gpuModule = module;
+        window.gpuLane = await module.createGpuLane(laneOptions);
+        const toBase64 = (values) => {
+          const bytes = new Uint8Array(
+            values.buffer,
+            values.byteOffset,
+            values.byteLength,
+          );
+          let binary = "";
+          for (let i = 0; i < bytes.length; i += 0x8000) {
+            binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+          }
+          return btoa(binary);
+        };
+        window.getGpuValues = async (payload) =>
+          toBase64((await window.gpuLane.renderValues(payload)).values);
+      },
+      opts.module,
+      opts.laneOptions,
+    );
 
     console.log(
       `GPU lane vs anchor @${anchor.gitSha.slice(0, 7)} (statistical tier), ` +

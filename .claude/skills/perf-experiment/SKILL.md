@@ -183,8 +183,9 @@ including the tier reported to tierOverlay.
     kernel, `--holdout`);
   - `gpu-truth` (BigInt arbiter when the GPU and the anchor disagree);
   - `gpu-decompose` and `gpu-throughput` (where GPU time goes);
-  - `gpu-periodicity` (G3 prototype loop configs, timed and output-checked
-    against no periodicity);
+  - `gpu-periodicity` (G3 prototype loop and Mariani configs, timed and
+    output-checked against no periodicity; `--pool 7` for production's
+    one-device-per-worker shape, `--deep` for the z36–z48 grids);
   - `lane-check` and run-e2e `:gpu`/`:wasm` on built dists.
 - **The anchor is f64 direct, so its own precision runs out with depth**
   (53 − log2(1/spacing) sub-pixel bits). From about z35 it is less accurate
@@ -695,10 +696,22 @@ policy above. Replace these estimates with measurements as items run.
   views 4×. Strided checks lose on the GPU: the 2026-11-15 strided result
   came from a save bug, and fixed strides still cost as much. With the new
   defaults G3 ties wasm on grid-z28 (2824 vs 2847 ms) and beats it on
-  grid-z20 (88 vs 105 ms). Light interior-heavy views are still
-  1.6–2.2× slower than wasm (126–179 vs 57–84 ms), so **interior handling
-  is the next speed item**: a CPU-side rect_in_set/Mariani pass that sends
-  only boundary rectangles to the GPU. Precision: user-z28 passes
+  grid-z20 (88 vs 105 ms). **Interior handling measured 2026-11-17
+  (LOG):** a GPU Mariani–Silver pass, built as a shallow static tree (rings
+  of 20 px blocks, then one leaf wave, every pixel listed once, periodicity
+  in the ring wave only), is now the prototype default. Against brute force
+  it gives z24 134 → 66 ms, z11 181 → 122 ms and grid-z28 2714 → 2424 ms,
+  and the gate sees no change (fixed corpus and 140 holdout views,
+  identical verdicts). wasm's own 6-wave tree, and fills done inside one
+  workgroup, are settled negative on this GPU: a dependent wave costs its
+  slowest pixel's latency, and seven devices do not overlap their
+  dispatches. Still behind wasm: light views (z9 112 vs 56 ms, z11 122 vs
+  86 ms), which sit near the ~1.3 ms per-tile round-trip floor, and grid-z36
+  (296 vs 208 ms, not yet decomposed). **At pf64 depths the prototype is
+  13–24× faster than wasm** (grid-z48-i48000 15.7 → 1.25 s, grid-z47-i50000
+  56 → 2.3 s, same in-page harness). Before any z ≥ 46 verdict can be read,
+  the open pf64 grid-offset question must be resolved: gpu-truth finds wasm
+  pf64 0-exact even at 800 iterations (LOG 2026-11-17). Precision: user-z28 passes
   the tier. Holdout z25–z45 passes 48/80: z25–z27 13/13, z28–z31 14/18,
   failing more with depth. `src/gpu-truth.mjs` shows why: up to ~z31 the
   f64-direct anchor is the more precise side, and from ~z35 the anchor is
@@ -716,8 +729,7 @@ policy above. Replace these estimates with measurements as items run.
   grid-z28-i50000 (~3 s), z36-i51200, z46, grid-z47-i50000 (~45 s),
   grid-z48-i48000, z48-i20k. Compare against a df32 direct kernel for the
   z13–40 range before committing to either there. Interior-heavy tiles:
-  check whether brute force on the GPU beats wasm's Mariani–Silver fills;
-  if not, keep fills on the CPU or port the rectangle test.
+  answered 2026-11-17, fills ported to the GPU (shallow block tree, above).
 - **G4. Multibrot exponents on the GPU** (grid-z30-e6, the e52 view): the
   general-exponent step, direct and perturbation. After G3.
 - **G5. Deep tiers (float-exp, z ≥ 250).** Extended-exponent or rescaled

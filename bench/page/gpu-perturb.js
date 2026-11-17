@@ -1,4 +1,4 @@
-/* global GPUBufferUsage, GPUMapMode */
+/* global GPUBufferUsage, GPUMapMode, GPUShaderStage */
 // G3 precision prototype (bench only, never shipped): quadratic perturbation
 // with plain-f32 pixel deltas around a reference orbit at the view origin,
 // on WebGPU. Same module interface as client/js/gpu.js (createGpuLane,
@@ -11,7 +11,9 @@
 // (restart at Z_0 with dz = z when the orbit runs out or |z| < |dz|). The
 // first step is not counted, so counts match the direct renderer's. Brent
 // periodicity on (dz, n) retires interior pixels early. Smoothing is done on
-// the CPU in f64.
+// the CPU in f64. By default tiles render through a shallow GPU Mariani-Silver
+// tree (marianiTree): rings of 20 px blocks first, then the pixels of every
+// block whose ring is not all interior (LOG 2026-11-17).
 
 const TILE_SPACE_SCALE = 200 / 128;
 const ESCAPE_RADIUS = 3;
@@ -76,11 +78,19 @@ const stridedBody = /* wgsl */ `
     first = false;
   }`;
 
-const shader = (periodicity, zLo) => /* wgsl */ `
+const NONE = 0xffffffff;
+const SPLIT = 2;
+
+const shader = (periodicity, zLo, mariani) => /* wgsl */ `
 const STRIDE = ${periodicity}u;
 // false: z = Z + dz adds Z's hi part only (the lo part stays in 2Z + dz).
 const Z_LO = ${zLo};
+// Mariani mode stores count + 1, so a cleared (0) slot means "not computed".
+const COUNT_OFFSET = ${mariani ? 1 : 0}u;
+const NONE = ${NONE}u;
+const SPLIT = ${SPLIT}u;
 struct Params { width: u32, height: u32, maxIterations: u32, orbitLen: u32, zero: u32, _p0: u32, _p1: u32, _p2: u32 };
+struct Level { taskStart: u32, taskCount: u32, rectStart: u32, rectCount: u32 };
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read_write> out: array<u32>;
 // Z_n as (hi.re, hi.im, lo.re, lo.im): hi the nearest f32, lo the f32
@@ -93,27 +103,160 @@ struct Params { width: u32, height: u32, maxIterations: u32, orbitLen: u32, zero
 // Per-axis pixel deltas from the origin: width real parts, then height
 // imaginary parts.
 @group(0) @binding(3) var<storage, read> dcs: array<f32>;
+${mariani ? `
+// Mariani-Silver wave tree (static per tile shape, see marianiTree): each
+// task is (pixel, rect); rects are (x0, y0, x1, y1) with parent indices; one
+// state word per rect per tile.
+@group(0) @binding(4) var<storage, read> tasks: array<vec2<u32>>;
+@group(0) @binding(5) var<storage, read> rects: array<vec4<u32>>;
+@group(0) @binding(6) var<storage, read> parents: array<u32>;
+@group(0) @binding(7) var<storage, read_write> state: array<u32>;
+@group(1) @binding(0) var<uniform> level: Level;` : ""}
 
 // Opaque to the compiler (Metal compiles with fast math and would fold
 // hi + (lo + dz) into (hi + lo) + dz = hi + dz).
 fn opaque(x: vec2<f32>) -> vec2<f32> { return bitcast<vec2<f32>>(bitcast<vec2<u32>>(x) ^ vec2<u32>(params.zero)); }
 
-@compute @workgroup_size(${WORKGROUP}, ${WORKGROUP})
-fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-  if (id.x >= params.width || id.y >= params.height) { return; }
-  let dc = vec2<f32>(dcs[id.x], dcs[params.width + id.y]);
+fn iterate(dc: vec2<f32>, base: u32) -> u32 {
   let last = params.orbitLen - 1u;
   var n = 0u;
   var dz = vec2<f32>(0.0, 0.0);
   var z = vec2<f32>(0.0, 0.0);
   var i = 0u;
   ${periodicity === 1 ? branchlessBody : stridedBody}
-  let base = 3u * (id.y * params.width + id.x);
-  out[base] = i;
+  out[base] = i + COUNT_OFFSET;
   out[base + 1u] = bitcast<u32>(z.x);
   out[base + 2u] = bitcast<u32>(z.y);
+  return i;
 }
+
+fn iteratePixel(x: u32, y: u32) -> u32 {
+  return iterate(vec2<f32>(dcs[x], dcs[params.width + y]), 3u * (y * params.width + x));
+}
+
+@compute @workgroup_size(${WORKGROUP}, ${WORKGROUP})
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+  if (id.x >= params.width || id.y >= params.height) { return; }
+  iteratePixel(id.x, id.y);
+}
+
+${mariani ? `
+fn isActive(rect: u32) -> bool {
+  let p = parents[rect];
+  return p == NONE || state[p] == SPLIT;
+}
+
+// One wave: compute this level's scheduled pixels (ring, or every pixel of a
+// leaf) for rects whose parent split, skipping pixels already computed.
+@compute @workgroup_size(64)
+fn ring(@builtin(global_invocation_id) id: vec3<u32>) {
+  if (id.x >= level.taskCount) { return; }
+  let task = tasks[level.taskStart + id.x];
+  if (!isActive(task.y)) { return; }
+  let base = 3u * task.x;
+  if (out[base] != 0u) { return; }
+  iterate(vec2<f32>(dcs[task.x % params.width], dcs[params.width + task.x / params.width]), base);
+}
+
+fn interiorAt(x: u32, y: u32) -> bool { return out[3u * (y * params.width + x)] == params.maxIterations + 1u; }
+
+// After a wave: a rect whose whole ring is at the budget fills (its inside
+// stays 0 = interior), any other active rect splits into its children.
+@compute @workgroup_size(64)
+fn classify(@builtin(global_invocation_id) id: vec3<u32>) {
+  if (id.x >= level.rectCount) { return; }
+  let r = level.rectStart + id.x;
+  if (!isActive(r)) { state[r] = 0u; return; }
+  let b = rects[r];
+  var all = true;
+  for (var x = b.x; x < b.z && all; x++) { all = interiorAt(x, b.y) && interiorAt(x, b.w - 1u); }
+  for (var y = b.y + 1u; y + 1u < b.w && all; y++) { all = interiorAt(b.x, y) && interiorAt(b.z - 1u, y); }
+  state[r] = select(SPLIT, 1u, all);
+}` : ""}
 `;
+
+const MARIANI_LEAF = 8;
+const trees = new Map();
+
+// The static Mariani-Silver rect tree of subdivide_tile_streamed (lib.rs)
+// for one tile shape: midpoint quadrant splits, rects at or below
+// MARIANI_LEAF in either dimension compute every pixel. Each level lists its
+// rects and its tasks (pixel, rect): ring pixels, or all pixels for a leaf.
+//
+// `blocks` (an array of block sizes, e.g. [25]) builds a shallow tree
+// instead, with fewer and fatter waves: level 0 partitions the tile into
+// blocks of blocks[0] px (ragged at the edges), each later size partitions
+// its parent the same way, and the last level is one leaf per block that
+// computes every pixel the rings above it left. A GPU wave costs its slowest
+// pixel's latency, so the depth of wasm's tree costs more than its fills
+// save on the GPU (LOG 2026-11-17).
+function marianiTree(width, height, blocks = null) {
+  const key = `${width}x${height}:${blocks ?? "wasm"}`;
+  if (trees.has(key)) return trees.get(key);
+  const rects = [];
+  const parents = [];
+  const levels = [];
+  const partition = (r, size) => {
+    const out = [];
+    for (let y0 = r.y0; y0 < r.y1; y0 += size)
+      for (let x0 = r.x0; x0 < r.x1; x0 += size)
+        out.push({ x0, y0, x1: Math.min(r.x1, x0 + size), y1: Math.min(r.y1, y0 + size) });
+    return out;
+  };
+  let pending = blocks
+    ? partition({ x0: 0, y0: 0, x1: width, y1: height }, blocks[0]).map((r) => ({ ...r, parent: NONE, depth: 0 }))
+    : [{ x0: 0, y0: 0, x1: width, y1: height, parent: NONE }];
+  const tasks = [];
+  // Every ancestor of an active rect was active, so a pixel on an earlier
+  // level's ring is always computed before this level runs: list each pixel
+  // once, at the first level that schedules it (no idle lanes on re-listed
+  // pixels).
+  const scheduled = new Uint8Array(width * height);
+  const schedule = (pixel, id) => {
+    if (scheduled[pixel]) return;
+    scheduled[pixel] = 1;
+    tasks.push(pixel, id);
+  };
+  while (pending.length) {
+    const rectStart = rects.length;
+    const taskStart = tasks.length / 2;
+    const next = [];
+    for (const r of pending) {
+      const id = rects.length / 4;
+      rects.push(r.x0, r.y0, r.x1, r.y1);
+      parents.push(r.parent);
+      const leaf = blocks
+        ? r.depth === blocks.length || r.x1 - r.x0 <= 2 || r.y1 - r.y0 <= 2
+        : r.x1 - r.x0 <= MARIANI_LEAF || r.y1 - r.y0 <= MARIANI_LEAF;
+      for (let y = r.y0; y < r.y1; y++) {
+        if (leaf || y === r.y0 || y === r.y1 - 1) for (let x = r.x0; x < r.x1; x++) schedule(y * width + x, id);
+        else {
+          schedule(y * width + r.x0, id);
+          if (r.x1 - r.x0 > 1) schedule(y * width + r.x1 - 1, id);
+        }
+      }
+      if (leaf) continue;
+      if (blocks) {
+        const children = r.depth + 1 < blocks.length ? partition(r, blocks[r.depth + 1]) : [{ x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1 }];
+        for (const c of children) next.push({ ...c, parent: id, depth: r.depth + 1 });
+      } else {
+        const xm = (r.x0 + r.x1) >> 1;
+        const ym = (r.y0 + r.y1) >> 1;
+        next.push(
+          { x0: r.x0, y0: r.y0, x1: xm, y1: ym, parent: id },
+          { x0: xm, y0: r.y0, x1: r.x1, y1: ym, parent: id },
+          { x0: r.x0, y0: ym, x1: xm, y1: r.y1, parent: id },
+          { x0: xm, y0: ym, x1: r.x1, y1: r.y1, parent: id },
+        );
+      }
+    }
+    levels.push({ taskStart, taskCount: tasks.length / 2 - taskStart, rectStart: rectStart / 4, rectCount: rects.length / 4 - rectStart / 4 });
+    pending = next;
+  }
+  const tree = { tasks: Uint32Array.from(tasks), rects: Uint32Array.from(rects), parents: Uint32Array.from(parents), levels };
+  trees.set(key, tree);
+  return tree;
+}
 
 // Decimal string -> BigInt fixed point with `bits` fraction bits.
 function toFixed(text, bits) {
@@ -184,14 +327,68 @@ export function gpuCovers(payload) {
 
 // periodicity: 1 = per-iteration branchless check (default), 0 = none, N > 1
 // = a check every N iterations. zLo: add Z's lo part in z = Z + dz too.
-export async function createGpuLane({ periodicity = 1, zLo = false } = {}) {
+// mariani: true renders through the GPU port of wasm's Mariani-Silver
+// subdivision (one ring dispatch and one classify dispatch per wave, all in
+// one pass); an array of block sizes uses marianiTree's shallow tree.
+// leafPeriodicity: periodicity for the last (leaf) wave (mariani mode only).
+// Defaults (LOG 2026-11-17): 20 px block rings with periodicity, then a leaf
+// wave without it (fills already retire interior blocks). Pass
+// `mariani: false` for brute force.
+export async function createGpuLane({ periodicity = 1, zLo = false, mariani = [20], leafPeriodicity = 0 } = {}) {
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
   if (!adapter) throw new Error("No WebGPU adapter");
   const device = await adapter.requestDevice();
-  const pipeline = await device.createComputePipelineAsync({
-    layout: "auto",
-    compute: { module: device.createShaderModule({ code: shader(periodicity, zLo) }), entryPoint: "main" },
-  });
+  const module = device.createShaderModule({ code: shader(periodicity, zLo, mariani) });
+  const errors = (await module.getCompilationInfo()).messages.filter((m) => m.type === "error");
+  if (errors.length) throw new Error(errors.map((m) => `${m.lineNum}:${m.linePos} ${m.message}`).join("\n"));
+  const storage = (binding, type) => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
+  let pipeline, ringPipeline, leafPipeline, classifyPipeline, layout0, layout1;
+  if (mariani) {
+    layout0 = device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+        storage(1, "storage"),
+        storage(2, "read-only-storage"),
+        storage(3, "read-only-storage"),
+        storage(4, "read-only-storage"),
+        storage(5, "read-only-storage"),
+        storage(6, "read-only-storage"),
+        storage(7, "storage"),
+      ],
+    });
+    layout1 = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } }] });
+    const layout = device.createPipelineLayout({ bindGroupLayouts: [layout0, layout1] });
+    [ringPipeline, classifyPipeline] = await Promise.all(
+      ["ring", "classify"].map((entryPoint) => device.createComputePipelineAsync({ layout, compute: { module, entryPoint } })),
+    );
+    leafPipeline = ringPipeline;
+    if (leafPeriodicity !== null && leafPeriodicity !== periodicity) {
+      const leafModule = device.createShaderModule({ code: shader(leafPeriodicity, zLo, mariani) });
+      leafPipeline = await device.createComputePipelineAsync({ layout, compute: { module: leafModule, entryPoint: "ring" } });
+    }
+  } else {
+    pipeline = await device.createComputePipelineAsync({ layout: "auto", compute: { module, entryPoint: "main" } });
+  }
+  const treeBuffers = new Map();
+  const gpuTree = (width, height) => {
+    const key = `${width}x${height}`;
+    const blocks = Array.isArray(mariani) ? mariani : null;
+    if (treeBuffers.has(key)) return treeBuffers.get(key);
+    const tree = marianiTree(width, height, blocks);
+    const upload = (array) => {
+      const buffer = device.createBuffer({ size: Math.max(16, array.byteLength), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+      device.queue.writeBuffer(buffer, 0, array);
+      return buffer;
+    };
+    const levels = tree.levels.map((l) => {
+      const buffer = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+      device.queue.writeBuffer(buffer, 0, new Uint32Array([l.taskStart, l.taskCount, l.rectStart, l.rectCount]));
+      return { ...l, bindGroup: device.createBindGroup({ layout: layout1, entries: [{ binding: 0, resource: { buffer } }] }) };
+    });
+    const result = { tasks: upload(tree.tasks), rects: upload(tree.rects), parents: upload(tree.parents), rectCount: tree.parents.length, levels };
+    treeBuffers.set(key, result);
+    return result;
+  };
   let cached = null;
 
   const renderValues = async (payload) => {
@@ -221,40 +418,65 @@ export async function createGpuLane({ periodicity = 1, zLo = false } = {}) {
 
     const pixels = width * height;
     const uniform = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    const outBuffer = device.createBuffer({ size: pixels * 12, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    const outBuffer = device.createBuffer({ size: pixels * 12, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     const readback = device.createBuffer({ size: pixels * 12, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     const dcBuffer = device.createBuffer({ size: dcs.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     device.queue.writeBuffer(uniform, 0, new Uint32Array([width, height, maxIterations, cached.length, 0, 0, 0, 0]));
     device.queue.writeBuffer(dcBuffer, 0, dcs);
-    const bindGroup = device.createBindGroup({
-      layout: pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: uniform } },
-        { binding: 1, resource: { buffer: outBuffer } },
-        { binding: 2, resource: { buffer: cached.buffer } },
-        { binding: 3, resource: { buffer: dcBuffer } },
-      ],
-    });
+    const entries = [
+      { binding: 0, resource: { buffer: uniform } },
+      { binding: 1, resource: { buffer: outBuffer } },
+      { binding: 2, resource: { buffer: cached.buffer } },
+      { binding: 3, resource: { buffer: dcBuffer } },
+    ];
     const encoder = device.createCommandEncoder();
-    const pass = encoder.beginComputePass();
-    pass.setPipeline(pipeline);
-    pass.setBindGroup(0, bindGroup);
-    pass.dispatchWorkgroups(Math.ceil(width / WORKGROUP), Math.ceil(height / WORKGROUP));
-    pass.end();
+    let stateBuffer = null;
+    if (mariani) {
+      const tree = gpuTree(width, height);
+      stateBuffer = device.createBuffer({ size: tree.rectCount * 4, usage: GPUBufferUsage.STORAGE });
+      entries.push(
+        { binding: 4, resource: { buffer: tree.tasks } },
+        { binding: 5, resource: { buffer: tree.rects } },
+        { binding: 6, resource: { buffer: tree.parents } },
+        { binding: 7, resource: { buffer: stateBuffer } },
+      );
+      const bindGroup = device.createBindGroup({ layout: layout0, entries });
+      encoder.clearBuffer(outBuffer);
+      const pass = encoder.beginComputePass();
+      pass.setBindGroup(0, bindGroup);
+      tree.levels.forEach((l, k) => {
+        pass.setBindGroup(1, l.bindGroup);
+        pass.setPipeline(k + 1 < tree.levels.length ? ringPipeline : leafPipeline);
+        pass.dispatchWorkgroups(Math.ceil(l.taskCount / 64));
+        if (k + 1 < tree.levels.length) {
+          pass.setPipeline(classifyPipeline);
+          pass.dispatchWorkgroups(Math.ceil(l.rectCount / 64));
+        }
+      });
+      pass.end();
+    } else {
+      const bindGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries });
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.dispatchWorkgroups(Math.ceil(width / WORKGROUP), Math.ceil(height / WORKGROUP));
+      pass.end();
+    }
     encoder.copyBufferToBuffer(outBuffer, 0, readback, 0, pixels * 12);
     device.queue.submit([encoder.finish()]);
     await readback.mapAsync(GPUMapMode.READ);
     const words = new Uint32Array(readback.getMappedRange().slice(0));
     readback.unmap();
-    for (const b of [uniform, outBuffer, readback, dcBuffer]) b.destroy();
+    for (const b of [uniform, outBuffer, readback, dcBuffer, stateBuffer]) b?.destroy();
     const floats = new Float32Array(words.buffer);
     const values = new Float32Array(pixels);
     const lnR = Math.log(ESCAPE_RADIUS);
     let minIter = Infinity;
     let maxIter = -Infinity;
     for (let p = 0; p < pixels; p++) {
-      const it = words[3 * p];
-      if (it >= maxIterations) {
+      // Mariani mode: 0 = inside a filled rect, else count + 1.
+      const it = mariani ? words[3 * p] - 1 : words[3 * p];
+      if (mariani ? words[3 * p] === 0 || it >= maxIterations : it >= maxIterations) {
         values[p] = Infinity;
         continue;
       }
