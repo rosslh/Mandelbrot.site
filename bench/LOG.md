@@ -3741,15 +3741,23 @@ this GPU.
   | z48-i20000 (−0.8288…, −0.1890…) | 0/200, +93/−107, 120 | 21/200, +81/−98, 51 |
 
 - At 800 iterations a 208-bit truth cannot have lost its precision to chaos,
-  and wasm's deltas are f64. So 0 exact pixels points to a **sub-pixel grid
-  offset between the wasm pf64 frame and the grid that gpu-truth and the
-  prototype share** (both mirror `PerturbedFrame::new`'s formula), not to
-  arithmetic error.
-- Which side is offset is unknown. It is invisible at screen scale, but it
-  decides how every pf64-depth GPU verdict reads.
-- Next step: run the truth on grids shifted by ±½ px and ±1 px on each axis
-  and see which shift matches wasm. Then read wasm's pf64 dc and origin
-  handling at the matching spot.
+  and wasm's deltas are f64. So 0 exact pixels is not plain rounding.
+- **Checked later this run (code reading, after the first push): it is not a
+  grid offset.**
+  - wasm's `PerturbedFrame::pixel_dc_f64` and the prototype use the same
+    formula: first offset + step × column, then ldexp by −zoomOffset.
+  - gpu-truth renders the anchor and the GPU from one `caseToWasmArgs`
+    payload, so both get the same geometry.
+  - What remains: the pf64 iteration itself (rebasing, reference-orbit
+    rounding, stream kernel), its escape-count convention, or its smoothing.
+    The GPU prototype matching the truth on 114–139 of 300 pixels argues
+    against a convention mismatch shared by all three.
+- It is invisible at screen scale, but it decides how every pf64-depth GPU
+  verdict reads, and it may be a real wasm-lane accuracy bug.
+- Next step: dump a few disagreeing pixels from the z48-i800 view (wasm
+  count and |z| against the truth's, per iteration), and replay
+  `perturbed_escape_iterations_f64` natively in a Rust probe test to find
+  where the wasm trajectory leaves the truth.
 
 **Verdict:** no ship (prototype only; the G3 gate is still held for Ross,
 see 2026-11-15).
@@ -3765,8 +3773,8 @@ see 2026-11-15).
 
 **Next run.**
 1. Verify the deploy (none since 11 Nov).
-2. Resolve the pf64 grid-offset question above (gpu-truth with shifted
-   grids). It is the precondition for reading any z ≥ 46 GPU verdict, and
-   those are now G3's biggest wins (grid-z47 56 → 2.3 s).
+2. Resolve the pf64-vs-truth question above (per-pixel trajectory dump and
+   a native Rust replay). It is the precondition for reading any z ≥ 46 GPU
+   verdict, and those are now G3's biggest wins (grid-z47 56 → 2.3 s).
 3. grid-z36 (GPU 296 vs wasm 208 ms): decompose it (interior 11%; budget
    51,200; which waves, and whether one long pixel sets the tail).

@@ -710,8 +710,9 @@ policy above. Replace these estimates with measurements as items run.
   (296 vs 208 ms, not yet decomposed). **At pf64 depths the prototype is
   13–24× faster than wasm** (grid-z48-i48000 15.7 → 1.25 s, grid-z47-i50000
   56 → 2.3 s, same in-page harness). Before any z ≥ 46 verdict can be read,
-  the open pf64 grid-offset question must be resolved: gpu-truth finds wasm
-  pf64 0-exact even at 800 iterations (LOG 2026-11-17). Precision: user-z28 passes
+  the open pf64-vs-truth question must be resolved: gpu-truth finds wasm
+  pf64 0-exact even at 800 iterations, with the same pixel grid as the GPU
+  (LOG 2026-11-17). Precision: user-z28 passes
   the tier. Holdout z25–z45 passes 48/80: z25–z27 13/13, z28–z31 14/18,
   failing more with depth. `src/gpu-truth.mjs` shows why: up to ~z31 the
   f64-direct anchor is the more precise side, and from ~z35 the anchor is
