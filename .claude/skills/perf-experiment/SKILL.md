@@ -183,7 +183,13 @@ including the tier reported to tierOverlay.
   (pixel-check, validate, enrich) only load wasm artifacts. GPU work has its
   own tools:
   - `gpu-check` (statistical tier vs the anchor; `--module` for a prototype
-    kernel, `--holdout`);
+    kernel, `--holdout`). `--reference truth` is the truth tier (2026-11-18,
+    `src/truth.mjs`): BigInt truth for every pixel of the tile (or
+    `--samples N`, a uniform sample), judged by the same statistical tier
+    and budgets with truth as the reference, printed beside the anchor's
+    own error against the same truth. Truth is cached under
+    `results/truth-cache`. `--reference auto` switches at truth.json's
+    `crossoverSpacingLog2`;
   - `gpu-truth` (BigInt arbiter when the GPU and the anchor disagree);
   - `gpu-decompose` and `gpu-throughput` (where GPU time goes);
   - `gpu-periodicity` (G3 prototype loop and Mariani configs, timed and
@@ -712,21 +718,41 @@ policy above. Replace these estimates with measurements as items run.
   86 ms), which sit near the ~1.3 ms per-tile round-trip floor, and grid-z36
   (296 vs 208 ms, not yet decomposed). **At pf64 depths the prototype is
   13–24× faster than wasm** (grid-z48-i48000 15.7 → 1.25 s, grid-z47-i50000
-  56 → 2.3 s, same in-page harness). Before any z ≥ 46 verdict can be read,
-  the open pf64-vs-truth question must be resolved: gpu-truth finds wasm
-  pf64 0-exact even at 800 iterations, with the same pixel grid as the GPU
-  (LOG 2026-11-17). Precision: user-z28 passes
+  56 → 2.3 s, same in-page harness). z ≥ 46 GPU verdicts are read against
+  truth, not the wasm pf64 anchor, which is itself off the truth (LOG
+  2026-11-17, 2026-11-18). Precision: user-z28 passes
   the tier. Holdout z25–z45 passes 48/80: z25–z27 13/13, z28–z31 14/18,
   failing more with depth. `src/gpu-truth.mjs` shows why: up to ~z31 the
   f64-direct anchor is the more precise side, and from ~z35 the anchor is
   the biased side (z41/z44: GPU exact on 395–399 of 400 samples, anchor
-  biased +259/−130 and +140/−74). **Gate decided 2026-11-17 (Ross):** past
-  the anchor/truth crossover, judge GPU output against sampled BigInt truth
-  (LOG directive of that date). Next: build that truth tier into gpu-check
-  with unbiased sampling, measure the crossover in pixel spacing, propose
-  budgets, then re-judge G3. This also lifts the pf64-vs-truth question as a
-  blocker on z ≥ 46 GPU verdicts; it stays open as a wasm-lane accuracy
-  item. Reference orbit from
+  biased +259/−130 and +140/−74). **Gate decided 2026-11-17 (Ross):**
+  past the anchor/truth crossover, judge GPU output against BigInt truth
+  (LOG directive of that date). **Built 2026-11-18 (LOG):** `gpu-check
+  --reference auto` uses the anchor tier at spacing above 2^-37.5 and, at
+  or below it (z ≥ 33 at 200 px), truth for every pixel with the same
+  statistical tier and budgets (truth.json; extra absolute budgets report
+  only, with the evidence logged). The crossover was measured: through
+  2^-37 the anchor is closer to truth on every view, and from 2^-38 it fails
+  against truth on half the views. G3's deep failures were its f32
+  multiplier: rounding t = 2Z_hi + (2Z_lo + dz) drops Z_lo the same way for
+  every pixel while dz ≪ ulp(Z). The prototype's `split` option (dz' =
+  2Z_hi dz + ((2Z_lo + dz) dz + dc), barrier-ordered) fixes most of them:
+  - fixed corpus 6/8 → 8/8 under auto;
+  - holdout 62/80 → 77/80;
+  - truth tier z33–z45 15/30 → 25/30 and 19/19;
+  - z47–z60 corpus views 10/13 → 13/13.
+
+  It costs +9..+22% (grid-z28 then ties wasm; the pf64 grids stay 10–16×
+  faster), so use it where the truth tier judges. Residuals: a parabolic
+  (cusp) drift class (hold-z43-a5595821, where split leans and plain f32
+  does not), four other z33–z44 views, and z14–z15 near the lower bound.
+  `src/perturb-emulate.mjs` reproduces the GPU's sign counts on the CPU:
+  try it first on any new bias. Next: port G3 to the client lane for z ≥ 33
+  (turned off first), or chase the residuals. The pf64-vs-truth question is
+  no longer a blocker: f64 perturbation emulated in JS matches truth
+  (39,931/40,000 exact on user-z48-i800), so wasm pf64's error is a wasm
+  implementation bug, a wasm-lane accuracy item whose fix is held.
+  Reference orbit from
   the existing wasm orbit code uploaded as a storage buffer; f32 pixel
   deltas with rebasing; covers z ≳ 13 into the pf64 range. Precision case
   (LOG 2026-11-13): f32 deltas keep ~24 sub-pixel bits at any depth, while

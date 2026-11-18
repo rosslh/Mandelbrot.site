@@ -3830,3 +3830,219 @@ so it cannot serve as the reference there.
    evidence.
 3. Re-judge the G3 prototype on the fixed corpus and holdout: anchor tier
    below the crossover, truth tier above it.
+
+## 2026-11-18 — MEASURED (no ship): the truth tier is built; the anchor/truth crossover is at pixel spacing 2^-37.5 (z33); G3's deep sign failures were its f32 multiplier, fixed by a split step; f64 perturbation emulated in JS matches truth, so wasm pf64's error is a wasm bug
+
+Machine: Apple M1 Pro (8 cores), on AC power, Chrome for Testing
+136.0.7103.94, WebGPU adapter `apple / metal-3` (gpu-probe exit 0), rustc
+1.100.0 (`rustup update stable`: current). 1-minute load 1.8–3.7 at the
+start of each correctness run; the speed table below started at 8–10 (my own
+truth workers had just finished) and has no A/A pair, so its numbers are
+**indicative only**. Nothing here changes the client, so no e2e verdict was
+needed. One Apple GPU; other vendors are unmeasured.
+
+Deploy check: the live site's `last-modified` is now Wed 18 Nov 01:33 GMT, so
+a deploy after 11 Nov has been observed. `perf/gpu-lane-skeleton` (merged into
+`main` 2026-11-14) is deleted. The 2026-11-17 directive commit (6bb5159) had
+been committed but not pushed; it goes out with this entry.
+
+**What was built (bench only).**
+- `src/truth.mjs`: BigInt truth for tile pixels, on the exact linspace grid
+  the lanes render (f64 offsets converted exactly, the step as an exact
+  rational), zoom + 160 fraction bits, smoothed exactly as lib.rs
+  `smoothed_escape_value` (radius 3). Interior shortcuts are exact for the
+  truncated fixed-point map: closed-form cardioid / period-2 bulb with an
+  absolute margin, and Brent cycle detection on exact state equality. The
+  work fans out over 7 worker threads and is cached in
+  `results/truth-cache`. A whole 200 px tile costs 1–72 s (user-z28-i50000
+  is the worst at 72 s); 1000 samples cost 0.05–1.8 s.
+- Convergence check: 400 extra bits instead of 160 give identical f32 values
+  on 2000 of 2000 sampled pixels of user-z48-85c3859b (i800) and
+  user-z28-543f9cfa (i50000, the most chaotic heavy view).
+- `gpu-check --reference truth|auto`: by default truth for **every pixel**
+  of the tile (no sampling bias at all, so GPU-interior flips are seen), and
+  the **same statistical tier with the same budgets**, truth as the
+  reference. The anchor's own error against the same truth is printed beside
+  the GPU's. `--samples N` judges a uniform sample on the non-spatial axes
+  only (exploration, not gate runs). `auto` switches tier at truth.json's
+  `crossoverSpacingLog2`. Results carry re/im so holdout views can be
+  replayed.
+- `bench/truth.json`: crossover −37.5, sample seed, `extraBudgets: null`.
+- `src/perturb-emulate.mjs`: the G3 step on the CPU with each operation
+  rounded to f32 or kept in f64, judged against truth. It reproduces the real
+  GPU's sign counts within a few percent: user-z48-85c3859b gives +9987/−12340
+  emulated against +9289/−11671 on the GPU, and user-z48-3e744c34 gives
+  +14088/−13243 against +14119/−13188. That lets you find which rounding
+  causes a shift, with no GPU and no shader compiler involved.
+- G3 prototype option `split` (SPLIT_T, below); gpu-periodicity config
+  `blocks20-ringp-split`.
+
+**The crossover, measured.** Holdout seed 2026-11-18 (60 views, z25–z45)
+plus the fixed corpus, every pixel against truth, anchor vs the G3 default
+kernel:
+
+| spacing (≈ zoom) | views | anchor passes vs truth | anchor closer than GPU |
+|---|---|---|---|
+| 2^-30..-32 (z25–z27) | 21 | 21 | 20 |
+| 2^-33..-37 (z28–z32) | 9 | 9 | 9 |
+| 2^-38 (z33) | 4 | 2 | 1 |
+| 2^-39..-41 (z34–z36) | 8 | 5 | 2 |
+| 2^-42..-50 (z37–z45) | 18 | 6 | 0 |
+
+The fixed corpus agrees: user-z37 is the last view where the anchor is both
+exact and level with the GPU. From user-z38 on, the anchor fails against
+truth on sign balance (user-z44: +14441/−6805 over 53% of pixels, while G3
+differs on 0.3%). z33 at 200 px is spacing 2^-37.99, so the boundary is set
+at **2^-37.5**. A second holdout (seed 2026-11-18b, z13–z45) confirms it: the
+two z33 views the anchor tier failed G3 on are views where the anchor itself
+fails against truth (+7413/−6327, +8344/−9085), and G3 passes all four z33
+views there under the truth tier. This puts the crossover deeper than
+2026-11-15's ~z31–z35 guess, at its far end.
+
+**Budgets proposed.** The truth tier uses anchor.json's
+`statisticalBudgets` unchanged, on every axis: the same tier, only the
+reference swapped. That is no looser than the anchor tier on any shared axis,
+so it ships within the 2026-11-12 GPU policy. The directive also asked for
+absolute bounds on counts moved and exact share. I propose **none for now**
+(`extraBudgets: null`, report only), because the numbers show that no
+absolute bound separates a re-roll from a defect:
+- On user-z28-i50000 the anchor itself differs from truth on 60% of pixels.
+  It moves the counts of 45% of sampled escapers and is exact on 43%. The
+  GPU differs on 87% and is exact on 5%. Both pass the tier, because both
+  are symmetric chaos re-rolls.
+- On user-z14-a8d71690 the anchor moves 15% of escaper counts (f64 has 34
+  sub-pixel bits there).
+- A bound loose enough for those views would not bind on the smooth views,
+  where the sign axis already catches a 1-ulp systematic shift (below).
+
+A later run can add an absolute bound scaled by view chaos. Tightening is in
+policy.
+
+**G3 re-judged, and why its deep views failed.** At pf64 depths with the
+default kernel, every failing view failed on sign balance alone, and they
+were smooth low-chaos views (zero flips, ±1-ulp deltas). user-z48-85c3859b is
+an example: GPU values one ulp low on 4599 pixels and one ulp high on 2918.
+The emulator finds the cause by rounding one operation at a time:
+- **f32 multiplier t = 2Z_hi + (2Z_lo + dz)** (kept in f64: z48-85c goes from
+  +10036/−12259 to +10581/−10724, and z85 from +118/−150 to +68/−66);
+- not dc, the products, the dz sum or z = Z + dz (each within noise).
+
+The mechanism: while |dz| ≪ ulp(2Z) (deep views, early iterations), the
+rounding of t drops Z_lo the same way for every pixel. That is a coherent
+error injected every iteration, and the sign axis is built to catch exactly
+that.
+
+**The fix, `split`:** dz' = 2Z_hi·dz + ((2Z_lo + dz)·dz + dc), in that order.
+On the real GPU it needed a second opaque barrier: Metal reassociated the sum
+to (a + b) + dc, which drops b coherently again. The emulator's `abfirst` mode
+reproduces that failure (+10239/−11896).
+
+| run | default kernel | split |
+|---|---|---|
+| fixed corpus, `--reference auto` (covered z13–z45) | 6/8 | **8/8** |
+| holdout 2026-11-18b, auto (80 views, z13–z45) | 62/80 | **75/80** (77/80 at −37.5) |
+| — anchor tier (z13–z32) | 50/65 | 60/65 |
+| — truth tier (z33–z45) | 12/15 | 15/15 (19/19 at −37.5) |
+| holdout 2026-11-18, truth tier, z33–z45 (30 views) | 15/30 | **25/30** |
+| holdout 2026-11-18, vs truth, z25–z32 (30 views) | 26/30 | 28/30 |
+| fixed corpus z47–z60 vs truth (13 views, outside coverage) | 10/13 | **13/13** |
+
+- GPU A/A: 0 nondeterministic renders across every run above.
+- For reference, the anchor itself passes 13/30 against truth on the z33–z45
+  views of the 2026-11-18 holdout.
+- Still failing with split:
+  - three shallow views at z14–z15 (anchor tier: sign balance and tile KS),
+    near G3's lower bound;
+  - five views at z33–z44: hold-z33-48f2fadc (i200), hold-z38-11acebba
+    (i10000), hold-z43-a5595821 (i3200), hold-z44-9792e004 (i4096),
+    hold-z44-bb803fe6 (i200);
+  - user-z85-c163744e (outside coverage), +48/−141.
+- hold-z43-a5595821 sits near the 0.25 cusp, which is parabolic: plain f32 is
+  balanced there (+4983/−4934 emulated) and split leans (+2208/−3653). Slow
+  parabolic drift rounds onto dz the same way for every pixel. Each step
+  form has its own coherent-rounding class, so a full fix needs df32 dz in
+  some form, or a per-class choice.
+- `dcLo` (propagating the lo part of the f32 pixel offsets) was tried first
+  and **changed nothing** (z48-85c: +9288/−11658 vs +9289/−11671). It is
+  removed. dc rounding is not a cause.
+
+**Speed of split** (indicative, load 8–10 at start, no A/A; 45 tiles, one
+GPU owner, median of 5, `results/gpu-split-speed.json`):
+
+| view | default | split | Δ | wasm (7 workers) |
+|---|---|---|---|---|
+| z9-i20000 | 112 | 128 | +15% | 58 |
+| z11-i20000 | 124 | 147 | +19% | 87 |
+| grid-z20-i1600 | 97 | 108 | +11% | 111 |
+| z24-i5000 | 66 | 76 | +16% | 81 |
+| grid-z28-i50000 | 2444 | 2906 | +19% | 2884 |
+| grid-z36-i51200 | 304 | 355 | +17% | 198 |
+| grid-z45-i6400 | 131 | 142 | +9% | 152 |
+| grid-z48-i48000 | 1252 | 1508 | +20% | 15251 |
+| grid-z47-i50000 | 2301 | 2817 | +22% | 44874 |
+
+- The extra complex multiply costs +9..+22%. On grid-z28 that turns G3's lead
+  over wasm into a tie.
+- At pf64 depths it hardly matters: the deep grids stay 10–16× faster than
+  wasm.
+- So the natural shape is split where the truth tier judges (z ≥ 33), and
+  the default kernel shallower, where it passes the anchor tier as often
+  (60/65 vs 50/65 says split helps there too, so measure both before
+  choosing).
+
+**wasm pf64 accuracy (an item of its own, wasm lane).** The emulator in
+`f64` mode is the same perturbation algorithm, rebasing included, in double
+precision. On user-z48-85c3859b it matches truth on **39,931 of 40,000**
+pixels (+32/−37, 2 counts moved). wasm pf64 on the same view is exact on 1
+of 2000 samples and moves 28% of counts. So the algorithm is sound and the
+wasm implementation departs from it somewhere. The emulator is now the
+reference to diff wasm against. It is not a grid offset (2026-11-17). Next,
+step a disagreeing pixel through `perturbed_escape_iterations_f64` (Rust
+probe test) beside `perturb-emulate.mjs f64`, and compare per iteration.
+Fixing it changes wasm-lane output, so the fix itself is held for Ross.
+
+**Adversarial review** (fresh Opus subagent, read only). It confirmed:
+- truth's geometry, escape test, counting and smoothing against lib.rs and
+  perturbation.rs;
+- the soundness of the interior shortcuts;
+- the sampler, the reference-first argument order, and SPLIT_T's algebra
+  and barriers.
+
+Its findings, all fixed:
+- `--samples NaN/0` sampled nothing, passed every axis, and could cache an
+  empty file under the whole-tile key. It is now validated, the key says
+  `all`, the row count is checked, and the cache write is atomic.
+- `auto` sent z33 (2^-37.99) to the anchor tier at a −38 cutoff. That is why
+  the boundary is −37.5.
+- `--min-zoom` alone kept the holdout's max of 31 and silently dropped the
+  deep corpus.
+- A worker exiting without a result hung the run. Workers now run only when
+  flagged as truth jobs.
+- Whole-tile output printed the sampled verdict beside the deciding one;
+  only the deciding verdict is printed and stored now.
+- Sampled verdicts use floors calibrated on whole tiles, so they are looser.
+  A run with `--samples` now always exits 1: it is exploratory, never a gate.
+
+Its risk on precision was answered by a second convergence check, 400 vs 160
+extra bits on 1000 samples each of user-z48-f36112fd (i50000),
+user-z48-0a309fb2 (i48000), user-z47-fb5f0315 (i50000) and the near-cusp
+hold-z43-a5595821. 0 differ on all four.
+
+Its point that the truth tier has no absolute bound yet is the
+`extraBudgets: null` proposal above. Nothing ships on it yet, so it stands as
+a proposal **for Ross to confirm or replace** when G3's first turn-on comes
+up.
+
+**Verdict:** no ship. This is bench tooling and a prototype kernel option:
+the client is unchanged, and so are the anchor, its pin and every budget. The
+truth tier and its −37.5 crossover are in place for G3's verdicts.
+
+**Next run.**
+1. Start G3's client port for the truth-tier range (z ≥ 33 at 200 px, in
+   pixel spacing): the reference orbit in the worker, the split step, the
+   shallow Mariani tree; lane-check; turned off first. The pf64 grids are the
+   prize (grid-z47 45 s → ~2.8 s on this GPU).
+2. Or first, if the deep residuals matter more: the parabolic-drift class
+   (hold-z43-a5595821) and the four other z33–z44 residuals. Try
+   perturb-emulate on each before touching the shader.
+3. wasm pf64 accuracy: the per-iteration diff against the f64 emulator.
