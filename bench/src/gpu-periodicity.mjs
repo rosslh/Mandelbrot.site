@@ -56,6 +56,8 @@ const CONFIGS = {
   "blocks20-off": { periodicity: 0, leafPeriodicity: 0, mariani: [20] },
   "blocks20-ringp": { periodicity: 1, leafPeriodicity: 0, mariani: [20] },
   "blocks12-ringp": { periodicity: 1, leafPeriodicity: 0, mariani: [12] },
+  // The prototype default plus the split multiplier (LOG 2026-11-18).
+  "blocks20-ringp-split": { periodicity: 1, leafPeriodicity: 0, mariani: [20], split: true },
 };
 
 function parseArgs(argv) {

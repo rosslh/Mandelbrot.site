@@ -20,13 +20,28 @@
 // the events export (events_rows.csv at the repo root) that the lane covers
 // and the corpus does not contain: the anti-overfitting gate for the lane's
 // cutoff. The seed defaults to today's date, like validate.mjs.
-// --min-zoom/--max-zoom bound the holdout's zoom range (default 0..31).
+// --min-zoom/--max-zoom bound the holdout's zoom range (default 0..31), and
+// the corpus's when given without --holdout.
 //
 // --module swaps the lane module for another with the same interface
 // (createGpuLane, gpuCovers), served from the repo root: a bench-only
 // prototype kernel such as /bench/page/gpu-perturb.js (G3) is gated the
 // same way the shipped lane is. --lane-options passes a JSON object to the
 // module's createGpuLane (e.g. '{"mariani":[20],"leafPeriodicity":0}').
+//
+// --reference anchor|truth|auto picks what GPU output is judged against
+// (Ross, 2026-11-17; LOG directives 2026-11-17 and 2026-11-18). `anchor`
+// (default) is the statistical tier vs the pinned anchor. `truth` is the
+// truth tier: BigInt truth (src/truth.mjs) for every pixel of the tile, and
+// the same statistical tier and budgets with truth as the reference, plus
+// truth.json's extraBudgets when set. --samples N judges a uniform sample
+// of N pixels instead (escapers and interior alike), on the tier's
+// non-spatial axes only (flip and sign balance, central-quantile drift);
+// that mode is weaker and for exploration, not for gate runs. The anchor's
+// own error against the same truth is printed beside the GPU's, which is
+// how the crossover was measured. `auto` uses the anchor tier at pixel
+// spacing above 2^crossoverSpacingLog2 (truth.json) and the truth tier at or
+// below it.
 //
 // Exit 1 when a judged case fails, or when no hardware adapter is present.
 
@@ -42,6 +57,12 @@ import {
 } from "./ingest.mjs";
 import { caseToWasmArgs } from "./normalize.mjs";
 import { readVariantMeta, startSession } from "./session.mjs";
+import {
+  compareToTruth,
+  formatTruthStats,
+  judgeTruth,
+  sampleTruth,
+} from "./truth.mjs";
 import {
   diffValuesStatistical,
   formatStatisticalResult,
@@ -62,6 +83,8 @@ function parseArgs(argv) {
     laneOptions: {},
     minZoom: 0,
     maxZoom: 31,
+    reference: "anchor",
+    samples: Infinity,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -73,11 +96,41 @@ function parseArgs(argv) {
     else if (arg === "--seed") opts.seed = argv[++i];
     else if (arg === "--module") opts.module = argv[++i];
     else if (arg === "--lane-options") opts.laneOptions = JSON.parse(argv[++i]);
-    else if (arg === "--min-zoom") opts.minZoom = Number(argv[++i]);
-    else if (arg === "--max-zoom") opts.maxZoom = Number(argv[++i]);
-    else throw new Error(`Unexpected argument: ${arg}`);
+    else if (arg === "--min-zoom") {
+      opts.minZoom = Number(argv[++i]);
+      opts.minZoomSet = true;
+    } else if (arg === "--max-zoom") {
+      opts.maxZoom = Number(argv[++i]);
+      opts.maxZoomSet = true;
+    } else if (arg === "--reference") opts.reference = argv[++i];
+    else if (arg === "--samples") {
+      const v = argv[++i];
+      opts.samples = v === "all" ? Infinity : Number(v);
+      if (
+        !(
+          opts.samples === Infinity ||
+          (Number.isInteger(opts.samples) && opts.samples > 0)
+        )
+      )
+        throw new Error(
+          `--samples must be a positive integer or all, got ${v}`,
+        );
+    } else throw new Error(`Unexpected argument: ${arg}`);
   }
+  if (!["anchor", "truth", "auto"].includes(opts.reference))
+    throw new Error(`--reference must be anchor, truth or auto`);
   return opts;
+}
+
+function readTruthConfig() {
+  return JSON.parse(readFileSync(join(benchDir, "truth.json"), "utf8"));
+}
+
+// log2 of a tile's pixel spacing in the complex plane (200/128 * 4 / 2^z
+// per tile width, as normalize.mjs lays tiles out).
+function spacingLog2(payload) {
+  const zoom = payload.bounds.zoom + payload.zoomOffset;
+  return Math.log2((200 / 128) * 4) - zoom - Math.log2(payload.imageWidth - 1);
 }
 
 // Size of the per-pixel differences on pixels both renders call escapers:
@@ -189,9 +242,15 @@ async function main() {
   const corpus = JSON.parse(readFileSync(opts.corpus, "utf8"));
   let cases = corpus.cases;
   if (opts.holdout > 0) cases = holdoutCases(opts, corpus.cases);
+  else if (opts.minZoomSet || opts.maxZoomSet) {
+    // The holdout's default max (31) does not apply to the corpus.
+    const max = opts.maxZoomSet ? opts.maxZoom : Infinity;
+    cases = cases.filter((c) => c.zoom >= opts.minZoom && c.zoom <= max);
+  }
   if (opts.filter) cases = cases.filter((c) => c.id.includes(opts.filter));
 
   const anchor = readAnchorConfig();
+  const truthConfig = readTruthConfig();
   const anchorMeta = readVariantMeta(anchor.variant);
   if (!anchorMeta.gitSha.startsWith(anchor.gitSha)) {
     throw new Error(
@@ -233,7 +292,7 @@ async function main() {
     );
 
     console.log(
-      `GPU lane vs anchor @${anchor.gitSha.slice(0, 7)} (statistical tier), ` +
+      `GPU lane vs ${opts.reference === "anchor" ? `anchor @${anchor.gitSha.slice(0, 7)} (statistical tier)` : opts.reference === "truth" ? "sampled BigInt truth (truth tier)" : `anchor above 2^${truthConfig.crossoverSpacingLog2}, truth at or below`}, ` +
         `${opts.force ? "all exponent-2 cases (--force)" : "covered cases only"}\n`,
     );
     for (const benchCase of cases) {
@@ -266,6 +325,108 @@ async function main() {
         "base64",
       );
       const deterministic = first.equals(second);
+      const log2Spacing = spacingLog2(payload);
+      const useTruth =
+        opts.reference === "truth" ||
+        (opts.reference === "auto" &&
+          log2Spacing <= truthConfig.crossoverSpacingLog2);
+      if (useTruth) {
+        const truthRows = await sampleTruth(
+          { ...payload, exponent: request.power },
+          { samples: opts.samples, seed: truthConfig.seed },
+        );
+        const f32 = (buf) =>
+          new Float32Array(buf.buffer, buf.byteOffset, buf.length / 4);
+        const gpuStats = compareToTruth(f32(first), truthRows);
+        const anchorStats = compareToTruth(f32(anchorValues), truthRows);
+        const verdict = judgeTruth(
+          gpuStats,
+          anchor.statisticalBudgets,
+          truthConfig.extraBudgets,
+        );
+        const anchorVerdict = judgeTruth(
+          anchorStats,
+          anchor.statisticalBudgets,
+          truthConfig.extraBudgets,
+        );
+        // Whole tile sampled: run the full statistical tier (every axis,
+        // spatial ones included) with the truth buffer as the reference.
+        let fullGpu = null;
+        let fullAnchor = null;
+        if (truthRows.length === payload.imageWidth * payload.imageHeight) {
+          const truthValues = new Float32Array(truthRows.length);
+          for (const { pixel, value } of truthRows) truthValues[pixel] = value;
+          const truthBuf = Buffer.from(truthValues.buffer);
+          fullGpu = diffValuesStatistical(
+            truthBuf,
+            first,
+            payload.imageWidth,
+            anchor.statisticalBudgets,
+          );
+          fullAnchor = diffValuesStatistical(
+            truthBuf,
+            anchorValues,
+            payload.imageWidth,
+            anchor.statisticalBudgets,
+          );
+        }
+        // Whole tile: the full tier decides, plus any extra absolute bounds.
+        // Sample: the sampled shared axes decide.
+        const pass =
+          (fullGpu
+            ? fullGpu.pass && verdict.extraReasons.length === 0
+            : verdict.pass) && deterministic;
+        if (!pass && covered) failed++;
+        console.log(
+          `${benchCase.id} (spacing 2^${log2Spacing.toFixed(1)}, truth tier, ${truthRows.length} samples)` +
+            `${deterministic ? "" : "  GPU A/A: NOT DETERMINISTIC"}` +
+            `${covered ? "" : "  (outside coverage)"}`,
+        );
+        // Whole tile: the full-tier lines below decide, so these summary
+        // lines carry no verdict of their own.
+        console.log(
+          `    ${formatTruthStats("gpu   ", gpuStats, fullGpu ? null : verdict)}`,
+        );
+        console.log(
+          `    ${formatTruthStats("anchor", anchorStats, fullAnchor ? null : anchorVerdict)}`,
+        );
+        if (fullGpu) {
+          console.log(
+            `    ${formatStatisticalResult("gpu    vs truth", fullGpu, "truth")}`,
+          );
+          console.log(
+            `    ${formatStatisticalResult("anchor vs truth", fullAnchor, "truth")}`,
+          );
+        }
+        results.push({
+          id: benchCase.id,
+          re: benchCase.re,
+          im: benchCase.im,
+          zoom: benchCase.zoom,
+          iterations: benchCase.iterations,
+          log2Spacing,
+          tier: "truth",
+          covered,
+          deterministic,
+          pass,
+          sampled: !fullGpu,
+          gpu: {
+            ...gpuStats,
+            ...verdict,
+            pass: fullGpu ? pass : verdict.pass,
+            full: fullGpu,
+          },
+          anchor: {
+            ...anchorStats,
+            ...anchorVerdict,
+            pass: fullAnchor
+              ? fullAnchor.pass && anchorVerdict.extraReasons.length === 0
+              : anchorVerdict.pass,
+            full: fullAnchor,
+          },
+        });
+        continue;
+      }
       const stats = diffValuesStatistical(
         anchorValues,
         first,
@@ -289,6 +450,8 @@ async function main() {
         id: benchCase.id,
         zoom: benchCase.zoom,
         iterations: benchCase.iterations,
+        log2Spacing,
+        tier: "anchor",
         covered,
         deterministic,
         pass,
@@ -316,6 +479,14 @@ async function main() {
   if (judged.length === 0) {
     console.error(
       "FAIL: no covered case was judged (filter, holdout or cutoff left nothing)",
+    );
+    process.exit(1);
+  }
+  // Sampled truth verdicts use floors calibrated on whole tiles, so they are
+  // weaker than the gate (review 2026-11-18): never let them pass a run.
+  if (results.some((r) => r.sampled)) {
+    console.error(
+      "NOTE: --samples runs are exploratory, not a gate run (exit 1); use the default whole-tile truth",
     );
     process.exit(1);
   }

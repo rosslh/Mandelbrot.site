@@ -22,10 +22,27 @@ const WORKGROUP = 8;
 
 // One counted step: dz' = (2Z + dz)dz + dc, z = Z_{n+1} + dz, then rebase
 // when the orbit runs out or |z| < |dz|.
+//
+// SPLIT_T (LOG 2026-11-18): the multiplier t = 2Z_hi + (2Z_lo + dz) is
+// rounded to f32, and while dz is far below ulp(2Z) (deep views, early
+// iterations) that rounding drops Z_lo the same way for every pixel: a
+// coherent per-iteration error that the truth tier's sign axis flags on
+// smooth deep views. SPLIT_T computes dz' = 2Z_hi dz + ((2Z_lo + dz) dz + dc)
+// instead, in that order, so Z_lo survives (one extra complex multiply per
+// step).
 const STEP = /* wgsl */ `
     let Z = orbit[n];
-    let t = 2.0 * Z.xy + opaque(2.0 * Z.zw + dz);
-    dz = vec2<f32>(t.x * dz.x - t.y * dz.y, t.x * dz.y + t.y * dz.x) + dc;
+    if (SPLIT_T) {
+      let h = 2.0 * Z.xy;
+      let u = opaque(2.0 * Z.zw + dz);
+      let a = opaque(vec2<f32>(h.x * dz.x - h.y * dz.y, h.x * dz.y + h.y * dz.x));
+      // The barrier keeps (b + dc) first: Metal otherwise reassociates to
+      // (a + b) + dc, which drops b coherently again.
+      dz = a + opaque(vec2<f32>(u.x * dz.x - u.y * dz.y, u.x * dz.y + u.y * dz.x) + dc);
+    } else {
+      let t = 2.0 * Z.xy + opaque(2.0 * Z.zw + dz);
+      dz = vec2<f32>(t.x * dz.x - t.y * dz.y, t.x * dz.y + t.y * dz.x) + dc;
+    }
     n = n + 1u;
     let Zn = orbit[n];
     z = select(Zn.xy + dz, Zn.xy + opaque(Zn.zw + dz), Z_LO);
@@ -81,10 +98,11 @@ const stridedBody = /* wgsl */ `
 const NONE = 0xffffffff;
 const SPLIT = 2;
 
-const shader = (periodicity, zLo, mariani) => /* wgsl */ `
+const shader = (periodicity, zLo, mariani, splitT = false) => /* wgsl */ `
 const STRIDE = ${periodicity}u;
 // false: z = Z + dz adds Z's hi part only (the lo part stays in 2Z + dz).
 const Z_LO = ${zLo};
+const SPLIT_T = ${splitT};
 // Mariani mode stores count + 1, so a cleared (0) slot means "not computed".
 const COUNT_OFFSET = ${mariani ? 1 : 0}u;
 const NONE = ${NONE}u;
@@ -333,12 +351,13 @@ export function gpuCovers(payload) {
 // leafPeriodicity: periodicity for the last (leaf) wave (mariani mode only).
 // Defaults (LOG 2026-11-17): 20 px block rings with periodicity, then a leaf
 // wave without it (fills already retire interior blocks). Pass
-// `mariani: false` for brute force.
-export async function createGpuLane({ periodicity = 1, zLo = false, mariani = [20], leafPeriodicity = 0 } = {}) {
+// `mariani: false` for brute force. split: keep Z's lo part in the
+// multiplier (see SPLIT_T; LOG 2026-11-18).
+export async function createGpuLane({ periodicity = 1, zLo = false, mariani = [20], leafPeriodicity = 0, split = false } = {}) {
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
   if (!adapter) throw new Error("No WebGPU adapter");
   const device = await adapter.requestDevice();
-  const module = device.createShaderModule({ code: shader(periodicity, zLo, mariani) });
+  const module = device.createShaderModule({ code: shader(periodicity, zLo, mariani, split) });
   const errors = (await module.getCompilationInfo()).messages.filter((m) => m.type === "error");
   if (errors.length) throw new Error(errors.map((m) => `${m.lineNum}:${m.linePos} ${m.message}`).join("\n"));
   const storage = (binding, type) => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
@@ -363,7 +382,7 @@ export async function createGpuLane({ periodicity = 1, zLo = false, mariani = [2
     );
     leafPipeline = ringPipeline;
     if (leafPeriodicity !== null && leafPeriodicity !== periodicity) {
-      const leafModule = device.createShaderModule({ code: shader(leafPeriodicity, zLo, mariani) });
+      const leafModule = device.createShaderModule({ code: shader(leafPeriodicity, zLo, mariani, split) });
       leafPipeline = await device.createComputePipelineAsync({ layout, compute: { module: leafModule, entryPoint: "ring" } });
     }
   } else {

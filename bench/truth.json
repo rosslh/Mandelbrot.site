@@ -1,0 +1,24 @@
+{
+  "comment": [
+    "Truth tier for GPU output (Ross, 2026-11-17; LOG entries 2026-11-17 and",
+    "2026-11-18). At pixel spacing <= 2^crossoverSpacingLog2, GPU tiles are",
+    "judged against BigInt truth for every pixel (src/truth.mjs) instead of",
+    "the pinned f64-direct anchor, by the same statistical tier with the same",
+    "budgets (anchor.json statisticalBudgets): only the reference changes.",
+    "crossoverSpacingLog2 = -37.5 was measured 2026-11-18 (two holdouts and",
+    "the fixed corpus): through 2^-37 (z32 at 200 px tiles) the anchor is",
+    "closer to truth than the G3 kernel on every view; from 2^-38 (z33) it",
+    "is not, and it fails the tier against truth on half the views. z33 at",
+    "200 px is 2^-37.99, hence the half-step boundary.",
+    "extraBudgets: absolute bounds on top of the tier (counts moved, exact",
+    "share). null = report only: chaotic long-orbit views move most counts",
+    "for any finite-precision renderer (the anchor itself moves 45% of",
+    "escapers at z28), so no absolute bound separates a re-roll from a bug;",
+    "see the 2026-11-18 LOG entry. Tightening is in policy; loosening any",
+    "budget, here or in anchor.json, is held for Ross.",
+    "seed: the sample seed for --samples N runs; changing it re-samples."
+  ],
+  "seed": "truth-2026-11-18",
+  "crossoverSpacingLog2": -37.5,
+  "extraBudgets": null
+}

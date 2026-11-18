@@ -483,8 +483,8 @@ export function diffValuesStatistical(bufA, bufB, width, budgets) {
   };
 }
 
-export function formatStatisticalResult(caseId, stats) {
-  if (stats.diffCount === 0) return `${caseId}: identical to anchor`;
+export function formatStatisticalResult(caseId, stats, reference = "anchor") {
+  if (stats.diffCount === 0) return `${caseId}: identical to ${reference}`;
   const summary =
     `${stats.diffCount} px differ (${(stats.diffFraction * 100).toFixed(2)}%), ` +
     `flips ${stats.flipsToInterior}/${stats.flipsToEscaper}, ` +
