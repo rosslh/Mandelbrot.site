@@ -3482,6 +3482,9 @@ G3's targets (grid-z36, z45/z46, the pf64 grids). Options:
   arbiter whenever the two disagree. Moving the anchor or its budgets is
   Ross's call (improve-performance "Held for Ross").
 
+Resolved 2026-11-17 (Ross): option (a), against sampled BigInt truth. See
+the 2026-11-17 DIRECTIVE entry.
+
 Separately, within policy, G3 also needs a lower cutoff. In z28–z31 the GPU
 carries the small error itself (table above), so its passes against the
 anchor there are close calls.
@@ -3778,3 +3781,52 @@ see 2026-11-15).
    verdict, and those are now G3's biggest wins (grid-z47 56 → 2.3 s).
 3. grid-z36 (GPU 296 vs wasm 208 ms): decompose it (interior 11%; budget
    51,200; which waves, and whether one long pixel sets the tail).
+
+## 2026-11-17 — DIRECTIVE (Ross): gate perturbation-depth GPU output against sampled BigInt truth
+
+Resolves the 2026-11-15 "Held for Ross" item on how to gate GPU
+perturbation output at depth. Ross chose option (a), judged against
+sampled BigInt truth rather than an anchor rendered through the wasm
+perturbation path. The wasm pf64 path is itself off the truth (2026-11-17),
+so it cannot serve as the reference there.
+
+- **Where it applies.** The truth tier replaces the anchor as the reference
+  only from the depth where the f64-direct anchor stops being the more
+  precise side. gpu-truth puts that crossover somewhere between ~z31 and
+  ~z35 so far. The first run measures it in pixel spacing, the same unit
+  as the direct/perturbation cutoff. Shallower than the crossover, GPU
+  output keeps the existing statistical gate against the pinned anchor.
+- **What it judges.** Each view's GPU render, on sampled pixels, against
+  BigInt truth on the same linspace grid (gpu-truth's method). The sample
+  must not be drawn only from anchor escapers, because today's gpu-truth
+  sampling then misses GPU-interior flips (2026-11-15 caveat). Sample
+  across every pixel, or stratify escapers and interior.
+- **Budgets.** The first run proposes them from measurements and logs the
+  evidence: an absolute bound on the GPU's own error (counts moved, sign
+  balance, exact share), set no looser than the anchor-referenced tier
+  on any axis the two share. The truth tier and budgets built that way
+  ship within the 2026-11-12 GPU policy. A budget looser than that, or a
+  later loosening, is still held.
+- **Arbiter.** When the truth tier and a per-view gpu-truth run disagree,
+  gpu-truth's full per-view comparison decides, and the disagreement is
+  logged.
+- **Unchanged.** The pinned anchor, its pin, and the statistical budgets for
+  the wasm lanes. The wasm fallback lane stays byte-exact and keeps
+  tracking the anchor.
+
+**Consequences.**
+- GPU verdicts at z ≥ 46 no longer wait on the pf64-vs-truth question,
+  because the GPU is judged against the truth directly. That question
+  becomes its own item: a possible accuracy bug in the wasm lane. Fixing
+  it would change wasm output, which is still held.
+- G3's first turn-on can now target its fast range (grid-z28 through the
+  pf64 grids), not just z25–z27.
+
+**Next run.**
+1. Verify the deploy (none since 11 Nov).
+2. Build the truth tier into gpu-check (a `--reference truth` mode reusing
+   gpu-truth's BigInt iteration, with unbiased sampling). Measure the
+   anchor/truth crossover in pixel spacing, and propose budgets with
+   evidence.
+3. Re-judge the G3 prototype on the fixed corpus and holdout: anchor tier
+   below the crossover, truth tier above it.

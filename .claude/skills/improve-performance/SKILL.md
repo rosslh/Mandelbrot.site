@@ -90,7 +90,9 @@ browser-coverage bullets above:
 - landing lane code;
 - turning the lane on for a class of views, or widening which views or browsers it covers;
 - moving a measured precision cutoff;
-- GPU output that passes the statistical tier against the pinned anchor.
+- GPU output that passes the statistical tier against the pinned anchor, or, past the
+  anchor/truth crossover, the truth tier against sampled BigInt truth (Ross, 2026-11-17: see
+  that LOG directive, including which budgets it pre-approves).
 
 Each one ships in routine mode like any other winner, provided it passes the "GPU ship gates"
 in step 4 and the two-lane deploy check in step 6. Still held:
@@ -272,7 +274,8 @@ ships, because users will not file a bug for a blank or wrong tile, they just le
   shader in a test build), every tile still renders through wasm, with no page error and no
   missing tile;
 - GPU output for every view class the change turns on passes the statistical tier against
-  the pinned anchor, on the fixed corpus and the holdout;
+  the pinned anchor (shallower than the anchor/truth crossover) or the truth tier (past it),
+  on the fixed corpus and the holdout;
 - the views the lane does not cover give byte-identical output and unchanged speed, compared
   against the merge-base baseline (no regression beyond the significance threshold);
 - the adversarial reviewer also checks the lane's routing (which requests go to the GPU),

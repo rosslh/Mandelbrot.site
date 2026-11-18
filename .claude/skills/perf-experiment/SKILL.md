@@ -86,7 +86,10 @@ next large wins are expected from rendering tiles on the GPU.
 - **Role: final tiles, not previews.** Where a hardware WebGPU adapter is
   available, the GPU renders the tile the user keeps. Its output is judged
   by the **statistical-equivalence tier against the pinned anchor**
-  (`--statistical`, same budgets as the relaxed-FMA lane); it can never be
+  (`--statistical`, same budgets as the relaxed-FMA lane). Past the depth
+  where the f64 anchor stops being the more precise side, it is judged
+  instead by the **truth tier against sampled BigInt truth** (Ross,
+  2026-11-17; LOG directive of that date). The GPU output can never be
   byte-exact (WGSL has no f64, and shader compilers may contract or
   reorder float ops differently per driver). The wasm fallback lane stays
   byte-exact, and the anchor and blessed enrich hashes keep tracking it.
@@ -717,9 +720,13 @@ policy above. Replace these estimates with measurements as items run.
   failing more with depth. `src/gpu-truth.mjs` shows why: up to ~z31 the
   f64-direct anchor is the more precise side, and from ~z35 the anchor is
   the biased side (z41/z44: GPU exact on 395–399 of 400 samples, anchor
-  biased +259/−130 and +140/−74). **Held for Ross: gating perturbation-depth
-  GPU output needs a reference accurate at depth (anchor through the wasm
-  perturbation path, or sampled BigInt truth); see the LOG.** Reference orbit from
+  biased +259/−130 and +140/−74). **Gate decided 2026-11-17 (Ross):** past
+  the anchor/truth crossover, judge GPU output against sampled BigInt truth
+  (LOG directive of that date). Next: build that truth tier into gpu-check
+  with unbiased sampling, measure the crossover in pixel spacing, propose
+  budgets, then re-judge G3. This also lifts the pf64-vs-truth question as a
+  blocker on z ≥ 46 GPU verdicts; it stays open as a wasm-lane accuracy
+  item. Reference orbit from
   the existing wasm orbit code uploaded as a storage buffer; f32 pixel
   deltas with rebasing; covers z ≳ 13 into the pf64 range. Precision case
   (LOG 2026-11-13): f32 deltas keep ~24 sub-pixel bits at any depth, while
