@@ -12,11 +12,14 @@
 // statistical tier even at zoom 2: its rounding is structured on a regular
 // pixel grid, so sub-ulp deltas came out one-directional (bench/LOG.md
 // 2026-11-13). Coverage (see `gpuCovers`): exponent 2, escape-time coloring,
-// and pixel spacing coarse enough for df32. Everything else goes to wasm.
-// The output can never be byte-exact against the f64 wasm lanes; it is
-// judged by the statistical-equivalence tier against the pinned anchor, and
-// the cutoff below must be measured against that anchor before the lane
-// covers real views.
+// and pixel spacing coarse enough for df32 (the direct kernel here) or in the
+// perturbation kernel's window (gpuPerturb.js, backlog G3: pixel spacing
+// 2^-65.5..2^-37.5, judged by the truth tier). Everything else, including the
+// z25-z32 gap between the two, goes to wasm.
+// The output can never be byte-exact against the f64 wasm lanes. The df32
+// kernel is judged by the statistical-equivalence tier against the pinned
+// anchor, and its cutoff below was measured against that anchor; the
+// perturbation kernel is judged by the same tier against BigInt truth.
 //
 // The Metal backend compiles shaders with fast math: it reassociates float
 // expressions, which silently turns the error-free transformations df32 is
@@ -30,6 +33,8 @@
 // (device creation, shader compile, device loss, a rejected readback) is
 // thrown to worker.js, which renders that tile through wasm and stops
 // offering this worker's tiles to the GPU once the device is gone.
+
+import { createPerturbKernel, perturbCoversSpacing } from "./gpuPerturb.js";
 
 // Tile-space scale shared with the wasm renderer (perturbation.rs
 // TILE_SPACE_SCALE): 200 / 128.
@@ -53,7 +58,11 @@ export const GPU_MIN_PIXEL_SPACING = 2 ** -29;
 // stay on wasm. The kernel has no periodicity check or rect_in_set shortcut,
 // so a fully interior tile costs its whole budget per pixel: 2^32 steps is
 // about a second on an M1 Pro (the probe runs ~5G steps/s). The pixel cap
-// keeps image exports (tall columns) and buffer sizes on wasm too.
+// keeps image exports (tall columns) and buffer sizes on wasm too. The
+// perturbation kernel shares these caps, but its split step costs more per
+// iteration and its periodicity/fills retire only part of a tile, so the caps
+// are unmeasured for it: re-measure (or chunk its dispatches) before any view
+// turns it on.
 const GPU_MAX_ITERATIONS = 100000;
 const GPU_MAX_WORK = 2 ** 32;
 const GPU_MAX_PIXELS = 512 * 512;
@@ -235,11 +244,11 @@ function tileOffset(coordinate, zoom, zoomOffset) {
   );
 }
 
-// Whether the f32 kernel can render this request. Anything it cannot goes
-// to wasm unchanged.
-export function gpuCovers(payload) {
+// Which GPU kernel renders this request: "direct" (df32), "perturb" (G3) or
+// null (wasm renders it unchanged).
+function gpuKernelFor(payload) {
   const coloring = payload.coloring ?? {};
-  return (
+  const eligible =
     payload.power === 2 &&
     !coloring.distanceEstimate &&
     !coloring.atomDomain &&
@@ -248,9 +257,18 @@ export function gpuCovers(payload) {
     payload.imageWidth * payload.imageHeight * payload.maxIterations <=
       GPU_MAX_WORK &&
     payload.imageWidth > 1 &&
-    payload.imageHeight > 1 &&
-    pixelSpacing(payload) >= GPU_MIN_PIXEL_SPACING
-  );
+    payload.imageHeight > 1;
+  if (!eligible) return null;
+  const spacing = pixelSpacing(payload);
+  if (spacing >= GPU_MIN_PIXEL_SPACING) return "direct";
+  if (perturbCoversSpacing(spacing)) return "perturb";
+  return null;
+}
+
+// Whether a GPU kernel can render this request. Anything it cannot goes to
+// wasm unchanged.
+export function gpuCovers(payload) {
+  return gpuKernelFor(payload) !== null;
 }
 
 // Creates the device and pipeline. `inject` is a test-only failure mode
@@ -277,6 +295,7 @@ export async function createGpuLane({ inject = null } = {}) {
   });
 
   let pipeline;
+  let perturb;
   try {
     device.pushErrorScope("validation");
     const module = device.createShaderModule({
@@ -297,6 +316,14 @@ export async function createGpuLane({ inject = null } = {}) {
   } catch (error) {
     device.destroy();
     throw error;
+  }
+  // A perturbation-kernel failure costs only its own coverage: the df32
+  // kernel keeps the device, and perturbation-range tiles render on wasm.
+  try {
+    perturb = await createPerturbKernel(device);
+  } catch (error) {
+    console.warn("GPU perturbation kernel unavailable:", error);
+    perturb = null;
   }
 
   const uniform = device.createBuffer({
@@ -360,14 +387,25 @@ export async function createGpuLane({ inject = null } = {}) {
   if (inject === "lost") device.destroy();
 
   // Renders the escape values of one covered tile. Resolves to
-  // { values: Float32Array, minIter, maxIter } (iteration stats null for a
-  // fully interior tile, as wasm reports them).
+  // { values: Float32Array, minIter, maxIter, tier } (iteration stats null for
+  // a fully interior tile, as wasm reports them; tier is the precision tier
+  // the wasm would report, for the diagnostics overlay).
   let renders = 0;
   const renderValues = async (payload) => {
     if (lost) throw new Error("GPU device lost");
     if (inject === "tile" && renders++ > 0) {
       throw new Error("Injected GPU tile failure");
     }
+    const kernel = gpuKernelFor(payload);
+    if (kernel === "perturb") {
+      if (!perturb) throw new Error("GPU perturbation kernel unavailable");
+      return perturb.renderValues(payload, pixelSpacing(payload));
+    }
+    if (kernel !== "direct") throw new Error("Request not covered by the GPU");
+    return renderDirect(payload);
+  };
+
+  const renderDirect = async (payload) => {
     const {
       bounds,
       zoomOffset,
@@ -413,12 +451,15 @@ export async function createGpuLane({ inject = null } = {}) {
       const error = await submitError;
       if (error) throw new Error(`GPU dispatch error: ${error.message}`);
       const raw = new Float32Array(readback.getMappedRange(0, pixels * 20));
-      return smoothValues(
-        raw,
-        pixels,
-        payload.maxIterations,
-        payload.smoothColoring,
-      );
+      return {
+        ...smoothValues(
+          raw,
+          pixels,
+          payload.maxIterations,
+          payload.smoothColoring,
+        ),
+        tier: 0,
+      };
     } finally {
       readback.unmap();
     }
@@ -426,6 +467,11 @@ export async function createGpuLane({ inject = null } = {}) {
 
   return {
     renderValues,
+    // gpuCovers, narrowed to the kernels this device actually built.
+    covers(payload) {
+      const kernel = gpuKernelFor(payload);
+      return kernel === "direct" || (kernel === "perturb" && perturb !== null);
+    },
     get usable() {
       return !lost;
     },

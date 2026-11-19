@@ -190,7 +190,6 @@ const supportsRelaxedSimd = WebAssembly.validate(
     // tiles; any GPU error renders that tile through wasm instead, and a
     // lost device turns the lane off for this worker.
     let gpuLane = null;
-    let gpuCovers = null;
     const configureLane = async ({ lane, inject }) => {
       if (lane !== "gpu") {
         gpuLane = null;
@@ -201,54 +200,71 @@ const supportsRelaxedSimd = WebAssembly.validate(
         // Kept as the lane object itself: its `usable` getter must stay
         // live, so it turns false when the device is lost.
         gpuLane = await module.createGpuLane({ inject });
-        gpuCovers = module.gpuCovers;
       } catch (gpuError) {
         console.warn("GPU lane unavailable, using wasm:", gpuError);
         gpuLane = null;
         return "wasm";
       }
-      try {
-        // Compile and run the kernel once on a boundary-crossing view at
-        // the default tile size, so the first real tile neither pays the
-        // driver's first-dispatch cost nor regrows the buffers.
-        await gpuLane.renderValues({
+      // Compile and run each kernel once at the default tile size, so the
+      // first real tile neither pays the driver's first-dispatch cost nor
+      // regrows the buffers. A failed warmup keeps the lane: tiles still try
+      // it and fall back per tile (this is the "lost" injection's path), and
+      // a lost device turns it off.
+      const warmups = [
+        // df32 direct: a boundary-crossing shallow view.
+        {
           originRe: "-0.75",
           originIm: "0",
           bounds: { xMin: 2.5, xMax: 3, yMin: 2.4, yMax: 2.9, zoom: 2 },
           zoomOffset: 0,
+        },
+        // Perturbation (its pipelines, block tree and reference-orbit path):
+        // a deep dendrite tile.
+        {
+          originRe: "0",
+          originIm: "1",
+          bounds: { xMin: 2621, xMax: 2622, yMin: 2621, yMax: 2622, zoom: 12 },
+          zoomOffset: 28,
+        },
+      ];
+      for (const view of warmups) {
+        const payload = {
+          ...view,
           maxIterations: 200,
           power: 2,
           imageWidth: 200,
           imageHeight: 200,
           smoothColoring: true,
-        });
-      } catch (gpuError) {
-        // The device initialized but its first dispatch failed. Keep the
-        // lane: tiles still try it and fall back per tile (this is the
-        // "lost" injection's path), and a lost device turns it off.
-        console.warn(
-          "GPU lane warmup failed; tiles fall back per tile:",
-          gpuError,
-        );
+        };
+        if (!gpuLane.covers(payload)) continue;
+        try {
+          await gpuLane.renderValues(payload);
+        } catch (gpuError) {
+          console.warn(
+            "GPU lane warmup failed; tiles fall back per tile:",
+            gpuError,
+          );
+        }
       }
       return "gpu";
     };
 
     const getGpuTile = async (params) => {
-      const { values, minIter, maxIter } = await gpuLane.renderValues(params);
+      const { values, minIter, maxIter, tier } =
+        await gpuLane.renderValues(params);
       const image = wasm.recolor_tile(values, params.coloring);
       return {
         image,
         values: params.includeValues ? values : null,
         minIter,
         maxIter,
-        tier: 0,
+        tier,
         lane: "gpu",
       };
     };
 
     const getTile = async (params) => {
-      if (gpuLane && gpuLane.usable && gpuCovers(params)) {
+      if (gpuLane && gpuLane.usable && gpuLane.covers(params)) {
         try {
           return await getGpuTile(params);
         } catch (gpuError) {
