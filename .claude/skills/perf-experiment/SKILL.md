@@ -747,8 +747,23 @@ policy above. Replace these estimates with measurements as items run.
   (cusp) drift class (hold-z43-a5595821, where split leans and plain f32
   does not), four other z33–z44 views, and z14–z15 near the lower bound.
   `src/perturb-emulate.mjs` reproduces the GPU's sign counts on the CPU:
-  try it first on any new bias. Next: port G3 to the client lane for z ≥ 33
-  (turned off first), or chase the residuals. The pf64-vs-truth question is
+  try it first on any new bias. **Ported to the client lane 2026-11-19
+  (LOG), switched off:** `client/js/gpuPerturb.js`, routed by gpu.js for
+  pixel spacing 2^-65.5..2^-37.5 (z33–z60 at 200 px), reachable only via
+  `?lane=gpu`. Its output equals the prototype's (split, `[20]` blocks) on
+  40/40 holdout views; fixed corpus 25/25 under `--reference auto`; holdout
+  seed 2026-11-19 (z33–z60) 34/40. **Before any view turns it on:**
+  1. pixel offsets dc are f32 from the view origin, and the origin does not
+     move on pan, so tiles far from it (≳2^17 px) quantize columns
+     coherently; measure, then route those to wasm or carry dc as hi + lo;
+  2. the 2^32 work cap was sized for df32: re-measure it for the split
+     step, or chunk the dispatch;
+  3. the residuals inside the window: the six 2026-11-19 holdout failures
+     (one new class, hold-z41-c1ae634a: 3640 one-directional
+     interior→escaper flips) plus 2026-11-18's;
+  4. supersampled/high-DPI shapes move the zoom window and were never
+     gated.
+  The pf64-vs-truth question is
   no longer a blocker: f64 perturbation emulated in JS matches truth
   (39,931/40,000 exact on user-z48-i800), so wasm pf64's error is a wasm
   implementation bug, a wasm-lane accuracy item whose fix is held.

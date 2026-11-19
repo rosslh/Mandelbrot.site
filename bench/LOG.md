@@ -4046,3 +4046,144 @@ truth tier and its −37.5 crossover are in place for G3's verdicts.
    (hold-z43-a5595821) and the four other z33–z44 residuals. Try
    perturb-emulate on each before touching the shader.
 3. wasm pf64 accuracy: the per-iteration diff against the f64 emulator.
+
+## 2026-11-19 — SHIPPED (switched off): G3 GPU perturbation kernel ported into the client WebGPU lane; lane-off verdict holds
+
+Routine run. Machine: Apple M1 Pro (8 cores), on AC power, Chrome for Testing
+136.0.7103.94, WebGPU adapter `apple / metal-3` (gpu-probe exit 0 before
+every gate and timing run), rustc 1.100.0 (`rustup update stable`: current).
+Harness `PRODUCTION_DEFAULTS` match the production config. One Apple GPU;
+other vendors are unmeasured. The working tree held an untracked
+`.claude/launch.json` (a preview config from Ross's 18 Nov session); it does
+not touch builds or benchmarks, so it was left alone and not committed.
+
+**What changed (client, lane still off).**
+- New `client/js/gpuPerturb.js`: the G3 prototype
+  (`bench/page/gpu-perturb.js`) with the options its verdicts were taken
+  on: split multiplier step, Z's hi part only in z = Z + dz, branchless
+  Brent periodicity in the ring waves, none in the leaf wave, 20 px block
+  tree. BigInt reference orbit at the view origin, cached per worker;
+  output, readback and delta buffers reused and regrown; block trees cached
+  per tile shape (at most 4, evicted ones destroyed).
+- `gpu.js` routes each request: pixel spacing ≥ 2^-29 to df32 (unchanged),
+  2^-65.5..2^-37.5 (z33–z60 at 200 px) to the perturbation kernel, the
+  z25–z32 gap and everything else to wasm. The lane object gains
+  `covers()`, so a device whose perturbation pipelines fail keeps df32 and
+  sends perturbation-range tiles to wasm. GPU tiles report the tier wasm
+  would (pf64 below 2^-50).
+- `worker.js` warms each kernel at 200 px in `configureLane`, each in its
+  own try.
+- Production never sends `configureLane` with `gpu` (only the
+  localhost-only `?lane=gpu` switch does), so no production load runs any
+  of this. The service worker precaches the new chunk, as it does gpu.js.
+
+**Port fidelity.** Holdout seed 2026-11-19 (40 export views, z33–z60), the
+client module against the prototype (`--module /bench/page/gpu-perturb.js
+--lane-options '{"split":true}' --force`): the GPU-vs-truth stats are
+identical on 40/40 views. GPU A/A: 0 nondeterministic renders.
+
+**Gates.**
+- `gpu-check --reference auto` (fixed corpus, client module): 25/25 covered
+  cases pass (df32 z ≤ 24 against the anchor; G3 z37–z48 against truth
+  for every pixel). Re-run after the review fixes: identical, 44/44 rows.
+- Holdout seed 2026-11-19, z33–z60, truth tier: **34/40**. Failing:
+  - hold-z34-d5b8120a: quantile drift 1.69% (budget 1.5%);
+  - hold-z38-11acebba: sign +12398/−13265 (already failing 2026-11-18);
+  - hold-z41-13c8c542: sign +1/−67 on 68 px;
+  - **hold-z41-c1ae634a: 3640 one-directional interior→escaper flips, one
+    blob, 9.1% of the tile.** A new failure class for G3, not a re-roll;
+    decompose it (perturb-emulate, gpu-truth) before any turn-on;
+  - hold-z46-53cca7fb: sign +395/−106;
+  - hold-z48-9493243b: sign +1842/−1467.
+  These are kernel residuals, not port bugs (the prototype gives the same
+  numbers). They block turning the lane on, not landing it off.
+- lane-check on exp-dist, 45/45 tiles each, 0 page or console errors:
+  - all-GPU: z48-i800 (pf64 depth), z38-i13400 (cusp), z5;
+  - all-wasm: `lane=wasm`, `--no-gpu`, each of `gpuFail=shader|lost|tile`,
+    and an uncovered z28 view.
+  `gpuFail=tile` is all-wasm by design (every render after the first
+  throws; the first is a warmup).
+- client typecheck, lint, format:check, test (92 cargo tests pass, 4
+  ignored) and build pass; `npm run verify-e2e` 8/8 on the fresh
+  client/dist.
+- The verdict runs below rendered **0 GPU tiles** on every pass of every
+  variant: direct evidence that a load without the parameter never routes
+  to the GPU.
+
+**Harness finding: build both dists the same way.** The first exp-dist was
+the in-tree build, and its wasm differed from the `--ref` worktree build of
+the same Rust source (the two module wasms were 407,004 and 411,526 bytes
+in-tree, 412,166 and 416,728 from the worktree; cause not traced). Rebuilt with `build-dist.mjs exp-dist --ref 88cb890`, all
+three dists' wasm files are byte-identical (sha-1 checked), so the verdict
+compares client JS only. Invocation 1 used the in-tree exp-dist and is void
+anyway. Lesson: for a lane-off or JS-only verdict, build exp-dist with
+`--ref <commit>` too, and diff the wasm hashes before timing.
+
+**Lane-off verdict.** `run-e2e --variants base-dist,base-dist2,exp-dist`,
+base dists at the merge base a359453, exp-dist at 88cb890, wasm identical.
+Four invocations, load ≤ 4.0 at each start:
+- v1 is **void**: its A/A pair flagged grid-z20 (+6.2%), and it used the
+  in-tree exp-dist (results/e2e-g3off-v1.json).
+- v2, v3 and v4 are valid (results/e2e-g3off-v{2,3,4}.json): no A/A flag.
+- exp-dist: one case significant once, grid-z48-i800 +5.9% in v2 only
+  (−1.4% in v3 and −0.3% in v4). It was not slower in two runs, so under
+  the verdict protocol it is not a regression. No other case was
+  significant in either direction.
+- 0 GPU tiles on every pass.
+
+Medians across the three valid runs, base → exp. The cold change is listed
+per run.
+
+| case | base → exp (median of run medians) | change | cold v2 / v3 / v4 |
+|---|---|---|---|
+| grid-z36-i51200 | 437 → 427 ms | -2.5% | -15.4 / -13.7 / -6.6% |
+| grid-z45-i6400 | 383 → 385 ms | 0.6% | -13.7 / -2.4 / -6.3% |
+| grid-z20-i1600 | 259 → 257 ms | -1.0% | -2.1 / 5.9 / 4.0% |
+| grid-z48-i20000 | 1717 → 1735 ms | 1.0% | -8.6 / -4.3 / 5.4% |
+| grid-z47-i50000 | 45614 → 45485 ms | -0.3% | 0.4 / -2.4 / 1.7% |
+| grid-z48-i48000 | 15088 → 15112 ms | 0.2% | -1.3 / 1.2 / 1.2% |
+| grid-z28-i50000 | 3141 → 3216 ms | 2.4% | 0.4 / 2.9 / -0.6% |
+| grid-z259-i1600 | 1072 → 1095 ms | 2.2% | 13.8 / 3.5 / 4.7% |
+| grid-z48-i800 | 713 → 704 ms | -1.4% | -16.8 / -1.7 / -8.0% |
+| grid-z85-i200 | 449 → 444 ms | -1.3% | 8.4 / 2.2 / 3.9% |
+
+None of this is a speed-up, and none was expected: the gate for a
+switched-off lane is "uncovered views byte-identical and as fast", and it
+holds. The lane-off client adds one lazy chunk (gpuPerturb.js, loaded only
+with the lane on); wasm sizes unchanged (407.0 KiB).
+
+**Verdict: shipped, switched off** (lane code landing off is pre-approved
+under the 2026-11-12 GPU policy; no view class is turned on, nothing held).
+
+**Adversarial review** (fresh Opus agent, read only). No difference from the
+prototype that changes output for any input the client sends; no buffer
+lifetime, leak or concurrency bug (one tile in flight per worker; configureLane
+completes before the worker joins the pool); routing, tier and return shape
+correct; production unchanged. Fixed in this ship:
+- a perturbation-pipeline failure used to destroy the device and take df32
+  with it; now it costs only perturbation coverage (`covers()`);
+- the perturbation warmup was 64 px and ran only if df32's warmup succeeded;
+  now 200 px, in its own try;
+- stale comments (anchor-only judging, "step for step", the coverage
+  evidence, the work cap's df32-only reasoning).
+
+Its three risks are the **must-fix list before any view turns G3 on**
+(now in the backlog):
+1. dc offsets are f32 from the view origin, and the origin does not move on
+   pan, so a tile ≳2^17 px from it quantizes columns coherently (≈2^23 px
+   away, half a pixel). Every gated view sits near its origin. Measure, then
+   route far tiles to wasm or carry dc as hi + lo.
+2. `GPU_MAX_WORK = 2^32` was sized for df32; the split step costs more per
+   iteration. Re-measure it, or chunk the dispatch.
+3. Coverage past the evidence: the holdout residuals above, and
+   supersampled/high-DPI shapes, which move the zoom window and were never
+   gated.
+
+**Next run.**
+1. Decompose hold-z41-c1ae634a's flip blob (perturb-emulate first).
+2. Measure the far-from-origin dc error (must-fix 1) and the worst-case
+   split-step dispatch time (must-fix 2).
+3. Then the first turn-on candidate: G3 for z ≥ 46 (the pf64 grids, 10–16×
+   faster in the prototype) once 1–2 are answered, with its own holdout.
+4. wasm pf64 accuracy (per-iteration diff against the f64 emulator) stays
+   open; its fix is held.
