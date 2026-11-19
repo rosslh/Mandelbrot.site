@@ -1670,3 +1670,132 @@ fn misiurewicz_m221_tile_renders_structure_at_e1000_depth() {
     );
     assert!(tile.max_iter < max_iterations as i32);
 }
+
+/// The complex coordinate of pixel (column, row) of a `make_frame` frame, in
+/// plain f64 (only meaningful at depths f64 still resolves).
+fn make_frame_pixel_c(
+    origin_re: f64,
+    origin_im: f64,
+    tile_zoom: i32,
+    zoom_offset: u32,
+    image_size: usize,
+    column: usize,
+    row: usize,
+) -> num::complex::Complex64 {
+    let center = centered_tile_coordinate(tile_zoom).floor();
+    let x = center + column as f64 / (image_size - 1) as f64;
+    let y = center + row as f64 / (image_size - 1) as f64;
+    num::complex::Complex64::new(
+        origin_re + ldexp(tile_coordinate_offset(x, tile_zoom), -(zoom_offset as i64)),
+        origin_im - ldexp(tile_coordinate_offset(y, tile_zoom), -(zoom_offset as i64)),
+    )
+}
+
+#[test]
+fn perturbed_distance_estimate_and_atom_domain_match_direct_at_moderate_zoom() {
+    // Issue #53: deep tiles in the fixed-palette modes now run perturbation
+    // kernels. Where f64 still resolves the view, they must agree with the
+    // direct kernels the shallow tiles use, so the modes look the same on
+    // both sides of the tier switch.
+    let image_size = 40;
+    let max_iterations = 2000;
+    let tile_zoom = 33;
+    let zoom_offset = 2;
+    let frame = make_frame(
+        DEEP_RE,
+        DEEP_IM,
+        tile_zoom,
+        zoom_offset,
+        image_size,
+        max_iterations,
+    );
+    let origin_re: f64 = DEEP_RE.parse().unwrap();
+    let origin_im: f64 = DEEP_IM.parse().unwrap();
+    // Any positive spacing works for the comparison; use one pixel.
+    let spacing = pixel_spacing(0.0, 1.0, tile_zoom, 0, image_size);
+    let display_spacing = ldexp(spacing, -(zoom_offset as i64));
+
+    let mut distance_checked = 0;
+    let mut distance_close = 0;
+    let mut atom_matching = 0;
+    let total = image_size * image_size;
+    for row in 0..image_size {
+        for column in 0..image_size {
+            let c = make_frame_pixel_c(
+                origin_re,
+                origin_im,
+                tile_zoom,
+                zoom_offset,
+                image_size,
+                column,
+                row,
+            );
+
+            let direct = crate::distance_estimate_at_c(c, max_iterations, 9.0, 2)
+                .map(|distance| distance / display_spacing);
+            let perturbed = frame.distance_estimate(column, row, spacing);
+            if let (Some(direct), Some(perturbed)) = (direct, perturbed) {
+                distance_checked += 1;
+                // Compare what renders — the brightness ramp — rather than
+                // raw distances: pixels a tiny fraction of a pixel from the
+                // boundary have chaotic estimates in either kernel (checked
+                // against 256-bit ground truth, neither is consistently
+                // closer), but both render them black.
+                if (direct.tanh() - perturbed.tanh()).abs() <= 1e-2 {
+                    distance_close += 1;
+                }
+            }
+
+            let direct_index = crate::atom_domain_index_at_c(c, max_iterations, 9.0, 2);
+            if direct_index == frame.atom_domain_index(column, row) {
+                atom_matching += 1;
+            }
+        }
+    }
+
+    assert!(distance_checked > total / 2, "too few exterior pixels");
+    assert!(
+        distance_close as f64 / distance_checked as f64 > 0.98,
+        "only {distance_close}/{distance_checked} distance estimates matched"
+    );
+    assert!(
+        atom_matching as f64 / total as f64 > 0.95,
+        "only {atom_matching}/{total} atom-domain indices matched"
+    );
+}
+
+#[test]
+fn perturbed_distance_estimate_float_exp_matches_f64_deltas() {
+    // Below the float-exp threshold both delta representations are valid, so
+    // the extended-exponent kernel must reproduce the f64-delta kernel.
+    let orbit = compute_reference_orbit(
+        &parse_decimal(DEEP_RE, 256).unwrap(),
+        &parse_decimal(DEEP_IM, 256).unwrap(),
+        2,
+        3001,
+        9.0,
+    );
+    for k in 0..50 {
+        let dc = Complex64::new(
+            ldexp(k as f64 - 25.0, -45),
+            ldexp(17.0 - k as f64 * 0.7, -45),
+        );
+        let dc_exp = ComplexExp::from_f64s(dc.re, dc.im);
+        let f64_estimate = perturbed_distance_estimate(&orbit.values, dc, 3000, 2, 9.0);
+        let exp_estimate = perturbed_distance_estimate(&orbit.values, dc_exp, 3000, 2, 9.0);
+        match (f64_estimate, exp_estimate) {
+            (Some((a, a_exp)), Some((b, b_exp))) => {
+                let a = ldexp(a, a_exp);
+                let b = ldexp(b, b_exp);
+                assert!((a - b).abs() <= 1e-6 * a, "dc #{k}: {a} vs {b}");
+            }
+            (None, None) => {}
+            other => panic!("dc #{k}: escape disagreement {other:?}"),
+        }
+        assert_eq!(
+            perturbed_atom_domain_index(&orbit.values, dc, 3000, 2, 9.0),
+            perturbed_atom_domain_index(&orbit.values, dc_exp, 3000, 2, 9.0),
+            "dc #{k}"
+        );
+    }
+}

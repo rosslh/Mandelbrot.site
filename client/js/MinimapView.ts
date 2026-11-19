@@ -183,6 +183,10 @@ class MinimapView {
         size,
         standardMode,
         MINIMAP_FRAME,
+        undefined,
+        // Render pixels per laid-out CSS pixel, so a high-DPI panel draws
+        // the distance-estimate boundary at the same weight as a 1x one.
+        size / (this.canvas.clientWidth || THUMBNAIL_FALLBACK_CSS_PX),
       );
 
       // The minimap's own palette fit: the same center-weighted percentile

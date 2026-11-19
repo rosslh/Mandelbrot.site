@@ -292,6 +292,10 @@ class ZoomAnimator {
   ): Promise<ImageBitmap> {
     const renderer = this.map.regionRenderer;
     const equalize = strength > 0;
+    // Constant across frames (the frames' extents scale, not their pixel
+    // counts), so the distance-estimate boundary keeps the on-screen weight
+    // throughout the animation (issue #54).
+    const pixelRatio = renderer.viewPixelRatio(spec.width, spec.height);
 
     if (range === null && !equalize) {
       const canvas = await renderer.renderToCanvas(
@@ -299,6 +303,7 @@ class ZoomAnimator {
         spec.width,
         spec.height,
         coloringOptions(config),
+        pixelRatio,
       );
       return createImageBitmap(canvas);
     }
@@ -315,6 +320,7 @@ class ZoomAnimator {
       true,
       undefined,
       coloringOptions(config),
+      pixelRatio,
     );
 
     let image = response.image;

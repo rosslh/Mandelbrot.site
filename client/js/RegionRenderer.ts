@@ -52,7 +52,9 @@ class RegionRenderer {
    * equalization table; the image export, which equalizes to the exported
    * region's own distribution) pass one so the render does not inherit the
    * map's viewport-global table, which is fit to the on-screen view rather
-   * than the off-screen region being rendered. */
+   * than the off-screen region being rendered. The optional `pixelRatio` is
+   * how many render pixels span one displayed pixel (see
+   * TileRenderPayload.pixelRatio); omitted means 1. */
   buildPayload(
     bounds: TileRect,
     imageWidth: number,
@@ -60,8 +62,12 @@ class RegionRenderer {
     includeValues: boolean,
     frame?: RenderFrame,
     coloring?: ColoringOptions,
+    pixelRatio?: number,
   ): TileRenderPayload {
     return {
+      // Only set when given: the wasm deserializer defaults a missing field
+      // to 1, and a present-but-undefined one is not "missing".
+      ...(pixelRatio === undefined ? {} : { pixelRatio }),
       includeValues,
       originRe: frame ? frame.originRe : this.map.origin.re,
       originIm: frame ? frame.originIm : this.map.origin.im,
@@ -79,6 +85,21 @@ class RegionRenderer {
       coloring:
         coloring ?? coloringOptions(this.map.config, this.map.paletteCdf),
     };
+  }
+
+  /** The render-to-screen pixel ratio for an offscreen render of the
+   * current view at `width x height` (image export, zoom animation): render
+   * pixels per on-screen CSS pixel. Those renders expand the view to their
+   * own aspect ratio (never crop), so the view's fitting dimension sets the
+   * scale. Passed as a render's `pixelRatio`, it makes a distance-estimate
+   * export draw the boundary at the weight seen on screen, whatever its
+   * resolution. */
+  viewPixelRatio(width: number, height: number): number {
+    const size = this.map.getSize();
+    if (size.x <= 0 || size.y <= 0) {
+      return 1;
+    }
+    return Math.min(width / size.x, height / size.y);
   }
 
   /** The escape iteration count at a single point, computed as a one-pixel
@@ -217,7 +238,8 @@ class RegionRenderer {
    * recoloring consumes. The optional `frame` pins the bounds to an explicit
    * origin and zoom offset instead of the map's current ones; the optional
    * `coloring` overrides the palette mapping instead of inheriting the map's
-   * viewport-global one (see buildPayload). */
+   * viewport-global one (see buildPayload), and the optional `pixelRatio`
+   * sets the displayed-pixel scale (see buildPayload). */
   async renderRegion(
     bounds: TileRect,
     imageWidth: number,
@@ -225,6 +247,7 @@ class RegionRenderer {
     includeValues: boolean,
     frame?: RenderFrame,
     coloring?: ColoringOptions,
+    pixelRatio?: number,
   ): Promise<MandelbrotResponse> {
     const request: CalculateRequest = {
       type: "calculate",
@@ -235,6 +258,7 @@ class RegionRenderer {
         includeValues,
         frame,
         coloring,
+        pixelRatio,
       ),
     };
 
@@ -269,12 +293,16 @@ class RegionRenderer {
     bounds: TileRect,
     imageWidth: number,
     imageHeight: number,
+    pixelRatio?: number,
   ): Promise<Float32Array> {
     const response = await this.renderRegion(
       bounds,
       imageWidth,
       imageHeight,
       true,
+      undefined,
+      undefined,
+      pixelRatio,
     );
 
     if (!response.values) {
@@ -287,12 +315,14 @@ class RegionRenderer {
   /** Renders the region to an offscreen canvas (no escape values, no tile
    * cache entry — pure pixels for export-style consumers). The optional
    * `coloring` overrides the palette mapping instead of inheriting the map's
-   * viewport-global one (see buildPayload). */
+   * viewport-global one (see buildPayload), and the optional `pixelRatio`
+   * sets the displayed-pixel scale. */
   async renderToCanvas(
     bounds: TileRect,
     imageWidth: number,
     imageHeight: number,
     coloring?: ColoringOptions,
+    pixelRatio?: number,
   ): Promise<HTMLCanvasElement> {
     const canvas = document.createElement("canvas");
     const context = canvas.getContext("2d");
@@ -311,6 +341,7 @@ class RegionRenderer {
       false,
       undefined,
       coloring,
+      pixelRatio,
     );
 
     const imageData = new ImageData(

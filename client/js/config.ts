@@ -50,9 +50,9 @@ export type MandelbrotConfig = {
   //   domain (the iteration index of the orbit's nearest approach to the
   //   origin) on a categorical palette, visualizing where the set's
   //   components of each period live.
-  // The non-standard methods render on the direct f64 path only; deeper
-  // (zoomed) tiles fall back to escape-time coloring. They also fix the
-  // palette domain, ignoring the palette range.
+  // The non-standard methods render at every depth (direct f64 kernels for
+  // shallow tiles, perturbation kernels for deep ones — issue #53). They fix
+  // the palette domain, ignoring the palette range.
   coloringMethod: string;
   // How the palette is distributed inside the palette window, as a 0–100
   // slider blending between the two classic mappings:

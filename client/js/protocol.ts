@@ -78,6 +78,12 @@ export type TileRenderPayload = {
   // offscreen image-export path skips them to avoid the extra transfer.
   includeValues: boolean;
   coloring: ColoringOptions;
+  // Render pixels per displayed (CSS layout) pixel: the supersampling
+  // factor, or an export's resolution relative to the on-screen view.
+  // Distance-estimate renders measure distance against the displayed pixel,
+  // so supersampling sharpens the boundary without thinning it (issue #54).
+  // Omitted means 1.
+  pixelRatio?: number;
 };
 
 export type CalculateRequest = {

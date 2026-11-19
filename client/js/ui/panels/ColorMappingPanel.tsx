@@ -121,9 +121,10 @@ function PaletteHistogramPanel(): JSX.Element {
 // here.
 export function ColorMappingPanel(): JSX.Element {
   const { map } = useApp();
-  // The palette range only applies to escape-time coloring; the fixed-range
-  // methods (distance estimate, atom domains) ignore it, so hide the panel's
-  // color-mapping slider and auto-fit checkbox while one is active (the
+  // The palette range and smoothing only apply to escape-time coloring; the
+  // fixed-range methods (distance estimate, atom domains) ignore them, so
+  // hide the panel's smooth-coloring checkbox, color-mapping slider and
+  // auto-fit checkbox while one is active (the
   // histogram itself blanks out; see PaletteHistogramRenderer). The
   // coloring-method select stays enabled so the user can switch back.
   const mappingHidden = map.store.signals.coloringMethod.value !== "standard";
@@ -145,7 +146,7 @@ export function ColorMappingPanel(): JSX.Element {
       <div class="input-wrapper">
         <label
           for="coloringMethod"
-          title="How pixels are colored. Standard: escape time. Distance estimate: distance to the set boundary, for a crisp image. Atom domains: the period of the pixel's atom domain on a categorical palette. The non-standard modes are available at shallow zoom (direct f64) only."
+          title="How pixels are colored. Standard: escape time. Distance estimate: distance to the set boundary, for a crisp image. Atom domains: the period of the pixel's atom domain on a categorical palette."
         >
           Coloring method
         </label>
@@ -158,7 +159,7 @@ export function ColorMappingPanel(): JSX.Element {
           <option value="atomDomain">Atom domains</option>
         </SettingSelect>
       </div>
-      <div class="checkbox-wrapper">
+      <div class="checkbox-wrapper" hidden={mappingHidden}>
         <SettingCheckbox spec={settingSpec<CheckboxSpec>("smoothColoring")} />
         <label for="smoothColoring">Smooth coloring</label>
       </div>

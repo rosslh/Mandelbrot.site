@@ -172,6 +172,11 @@ class MandelbrotLayer extends L.GridLayer {
           scaledTileSize,
           scaledTileSize,
           true,
+          undefined,
+          undefined,
+          // Supersampled tiles draw the distance-estimate boundary at the
+          // layout-size tile's weight (issue #54).
+          scaledTileSize / this.getTileSize().x,
         ),
       };
       const response = (await workerTask(request)) as MandelbrotResponse;

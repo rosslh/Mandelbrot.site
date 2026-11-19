@@ -1298,6 +1298,250 @@ fn perturbed_escape_iterations_float_exp(
     (iterations, z)
 }
 
+/// A pixel-delta representation the scalar analysis kernels (distance
+/// estimate and atom domains) can step: plain f64 below the float-exp
+/// threshold, `ComplexExp` beyond it. Both follow exactly the step and
+/// rebasing rules of the escape-time loops above
+/// (`perturbed_escape_iterations_f64` / `_float_exp`).
+trait PixelDelta: Copy + PartialEq {
+    const ZERO: Self;
+    /// One perturbation step against reference value `z_ref`, `+ dc` included.
+    fn step(self, z_ref: Complex64, dc: Self, exponent: u32) -> Self;
+    fn to_complex(self) -> Complex64;
+    fn from_complex(z: Complex64) -> Self;
+    /// Whether the delta is no longer small relative to the full value `z`
+    /// (the rebasing condition `|z| < |dz|`).
+    fn outgrows(self, z: Complex64) -> bool;
+}
+
+impl PixelDelta for Complex64 {
+    const ZERO: Self = Complex64::new(0.0, 0.0);
+
+    fn step(self, z_ref: Complex64, dc: Self, exponent: u32) -> Self {
+        delta_step_f64(z_ref, self, exponent) + dc
+    }
+
+    fn to_complex(self) -> Complex64 {
+        self
+    }
+
+    fn from_complex(z: Complex64) -> Self {
+        z
+    }
+
+    fn outgrows(self, z: Complex64) -> bool {
+        z.norm_sqr() < self.norm_sqr()
+    }
+}
+
+impl PixelDelta for ComplexExp {
+    const ZERO: Self = ComplexExp::ZERO;
+
+    fn step(self, z_ref: Complex64, dc: Self, exponent: u32) -> Self {
+        delta_step_float_exp(z_ref, self, exponent).add(&dc)
+    }
+
+    fn to_complex(self) -> Complex64 {
+        let (re, im) = self.to_f64s();
+        Complex64::new(re, im)
+    }
+
+    fn from_complex(z: Complex64) -> Self {
+        ComplexExp::from_f64s(z.re, z.im)
+    }
+
+    fn outgrows(self, z: Complex64) -> bool {
+        exp_value_less_than((z.norm_sqr(), 0), self.norm_sqr_exp())
+    }
+}
+
+/// One pixel's perturbed orbit, stepped one iteration at a time so a kernel
+/// can observe every full value `z_n`. Construction takes the pre-step, so
+/// `z` starts at `z_1 = c`, matching the direct kernels, which start iterating
+/// from `z = c`.
+struct PerturbedPixel<'a, D: PixelDelta> {
+    orbit: &'a [(f64, f64)],
+    dc: D,
+    exponent: u32,
+    reference_index: usize,
+    dz: D,
+    z: Complex64,
+}
+
+impl<'a, D: PixelDelta> PerturbedPixel<'a, D> {
+    fn new(orbit: &'a [(f64, f64)], dc: D, exponent: u32) -> Self {
+        let mut pixel = PerturbedPixel {
+            orbit,
+            dc,
+            exponent,
+            reference_index: 0,
+            dz: D::ZERO,
+            z: Complex64::new(0.0, 0.0),
+        };
+        pixel.advance();
+        pixel
+    }
+
+    fn advance(&mut self) {
+        let z_ref = self.orbit[self.reference_index];
+        self.dz = self
+            .dz
+            .step(Complex64::new(z_ref.0, z_ref.1), self.dc, self.exponent);
+        self.reference_index += 1;
+
+        let z_ref_next = self.orbit[self.reference_index];
+        let dz = self.dz.to_complex();
+        self.z = Complex64::new(z_ref_next.0 + dz.re, z_ref_next.1 + dz.im);
+
+        if self.reference_index == self.orbit.len() - 1 || self.dz.outgrows(self.z) {
+            self.dz = D::from_complex(self.z);
+            self.reference_index = 0;
+        }
+    }
+
+    /// The full deterministic step state. An exact recurrence of it means
+    /// the computed orbit cycles forever (see the periodicity check in
+    /// `perturbed_escape_iterations_f64`).
+    fn state(&self) -> (D, usize) {
+        (self.dz, self.reference_index)
+    }
+}
+
+/// Brent-style cycle detection over `PerturbedPixel::state`, with the same
+/// schedule as the escape-time kernels.
+struct CycleDetector<D: PixelDelta> {
+    saved: (D, usize),
+    next_save: u32,
+}
+
+impl<D: PixelDelta> CycleDetector<D> {
+    fn new(state: (D, usize)) -> Self {
+        CycleDetector {
+            saved: state,
+            next_save: PERIODICITY_FIRST_SAVE,
+        }
+    }
+
+    /// Records the state after `steps` post-pre-step iterations; true once
+    /// it exactly repeats a saved one.
+    fn cycled(&mut self, steps: u32, state: (D, usize)) -> bool {
+        if !steps.is_multiple_of(PERIODICITY_CHECK_STRIDE) {
+            return false;
+        }
+        if state == self.saved {
+            return true;
+        }
+        if steps == self.next_save {
+            self.saved = state;
+            self.next_save = self.next_save.saturating_mul(2);
+        }
+        false
+    }
+}
+
+/// Once the derivative's squared norm passes this (`|dz/dc| > 2^256`), its
+/// mantissa is rescaled by `2^-DERIVATIVE_RESCALE_BITS` and the shift is
+/// carried in a separate exponent. Deep-zoom derivatives grow like the inverse
+/// of the pixel spacing, which overflows f64 past ~1e308.
+const DERIVATIVE_RESCALE_NORM_SQR: f64 = f64::from_bits((1023 + 512) << 52);
+const DERIVATIVE_RESCALE_BITS: i64 = 256;
+
+/// Exterior distance estimate for one perturbed pixel, mirroring the direct
+/// `distance_estimate_at_c` (same seeding, step, and iteration semantics) but
+/// with the orbit reconstructed from the reference plus the pixel's delta, and
+/// the derivative carried with an extended exponent. Returns the estimate as
+/// `(mantissa, exponent)`, i.e. `mantissa * 2^exponent`, or `None` when the
+/// pixel does not escape (inside the set, cycling, or out of budget) or the
+/// derivative degenerates.
+fn perturbed_distance_estimate<D: PixelDelta>(
+    orbit: &[(f64, f64)],
+    dc: D,
+    max_iterations: u32,
+    exponent: u32,
+    escape_radius_squared: f64,
+) -> Option<(f64, i64)> {
+    let mut pixel = PerturbedPixel::new(orbit, dc, exponent);
+    let mut cycle = CycleDetector::new(pixel.state());
+
+    // dz/dc after the first step (z_1 = c) is 1. The true derivative is
+    // `derivative * 2^derivative_exp`; `one` is the `+ 1` term at that scale.
+    let mut derivative = Complex64::new(1.0, 0.0);
+    let mut derivative_exp: i64 = 0;
+    let mut one = 1.0;
+    let mut iter = 1u32;
+    let mut steps = 0u32;
+
+    while pixel.z.norm_sqr() < escape_radius_squared && iter < max_iterations {
+        derivative =
+            Complex64::new(f64::from(exponent), 0.0) * pixel.z.powu(exponent - 1) * derivative
+                + Complex64::new(one, 0.0);
+        if derivative.norm_sqr() > DERIVATIVE_RESCALE_NORM_SQR {
+            derivative *= ldexp(1.0, -DERIVATIVE_RESCALE_BITS);
+            derivative_exp += DERIVATIVE_RESCALE_BITS;
+            one = ldexp(1.0, -derivative_exp);
+        }
+
+        pixel.advance();
+        iter += 1;
+        steps += 1;
+        if cycle.cycled(steps, pixel.state()) {
+            return None;
+        }
+    }
+
+    if pixel.z.norm_sqr() < escape_radius_squared {
+        return None;
+    }
+
+    let z_norm = pixel.z.norm();
+    let derivative_norm = derivative.norm();
+    if !derivative_norm.is_finite() || derivative_norm == 0.0 || !z_norm.is_finite() {
+        return None;
+    }
+
+    let mantissa = 2.0 * z_norm * z_norm.ln() / derivative_norm;
+    mantissa
+        .is_finite()
+        .then_some((mantissa.max(0.0), -derivative_exp))
+}
+
+/// Atom-domain index (the iteration of the orbit's nearest approach to the
+/// origin) for one perturbed pixel, mirroring the direct
+/// `atom_domain_index_at_c`. An exactly recurring step state ends the search
+/// early: the cycle since the saved state has then been seen in full, so the
+/// running minimum is final.
+fn perturbed_atom_domain_index<D: PixelDelta>(
+    orbit: &[(f64, f64)],
+    dc: D,
+    max_iterations: u32,
+    exponent: u32,
+    escape_radius_squared: f64,
+) -> u32 {
+    let mut pixel = PerturbedPixel::new(orbit, dc, exponent);
+    let mut cycle = CycleDetector::new(pixel.state());
+    let mut min_norm_sqr = pixel.z.norm_sqr();
+    let mut min_index: u32 = 1;
+    let mut steps = 0u32;
+
+    for index in 2..=max_iterations {
+        if pixel.z.norm_sqr() >= escape_radius_squared {
+            break;
+        }
+        pixel.advance();
+        let norm_sqr = pixel.z.norm_sqr();
+        if norm_sqr < min_norm_sqr {
+            min_norm_sqr = norm_sqr;
+            min_index = index;
+        }
+        steps += 1;
+        if cycle.cycled(steps, pixel.state()) {
+            break;
+        }
+    }
+
+    min_index
+}
+
 /// Outcome of scalar-stepping a float-exp pixel until it is ready for the
 /// SIMD stream kernel's f64 phase.
 #[cfg(target_arch = "wasm32")]
@@ -1962,6 +2206,63 @@ impl PerturbedFrame {
             self.escape_iterations(first.0, first.1),
             self.escape_iterations(second.0, second.1),
         ]
+    }
+
+    /// The pixel's perturbation delta with an extended exponent (the
+    /// float-exp path's representation).
+    fn pixel_dc_float_exp(&self, column: usize, row: usize) -> ComplexExp {
+        let re_offset = self.first_column_offset + self.column_step * column as f64;
+        let im_offset = self.first_row_offset + self.row_step * row as f64;
+        ComplexExp::new(re_offset, im_offset, -self.zoom_offset)
+    }
+
+    /// The exterior distance estimate for the pixel at (column, row), in
+    /// units of `spacing * 2^-zoom_offset` — i.e. `spacing` is a length at
+    /// the frame's tile-zoom scale, before deep-zoom scaling, so it never
+    /// underflows however deep the view. `None` for pixels with no exterior
+    /// estimate (inside the set or out of budget). Distance-estimate mode at
+    /// perturbation depths (issue #53).
+    pub fn distance_estimate(&self, column: usize, row: usize, spacing: f64) -> Option<f64> {
+        let estimate = if self.use_float_exp {
+            perturbed_distance_estimate(
+                &self.orbit.values,
+                self.pixel_dc_float_exp(column, row),
+                self.kernel_budget(),
+                self.exponent,
+                self.escape_radius_squared,
+            )
+        } else {
+            perturbed_distance_estimate(
+                &self.orbit.values,
+                self.pixel_dc_f64(column, row),
+                self.kernel_budget(),
+                self.exponent,
+                self.escape_radius_squared,
+            )
+        };
+        estimate.map(|(mantissa, exp)| ldexp(mantissa / spacing, exp + self.zoom_offset))
+    }
+
+    /// The atom-domain index for the pixel at (column, row). Atom-domain mode
+    /// at perturbation depths (issue #53).
+    pub fn atom_domain_index(&self, column: usize, row: usize) -> u32 {
+        if self.use_float_exp {
+            perturbed_atom_domain_index(
+                &self.orbit.values,
+                self.pixel_dc_float_exp(column, row),
+                self.kernel_budget(),
+                self.exponent,
+                self.escape_radius_squared,
+            )
+        } else {
+            perturbed_atom_domain_index(
+                &self.orbit.values,
+                self.pixel_dc_f64(column, row),
+                self.kernel_budget(),
+                self.exponent,
+                self.escape_radius_squared,
+            )
+        }
     }
 
     fn pixels_in_set_pair(&self, first: (usize, usize), second: (usize, usize)) -> bool {

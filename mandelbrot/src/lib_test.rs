@@ -910,7 +910,7 @@ mod lib_test {
         // point is exactly the origin. The first minimum is attained at the
         // starting index 1 and never beaten, so the index is 1 (period-1 atom).
         assert_eq!(
-            super::atom_domain_index_at_c(Complex64::new(0.0, 0.0), 1000, escape_radius_squared),
+            super::atom_domain_index_at_c(Complex64::new(0.0, 0.0), 1000, escape_radius_squared, 2),
             1
         );
 
@@ -919,7 +919,12 @@ mod lib_test {
         // to the origin is z_2 = 0, so the running minimum is first attained at
         // index 2 — the period-2 atom domain.
         assert_eq!(
-            super::atom_domain_index_at_c(Complex64::new(-1.0, 0.0), 1000, escape_radius_squared),
+            super::atom_domain_index_at_c(
+                Complex64::new(-1.0, 0.0),
+                1000,
+                escape_radius_squared,
+                2
+            ),
             2
         );
 
@@ -928,14 +933,18 @@ mod lib_test {
         // the reported index is the starting index 1 and the loop bails on
         // escape without panicking or running the full budget.
         let index =
-            super::atom_domain_index_at_c(Complex64::new(4.0, 4.0), 1000, escape_radius_squared);
+            super::atom_domain_index_at_c(Complex64::new(4.0, 4.0), 1000, escape_radius_squared, 2);
         assert_eq!(index, 1);
 
         // The index is always at least 1 (index 0, |z_0| = 0, is excluded so it
         // never trivially wins) and never exceeds the iteration budget.
         for &(re, im) in &[(-0.5, 0.5), (0.25, 0.5), (-0.75, 0.1), (0.3, 0.0)] {
-            let index =
-                super::atom_domain_index_at_c(Complex64::new(re, im), 200, escape_radius_squared);
+            let index = super::atom_domain_index_at_c(
+                Complex64::new(re, im),
+                200,
+                escape_radius_squared,
+                2,
+            );
             assert!(
                 (1..=200).contains(&index),
                 "index {index} out of range for c = ({re}, {im})"
@@ -981,6 +990,7 @@ mod lib_test {
             -1.0,
             1.0,
             500,
+            2,
             image_width,
             image_height,
             "turbo",
@@ -2859,5 +2869,194 @@ mod lib_test {
         let img = super::recolor_values(&values, &coloring_options("turbo", 0, 200));
 
         assert_eq!(img, super::create_solid_black_image(4, 4));
+    }
+
+    /// Renders a one-tile view centered on `origin` through the production
+    /// `render_tile_precise` in the given coloring method.
+    fn render_method_tile(
+        origin_re: &str,
+        origin_im: &str,
+        tile_zoom: i32,
+        zoom_offset: u32,
+        image_size: usize,
+        max_iterations: u32,
+        method: super::ColoringMethod,
+    ) -> super::RenderedTile {
+        // The tile coordinate whose offset from the origin is zero, floored
+        // to a tile edge so the origin lies inside the tile.
+        let tile = (2.56 * f64::powi(2.0, tile_zoom - 2)).floor();
+        super::render_tile_precise(
+            origin_re,
+            origin_im,
+            tile,
+            tile + 1.0,
+            tile,
+            tile + 1.0,
+            tile_zoom,
+            zoom_offset,
+            max_iterations,
+            2,
+            image_size,
+            image_size,
+            "greys",
+            false,
+            0.0,
+            0.0,
+            0.0,
+            crate::ValidColorSpace::Hsl,
+            true,
+            0,
+            max_iterations as i32,
+            1,
+            method,
+            None,
+            0.0,
+        )
+    }
+
+    #[test]
+    fn deep_fixed_palette_tiles_at_needle_tip_are_not_flat() {
+        // Issue #53: past the direct-f64 depth (~5e12 at -2+0i) the
+        // distance-estimate and atom-domain modes used to fall through to
+        // escape-time values colored over the fixed 0..1 range, clamping
+        // every pixel to one color. Both perturbation tiers must now render
+        // real structure: the needle (the real axis left of -0.75) runs
+        // through the middle of the tile at any depth.
+        for (zoom_offset, tier) in [
+            (40, super::RenderTier::Perturbation),
+            (300, super::RenderTier::FloatExp),
+        ] {
+            let de = render_method_tile(
+                "-2",
+                "0",
+                10,
+                zoom_offset,
+                32,
+                3000,
+                super::ColoringMethod::DistanceEstimate { pixel_ratio: 1.0 },
+            );
+            assert_eq!(de.tier, tier, "zoom offset {zoom_offset}");
+            let finite: Vec<f32> = de
+                .values
+                .iter()
+                .copied()
+                .filter(|v| v.is_finite())
+                .collect();
+            assert!(!finite.is_empty(), "zoom offset {zoom_offset}: no exterior");
+            assert!(finite.iter().all(|v| (0.0..=1.0).contains(v)));
+            let brightest = finite.iter().cloned().fold(f32::MIN, f32::max);
+            let darkest = finite.iter().cloned().fold(f32::MAX, f32::min);
+            assert!(
+                brightest - darkest > 0.5,
+                "zoom offset {zoom_offset}: DE tile is flat ({darkest}..{brightest})"
+            );
+
+            let atom = render_method_tile(
+                "-2",
+                "0",
+                10,
+                zoom_offset,
+                32,
+                3000,
+                super::ColoringMethod::AtomDomain,
+            );
+            assert_eq!(atom.tier, tier, "zoom offset {zoom_offset}");
+            assert!(atom.values.iter().all(|v| (0.0..1.0).contains(v)));
+            let distinct: std::collections::HashSet<u32> =
+                atom.values.iter().map(|v| v.to_bits()).collect();
+            assert!(
+                distinct.len() > 1,
+                "zoom offset {zoom_offset}: atom-domain tile is flat"
+            );
+        }
+    }
+
+    #[test]
+    fn deep_atom_domain_tile_colors_minibrot_interior() {
+        // An all-interior deep tile is a flat atom domain, not black: the
+        // escape-time border shortcut (a solid-black, Infinity-valued tile)
+        // must not apply. The period-3 minibrot nucleus at c ~ -1.7549 lies
+        // on the perturbation path at this depth, and its nearest approaches
+        // to the origin recur every 3 iterations.
+        let atom = render_method_tile(
+            "-1.75487766624669276004950889635852869189460661777279",
+            "0",
+            10,
+            40,
+            16,
+            2000,
+            super::ColoringMethod::AtomDomain,
+        );
+        assert_eq!(atom.tier, super::RenderTier::Perturbation);
+        assert!(atom.values.iter().all(|v| (0.0..1.0).contains(v)));
+        let period_three: Vec<f32> = (1..=2000 / 3)
+            .map(|k| super::atom_domain_value(3 * k) as f32)
+            .collect();
+        assert!(
+            atom.values.iter().all(|v| period_three.contains(v)),
+            "interior pixels should report a multiple of the period"
+        );
+    }
+
+    #[test]
+    fn distance_estimate_weight_is_independent_of_supersampling() {
+        // Issue #54: a supersampled tile measures distances against the
+        // displayed pixel, so the same point gets the same brightness at 1x
+        // and 4x rather than a boundary band 4x thinner on screen. With
+        // inclusive pixel grids, 16px pixel j and 64px pixel 4.2j share a
+        // coordinate for j in {0, 5, 10, 15}. Checked on the direct path and
+        // on both perturbation tiers.
+        for (origin_re, origin_im, tile_zoom, zoom_offset) in [
+            ("-0.75", "0.1", 8, 0),
+            ("-2", "0", 10, 40),
+            ("-2", "0", 10, 300),
+        ] {
+            let render = |size, pixel_ratio| {
+                render_method_tile(
+                    origin_re,
+                    origin_im,
+                    tile_zoom,
+                    zoom_offset,
+                    size,
+                    2000,
+                    super::ColoringMethod::DistanceEstimate { pixel_ratio },
+                )
+            };
+            let base = render(16, 1.0);
+            let supersampled = render(64, 4.0);
+            let unscaled = render(64, 1.0);
+
+            let mut compared = 0;
+            for j in [0, 5, 10, 15] {
+                for i in [0, 5, 10, 15] {
+                    let a = base.values[i * 16 + j];
+                    let b = supersampled.values[(i * 21 / 5) * 64 + j * 21 / 5];
+                    if a.is_infinite() || b.is_infinite() {
+                        assert_eq!(a.is_infinite(), b.is_infinite());
+                        continue;
+                    }
+                    assert!(
+                        (a - b).abs() < 1e-2,
+                        "zoom offset {zoom_offset}, pixel ({j}, {i}): {a} vs {b}"
+                    );
+                    compared += 1;
+                }
+            }
+            assert!(
+                compared > 4,
+                "zoom offset {zoom_offset}: too few exterior samples"
+            );
+
+            // Without the ratio the 4x tile measures distance in its own,
+            // finer pixels and reads brighter everywhere: the thin-band bug.
+            let sum = |tile: &super::RenderedTile| -> f64 {
+                tile.values
+                    .iter()
+                    .filter(|v| v.is_finite())
+                    .map(|&v| f64::from(v))
+                    .sum()
+            };
+            assert!(sum(&unscaled) > sum(&supersampled));
+        }
     }
 }

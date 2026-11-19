@@ -78,12 +78,17 @@ class ImageSaver {
     );
 
     const columns = this.columnLayout(bounds, totalWidth);
+    const pixelRatio = this.map.regionRenderer.viewPixelRatio(
+      totalWidth,
+      totalHeight,
+    );
     const columnValues = await Promise.all(
       columns.map((column) =>
         this.map.regionRenderer.renderValues(
           column.subBounds,
           column.width,
           totalHeight,
+          pixelRatio,
         ),
       ),
     );
@@ -210,6 +215,12 @@ class ImageSaver {
   ): Promise<HTMLCanvasElement[]> {
     const columns = this.columnLayout(bounds, totalWidth);
     const coloring = coloringOptions(config);
+    // The export's resolution relative to the screen, so a distance-estimate
+    // export draws the boundary at the on-screen weight (issue #54).
+    const pixelRatio = this.map.regionRenderer.viewPixelRatio(
+      totalWidth,
+      totalHeight,
+    );
     // Mirrors the map's own CDF gating (rebuildPaletteCdf): the fixed-palette
     // methods normalize to 0..1 and are never equalized.
     const strength =
@@ -225,6 +236,7 @@ class ImageSaver {
             column.width,
             totalHeight,
             coloring,
+            pixelRatio,
           ),
         ),
       );
@@ -239,6 +251,7 @@ class ImageSaver {
           true,
           undefined,
           coloring,
+          pixelRatio,
         ),
       ),
     );

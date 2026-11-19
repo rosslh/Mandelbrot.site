@@ -780,6 +780,12 @@ input[type="checkbox"] {
   display: flex;
   align-items: center;
   gap: var(--space-4);
+
+  // `display: flex` would otherwise override the hidden attribute (e.g. the
+  // auto-fit checkbox in the fixed-palette coloring methods).
+  &[hidden] {
+    display: none;
+  }
 }
 
 input[type="text"] {

@@ -100,7 +100,7 @@ fn in_main_cardioid_or_bulb(re: f64, im: f64) -> bool {
 /// render so the client's diagnostics overlay can tint each tile by the tier
 /// the renderer picked for it (issue #50). The `u8` discriminants are the
 /// wire values the client reads back (see `MandelbrotTile::tier`).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum RenderTier {
     /// Direct f64 escape iteration (shallow views, or exponents the
     /// perturbation path does not support).
@@ -586,8 +586,14 @@ fn distance_estimate_brightness(distance: Option<f64>, pixel_spacing: f64) -> f6
 /// (`|z_0| = 0` would trivially win), so the search starts from the first
 /// mapped point `z_1 = c`; the returned index is at least `1`. Escaped orbits
 /// stop early (their minimum is always attained before escape), so the budget
-/// bounds the work. Only meaningful for exponent 2, matching the quadratic set.
-fn atom_domain_index_at_c(c: Complex64, max_iterations: u32, escape_radius_squared: f64) -> u32 {
+/// bounds the work. Iterates `z^exponent + c`, so multibrot views show their
+/// own period structure.
+fn atom_domain_index_at_c(
+    c: Complex64,
+    max_iterations: u32,
+    escape_radius_squared: f64,
+    exponent: u32,
+) -> u32 {
     let mut z = c;
     let mut min_norm_sqr = z.norm_sqr();
     let mut min_index: u32 = 1;
@@ -596,7 +602,11 @@ fn atom_domain_index_at_c(c: Complex64, max_iterations: u32, escape_radius_squar
         if z.norm_sqr() >= escape_radius_squared {
             break;
         }
-        z = z * z + c;
+        z = if exponent == 2 {
+            z * z + c
+        } else {
+            z.powu(exponent) + c
+        };
         let norm_sqr = z.norm_sqr();
         if norm_sqr < min_norm_sqr {
             min_norm_sqr = norm_sqr;
@@ -2820,6 +2830,85 @@ fn generate_mandelbrot_set_image(
     )
 }
 
+/// Palette and appearance settings for the fixed-palette rendering modes
+/// (distance estimate, atom domains), which map a per-pixel value already
+/// normalized to `[0, 1]` over the fixed `0..1` palette range.
+struct FixedPaletteColoring<'a> {
+    color_scheme: &'a str,
+    reverse_colors: bool,
+    shift_hue_amount: f32,
+    saturate_amount: f32,
+    lighten_amount: f32,
+    color_space: ValidColorSpace,
+    color_cycles: u32,
+    palette_offset: f64,
+}
+
+/// Builds a fixed-palette tile from `value_at(column, row)`, a per-pixel value
+/// in `[0, 1]` (or `INFINITY` for interior pixels, which render black). The
+/// value is stored in the cached `values` and the palette applied over the
+/// fixed `0..1` range, so these tiles recolor through the same `recolor_tile`
+/// pipeline as escape-time tiles (`ColoringOptions::distance_estimate` /
+/// `atom_domain` select the fixed range there). Iteration stats stay `None`:
+/// the palette range is fixed, so there is nothing to auto-fit. Histogram
+/// equalization does not apply.
+fn fixed_palette_tile(
+    image_width: usize,
+    image_height: usize,
+    coloring: &FixedPaletteColoring,
+    tier: RenderTier,
+    mut value_at: impl FnMut(usize, usize) -> f64,
+) -> RenderedTile {
+    let (palette, should_reverse_colors, palette_is_cyclic) =
+        get_color_palette(coloring.color_scheme, coloring.reverse_colors);
+
+    let output_size: usize = image_width * image_height * NUM_COLOR_CHANNELS;
+    let mut img: Vec<u8> = vec![0; output_size];
+    let mut values: Vec<f32> = vec![f32::INFINITY; image_width * image_height];
+    for alpha_idx in (3..output_size).step_by(NUM_COLOR_CHANNELS) {
+        img[alpha_idx] = 255;
+    }
+
+    for row in 0..image_height {
+        for column in 0..image_width {
+            let pixel_index = row * image_width + column;
+            // Narrow to f32 before coloring so the tile matches a later
+            // `recolor_tile` of these same cached values bit-for-bit (recolor
+            // only has the f32 values to work from).
+            let value = f64::from(value_at(column, row) as f32);
+            values[pixel_index] = value as f32;
+
+            let pixel = color_from_smoothed_value(
+                value,
+                palette,
+                should_reverse_colors,
+                palette_is_cyclic,
+                coloring.color_cycles,
+                &coloring.color_space,
+                coloring.shift_hue_amount,
+                coloring.saturate_amount,
+                coloring.lighten_amount,
+                0.0,
+                1.0,
+                None,
+                coloring.palette_offset,
+            );
+
+            let index = pixel_index * NUM_COLOR_CHANNELS;
+            img[index] = pixel[0];
+            img[index + 1] = pixel[1];
+            img[index + 2] = pixel[2];
+        }
+    }
+
+    RenderedTile {
+        image: img,
+        values,
+        stats: TileIterationStats::default(),
+        tier,
+    }
+}
+
 /// Renders a tile in distance-estimate mode (issue #46) over an f64 view
 /// rectangle. Each exterior pixel's brightness derives from its distance to
 /// the set boundary (`distance_estimate_at_c` / `distance_estimate_brightness`)
@@ -2827,16 +2916,14 @@ fn generate_mandelbrot_set_image(
 /// weight regardless of iteration count — the standard way to produce crisp
 /// boundary images. Interior pixels stay black.
 ///
+/// `pixel_spacing` is the spacing the distance is measured against: the
+/// *displayed* pixel's, so supersampling does not thin the boundary (issue
+/// #54; see `ColoringMethod::DistanceEstimate`).
+///
 /// A dedicated scalar loop rather than the tuned streaming escape kernels:
 /// tracking the derivative doubles the per-step work, so per the issue it is a
 /// separate kernel variant selected by mode, not a branch in the hot loops.
-///
-/// The per-pixel `[0, 1]` brightness is stored in the cached `values` (interior
-/// pixels keep the `INFINITY` sentinel), and the palette is applied over the
-/// fixed `0..1` range — so DE tiles recolor through the same `recolor_tile`
-/// pipeline as escape-time tiles (`ColoringOptions::distance_estimate` selects
-/// the fixed range there). Iteration stats stay `None`: the palette range is
-/// fixed, so there is nothing to auto-fit.
+/// Colored through `fixed_palette_tile`.
 fn generate_distance_estimate_image(
     re_min: f64,
     re_max: f64,
@@ -2856,9 +2943,6 @@ fn generate_distance_estimate_image(
     color_cycles: u32,
     palette_offset: f64,
 ) -> RenderedTile {
-    let (palette, should_reverse_colors, palette_is_cyclic) =
-        get_color_palette(color_scheme, reverse_colors);
-
     let re_range = linspace(re_min, re_max, image_width);
     let im_range = linspace(im_max, im_min, image_height);
 
@@ -2866,67 +2950,34 @@ fn generate_distance_estimate_image(
         return RenderedTile::solid_black(image_width, image_height, RenderTier::Direct);
     }
 
-    let output_size: usize = image_width * image_height * NUM_COLOR_CHANNELS;
-    let mut img: Vec<u8> = vec![0; output_size];
-    let mut values: Vec<f32> = vec![f32::INFINITY; image_width * image_height];
-    for alpha_idx in (3..output_size).step_by(NUM_COLOR_CHANNELS) {
-        img[alpha_idx] = 255;
-    }
-
     let escape_radius_squared = ESCAPE_RADIUS * ESCAPE_RADIUS;
     let re_values: Vec<f64> = re_range.collect();
+    let im_values: Vec<f64> = im_range.collect();
 
-    for (row, im) in im_range.enumerate() {
-        for (col, &re) in re_values.iter().enumerate() {
+    fixed_palette_tile(
+        image_width,
+        image_height,
+        &FixedPaletteColoring {
+            color_scheme,
+            reverse_colors,
+            shift_hue_amount,
+            saturate_amount,
+            lighten_amount,
+            color_space,
+            color_cycles,
+            palette_offset,
+        },
+        RenderTier::Direct,
+        |column, row| {
             let distance = distance_estimate_at_c(
-                Complex64::new(re, im),
+                Complex64::new(re_values[column], im_values[row]),
                 max_iterations,
                 escape_radius_squared,
                 exponent,
             );
-            let brightness = distance_estimate_brightness(distance, pixel_spacing);
-
-            let pixel_index = row * image_width + col;
-            // Narrow to f32 before coloring so the tile matches a later
-            // `recolor_tile` of these same cached values bit-for-bit (recolor
-            // only has the f32 values to work from).
-            let brightness = f64::from(brightness as f32);
-            values[pixel_index] = brightness as f32;
-
-            // DE brightness is already normalized to [0, 1]; the palette maps
-            // it over that fixed range (interior/INFINITY renders black).
-            // Fixed-palette mode: histogram equalization does not apply.
-            let pixel = color_from_smoothed_value(
-                brightness,
-                palette,
-                should_reverse_colors,
-                palette_is_cyclic,
-                color_cycles,
-                &color_space,
-                shift_hue_amount,
-                saturate_amount,
-                lighten_amount,
-                0.0,
-                1.0,
-                None,
-                palette_offset,
-            );
-
-            let index = pixel_index * NUM_COLOR_CHANNELS;
-            img[index] = pixel[0];
-            img[index + 1] = pixel[1];
-            img[index + 2] = pixel[2];
-        }
-    }
-
-    RenderedTile {
-        image: img,
-        values,
-        // The palette range is fixed at 0..1 in DE mode, so there is no
-        // iteration range to auto-fit.
-        stats: TileIterationStats::default(),
-        tier: RenderTier::Direct,
-    }
+            distance_estimate_brightness(distance, pixel_spacing)
+        },
+    )
 }
 
 /// Renders a tile in atom-domain mode (issue #45) over an f64 view rectangle.
@@ -2941,14 +2992,8 @@ fn generate_distance_estimate_image(
 /// sentinel: an interior tile is a meaningful flat atom domain, not a void. A
 /// dedicated scalar loop rather than the tuned streaming escape kernels, for
 /// the same reason distance-estimate mode uses one — this is a separate kernel
-/// variant selected by mode, not a branch in the hot loops.
-///
-/// The per-pixel `[0, 1)` value is stored in the cached `values` and the
-/// palette is applied over the fixed `0..1` range, so atom-domain tiles recolor
-/// through the same `recolor_tile` pipeline as escape-time tiles
-/// (`ColoringOptions::atom_domain` selects the fixed range there). Iteration
-/// stats stay `None`: the palette range is fixed, so there is nothing to
-/// auto-fit.
+/// variant selected by mode, not a branch in the hot loops. Colored through
+/// `fixed_palette_tile`.
 #[allow(clippy::too_many_arguments)]
 fn generate_atom_domain_image(
     re_min: f64,
@@ -2956,6 +3001,7 @@ fn generate_atom_domain_image(
     im_min: f64,
     im_max: f64,
     max_iterations: u32,
+    exponent: u32,
     image_width: usize,
     image_height: usize,
     color_scheme: &str,
@@ -2967,75 +3013,33 @@ fn generate_atom_domain_image(
     color_cycles: u32,
     palette_offset: f64,
 ) -> RenderedTile {
-    let (palette, should_reverse_colors, palette_is_cyclic) =
-        get_color_palette(color_scheme, reverse_colors);
-
-    let re_range = linspace(re_min, re_max, image_width);
-    let im_range = linspace(im_max, im_min, image_height);
-
-    let output_size: usize = image_width * image_height * NUM_COLOR_CHANNELS;
-    let mut img: Vec<u8> = vec![0; output_size];
-    // Every pixel has an atom-domain value, so none stays at the interior
-    // Infinity sentinel — but initialize to it anyway (harmless, and matches
-    // the escape/DE buffers) before overwriting every entry below.
-    let mut values: Vec<f32> = vec![f32::INFINITY; image_width * image_height];
-    for alpha_idx in (3..output_size).step_by(NUM_COLOR_CHANNELS) {
-        img[alpha_idx] = 255;
-    }
-
     let escape_radius_squared = ESCAPE_RADIUS * ESCAPE_RADIUS;
-    let re_values: Vec<f64> = re_range.collect();
+    let re_values: Vec<f64> = linspace(re_min, re_max, image_width).collect();
+    let im_values: Vec<f64> = linspace(im_max, im_min, image_height).collect();
 
-    for (row, im) in im_range.enumerate() {
-        for (col, &re) in re_values.iter().enumerate() {
-            let index = atom_domain_index_at_c(
-                Complex64::new(re, im),
+    fixed_palette_tile(
+        image_width,
+        image_height,
+        &FixedPaletteColoring {
+            color_scheme,
+            reverse_colors,
+            shift_hue_amount,
+            saturate_amount,
+            lighten_amount,
+            color_space,
+            color_cycles,
+            palette_offset,
+        },
+        RenderTier::Direct,
+        |column, row| {
+            atom_domain_value(atom_domain_index_at_c(
+                Complex64::new(re_values[column], im_values[row]),
                 max_iterations,
                 escape_radius_squared,
-            );
-            let value = atom_domain_value(index);
-
-            let pixel_index = row * image_width + col;
-            // Narrow to f32 before coloring so the tile matches a later
-            // `recolor_tile` of these same cached values bit-for-bit (recolor
-            // only has the f32 values to work from).
-            let value = f64::from(value as f32);
-            values[pixel_index] = value as f32;
-
-            // The atom-domain value is already in [0, 1); the palette maps it
-            // over that fixed range. Fixed-palette mode: histogram
-            // equalization does not apply.
-            let pixel = color_from_smoothed_value(
-                value,
-                palette,
-                should_reverse_colors,
-                palette_is_cyclic,
-                color_cycles,
-                &color_space,
-                shift_hue_amount,
-                saturate_amount,
-                lighten_amount,
-                0.0,
-                1.0,
-                None,
-                palette_offset,
-            );
-
-            let index = pixel_index * NUM_COLOR_CHANNELS;
-            img[index] = pixel[0];
-            img[index + 1] = pixel[1];
-            img[index + 2] = pixel[2];
-        }
-    }
-
-    RenderedTile {
-        image: img,
-        values,
-        // The palette range is fixed at 0..1 in atom-domain mode, so there is
-        // no iteration range to auto-fit.
-        stats: TileIterationStats::default(),
-        tier: RenderTier::Direct,
-    }
+                exponent,
+            ))
+        },
+    )
 }
 
 /// Half-width of the fixed complex-plane window a Julia thumbnail spans, in
@@ -3210,6 +3214,41 @@ pub fn get_mandelbrot_set_image(
     .image
 }
 
+/// How a tile's pixels are valued and colored.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ColoringMethod {
+    /// Escape time: smoothed iteration counts over the palette window.
+    EscapeTime,
+    /// Distance to the set boundary (issue #46), normalized by the spacing
+    /// of a *displayed* pixel: `pixel_ratio` render pixels span one displayed
+    /// pixel (the supersampling factor), so a supersampled tile draws the
+    /// boundary at the same on-screen weight as an unsupersampled one rather
+    /// than `pixel_ratio` times thinner (issue #54).
+    DistanceEstimate { pixel_ratio: f64 },
+    /// The period of each pixel's atom domain (issue #45).
+    AtomDomain,
+}
+
+impl ColoringMethod {
+    /// The method a render request's coloring flags select. A non-finite or
+    /// non-positive `pixel_ratio` (untrusted payload) falls back to 1.
+    fn from_flags(distance_estimate: bool, atom_domain: bool, pixel_ratio: f64) -> Self {
+        if distance_estimate {
+            ColoringMethod::DistanceEstimate {
+                pixel_ratio: if pixel_ratio.is_finite() && pixel_ratio > 0.0 {
+                    pixel_ratio
+                } else {
+                    1.0
+                },
+            }
+        } else if atom_domain {
+            ColoringMethod::AtomDomain
+        } else {
+            ColoringMethod::EscapeTime
+        }
+    }
+}
+
 /// Renders a Mandelbrot set image at any zoom depth, returning the RGBA
 /// bytes plus the iteration stats observed while rendering.
 ///
@@ -3244,17 +3283,10 @@ fn render_tile_precise(
     palette_min_iter: i32,
     palette_max_iter: i32,
     color_cycles: u32,
-    // Distance-estimate rendering mode (issue #46). Only the direct f64 path
-    // honors it; deeper (perturbation/float-exp) tiles fall back to escape-time
-    // coloring gracefully — see the `distance_estimate` handling below and the
-    // client gating that keeps DE mode on shallow views.
-    distance_estimate: bool,
-    // Atom-domain rendering mode (issue #45): color each pixel by the iteration
-    // index of its orbit's nearest approach to the origin, visualizing the
-    // set's period structure. Like distance-estimate mode it is direct-f64 only
-    // and gated to shallow views by the client; deeper tiles fall back to
-    // escape-time coloring.
-    atom_domain: bool,
+    // Escape time, distance estimate (issue #46), or atom domains (issue
+    // #45). Every tier honors all three: the fixed-palette methods have
+    // direct-f64 kernels and perturbation kernels for deep views (issue #53).
+    method: ColoringMethod,
     // Optional histogram-equalization lookup table over the palette window
     // (see `apply_palette_cdf`); `None` keeps the linear mapping. Only the
     // escape-time paths consume it — the fixed-palette modes (distance
@@ -3296,13 +3328,13 @@ fn render_tile_precise(
         let im_max = origin_im_f64 - scaled_offset(tile_y_min);
         let im_min = origin_im_f64 - scaled_offset(tile_y_max);
 
-        if distance_estimate {
+        if let ColoringMethod::DistanceEstimate { pixel_ratio } = method {
             return generate_distance_estimate_image(
                 re_min,
                 re_max,
                 im_min,
                 im_max,
-                pixel_spacing,
+                pixel_spacing * pixel_ratio,
                 max_iterations,
                 exponent,
                 image_width,
@@ -3318,13 +3350,14 @@ fn render_tile_precise(
             );
         }
 
-        if atom_domain {
+        if method == ColoringMethod::AtomDomain {
             return generate_atom_domain_image(
                 re_min,
                 re_max,
                 im_min,
                 im_max,
                 max_iterations,
+                exponent,
                 image_width,
                 image_height,
                 color_scheme,
@@ -3362,15 +3395,6 @@ fn render_tile_precise(
         );
     }
 
-    // Distance-estimate and atom-domain modes are only implemented on the
-    // direct f64 path (each ships direct-first). A deep-zoom tile reaching here
-    // in either mode falls through to the escape-time perturbation renderer
-    // below — a graceful, if unstyled, image. The client keeps both modes gated
-    // to shallow views, so this fallback is a safety net rather than a normal
-    // path.
-    let _ = distance_estimate;
-    let _ = atom_domain;
-
     // Which perturbation tier this view falls into, computed independently of
     // frame construction so a failed frame (below) still reports the right
     // tier to the diagnostics overlay.
@@ -3400,8 +3424,50 @@ fn render_tile_precise(
         Err(_) => return RenderedTile::solid_black(image_width, image_height, perturbation_tier),
     };
 
+    let fixed_palette = FixedPaletteColoring {
+        color_scheme,
+        reverse_colors,
+        shift_hue_amount,
+        saturate_amount,
+        lighten_amount,
+        color_space,
+        color_cycles,
+        palette_offset,
+    };
+
+    // Atom domains color interior pixels too, so an all-interior tile is a
+    // flat domain rather than black: no border shortcut.
+    if method == ColoringMethod::AtomDomain {
+        return fixed_palette_tile(
+            image_width,
+            image_height,
+            &fixed_palette,
+            perturbation_tier,
+            |column, row| atom_domain_value(frame.atom_domain_index(column, row)),
+        );
+    }
+
     if frame.border_in_set(image_width, image_height) {
         return RenderedTile::solid_black(image_width, image_height, perturbation_tier);
+    }
+
+    if let ColoringMethod::DistanceEstimate { pixel_ratio } = method {
+        // The displayed pixel's spacing at the frame's tile-zoom scale; the
+        // frame applies the deep-zoom `2^-zoom_offset` itself, so this never
+        // underflows (the `pixel_spacing` above does past ~2^-1074).
+        let spacing =
+            perturbation::pixel_spacing(tile_x_min, tile_x_max, tile_zoom, 0, image_width).min(
+                perturbation::pixel_spacing(tile_y_min, tile_y_max, tile_zoom, 0, image_height),
+            ) * pixel_ratio;
+        return fixed_palette_tile(
+            image_width,
+            image_height,
+            &fixed_palette,
+            perturbation_tier,
+            |column, row| {
+                distance_estimate_brightness(frame.distance_estimate(column, row, spacing), 1.0)
+            },
+        );
     }
 
     let (palette, should_reverse_colors, palette_is_cyclic) =
@@ -3522,8 +3588,7 @@ pub fn get_mandelbrot_image_precise(
         // control, so it renders a single palette pass.
         1,
         // The bench harness only measures escape-time rendering.
-        false,
-        false,
+        ColoringMethod::EscapeTime,
         // Frozen signature: no histogram equalization, linear mapping, no
         // palette offset.
         None,
@@ -3711,23 +3776,30 @@ pub struct TileRenderOptions {
     smooth_coloring: bool,
     include_values: bool,
     coloring: ColoringOptions,
+    /// Render pixels per displayed pixel — the supersampling factor. Distance
+    /// estimates are measured against the displayed pixel's spacing so the
+    /// boundary keeps its on-screen weight at any render resolution (issue
+    /// #54). Only distance-estimate renders read it; defaults to 1 so
+    /// payloads that omit it render as before.
+    #[serde(default = "default_pixel_ratio")]
+    pixel_ratio: f64,
+}
+
+fn default_pixel_ratio() -> f64 {
+    1.0
 }
 
 impl TileRenderOptions {
-    /// Whether this render uses distance-estimate mode (issue #46). The flag
-    /// rides on `coloring` so it reaches `recolor_tile` too, but a render also
-    /// needs it directly to pick the DE kernel and bake brightness into the
-    /// cached `values`.
-    fn distance_estimate(&self) -> bool {
-        self.coloring.distance_estimate
-    }
-
-    /// Whether this render uses atom-domain mode (issue #45). Like
-    /// `distance_estimate`, the flag rides on `coloring` so it reaches
-    /// `recolor_tile` too, but a render needs it directly to pick the
-    /// atom-domain kernel and bake the period value into the cached `values`.
-    fn atom_domain(&self) -> bool {
-        self.coloring.atom_domain
+    /// The coloring method this render uses. The distance-estimate (issue
+    /// #46) and atom-domain (issue #45) flags ride on `coloring` so they reach
+    /// `recolor_tile` too, but a render also needs them directly to pick the
+    /// kernel and bake the normalized value into the cached `values`.
+    fn coloring_method(&self) -> ColoringMethod {
+        ColoringMethod::from_flags(
+            self.coloring.distance_estimate,
+            self.coloring.atom_domain,
+            self.pixel_ratio,
+        )
     }
 }
 
@@ -3764,8 +3836,7 @@ pub fn render_tile(options: JsValue) -> Result<MandelbrotTile, JsValue> {
         options.coloring.palette_min_iter,
         options.coloring.palette_max_iter,
         options.coloring.color_density.max(1),
-        options.distance_estimate(),
-        options.atom_domain(),
+        options.coloring_method(),
         options.coloring.effective_palette_cdf(),
         options.coloring.effective_palette_offset(),
     );
@@ -3907,8 +3978,7 @@ pub fn get_mandelbrot_tile_precise(
         palette_max_iter,
         color_cycles.unwrap_or(1).max(1),
         // Frozen positional signature (bench harness): escape-time only.
-        false,
-        false,
+        ColoringMethod::EscapeTime,
         // Frozen positional signature: no histogram equalization, no
         // palette offset.
         None,
