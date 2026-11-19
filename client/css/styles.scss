@@ -722,6 +722,9 @@ button.underline-button {
 
 .form-modal {
   padding: var(--space-12);
+  // Long prose (e.g. the change-power confirmation) would otherwise stretch
+  // the dialog to its single-line width.
+  max-width: min(420px, calc(100vw - 2 * var(--space-16)));
 
   form {
     display: flex;
