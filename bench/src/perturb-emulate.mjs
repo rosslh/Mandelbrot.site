@@ -18,8 +18,14 @@
 //   split   the prototype's split kernel: dz' = 2Z_hi dz + ((2Z_lo + dz) dz + dc)
 //   split,abfirst   the same with (a + b) + dc, the order Metal reassociates to
 //   margin  (with gpu or split) the escape test as m_n + dz.(2Z_n + dz) >= 0,
-//           m_n = |Z_n|^2 - R^2 from the BigInt orbit, taken before the rebase,
-//           instead of |Z_n + dz|^2 >= R^2 on the rounded z (LOG 2026-11-20)
+//           m_n = |Z_n|^2 - R^2 from the BigInt orbit rounded to f32, taken
+//           before the rebase, instead of |Z_n + dz|^2 >= R^2 on the rounded z
+//           (LOG 2026-11-20); the kernel's order, and its rounded-z test at a
+//           rebase where |dz| > |Z_n|
+//   --far K moves the reference origin K tiles left and up of the tile while
+//   the tile keeps rendering the same region of the plane (exact: the shift
+//   is dyadic), so |dc| grows to about K tile widths: the case of a user who
+//   panned or zoomed far from the view the origin was set at.
 //   With f32, any of t64 (multiplier), mul64 (products), dz64 (the dz sum),
 //   dc64 (pixel offsets) or z64 (z = Z + dz) keeps that operation in f64.
 
@@ -32,11 +38,12 @@ import { frame, sampleTruth } from "./truth.mjs";
 const benchDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 function parseArgs(argv) {
-  const opts = { case: null, view: null, mode: "f64" };
+  const opts = { case: null, view: null, mode: "f64", far: 0 };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--case") opts.case = argv[++i];
     else if (arg === "--view") opts.view = argv[++i];
+    else if (arg === "--far") opts.far = Number(argv[++i]);
     else opts.mode = arg;
   }
   return opts;
@@ -73,6 +80,7 @@ async function main() {
   const Rd = flags.has("dz64") ? I : R;
 
   const [payload] = caseToWasmArgs(benchCase, corpus.defaults);
+  if (opts.far) shiftOrigin(payload, opts.far);
   const f = frame(payload);
   const B = BigInt(f.bits);
   const toNumber = (x) => Number(x >> (B - 60n)) * 2 ** -60;
@@ -170,11 +178,13 @@ async function main() {
       }
       escaped = margin
         ? F(
-            F(margins[n] + F(F(F(2 * F(Yr)) + dr) * dr)) +
-              F(F(F(2 * F(Yi)) + di) * di),
+            F(margins[n]) +
+              F(F(F(F(2 * F(Yr)) + dr) * dr) + F(F(F(2 * F(Yi)) + di) * di)),
           ) >= 0
         : zr * zr + zi * zi >= 9;
       if (n === last || zr * zr + zi * zi < dr * dr + di * di) {
+        if (margin && dr * dr + di * di > F(Yr) * F(Yr) + F(Yi) * F(Yi))
+          escaped = F(F(zr * zr) + F(zi * zi)) >= 9;
         dr = zr;
         di = zi;
         n = 0;
@@ -226,6 +236,39 @@ async function main() {
       `signs +${pos}/-${neg}, counts moved ${moved}, ` +
       `flips →int ${toInterior} →esc ${toEscaper} (orbit length ${orbit.length})`,
   );
+}
+
+// origin -= K tiles (re) and origin += K tiles (im, whose tile axis points
+// down), bounds += K tiles: the same pixels, |dc| ~ K tile widths. One tile
+// unit is 25 * 2^-(tileZoom + 2 + zoomOffset) in the plane, a dyadic, so the
+// new origin is an exact decimal.
+function shiftOrigin(payload, tiles) {
+  const p = payload.bounds.zoom + 2 + payload.zoomOffset;
+  const digits = p + 40;
+  const scale = 10n ** BigInt(digits);
+  const toScaled = (text) => {
+    const match = /^([+-]?)(\d*)(?:\.(\d*))?$/.exec(text.trim());
+    if (!match) throw new Error(`--far needs a plain decimal origin: ${text}`);
+    const [, sign, whole, fraction = ""] = match;
+    const value = BigInt((whole || "0") + fraction.padEnd(digits, "0"));
+    return sign === "-" ? -value : value;
+  };
+  const toText = (value) => {
+    const sign = value < 0n ? "-" : "";
+    const abs = value < 0n ? -value : value;
+    return `${sign}${abs / scale}.${(abs % scale).toString().padStart(digits, "0")}`;
+  };
+  const step =
+    (BigInt(tiles) * 25n * 5n ** BigInt(p) * scale) / 10n ** BigInt(p);
+  payload.originRe = toText(toScaled(payload.originRe) - step);
+  payload.originIm = toText(toScaled(payload.originIm) + step);
+  payload.bounds = {
+    ...payload.bounds,
+    xMin: payload.bounds.xMin + tiles,
+    xMax: payload.bounds.xMax + tiles,
+    yMin: payload.bounds.yMin + tiles,
+    yMax: payload.bounds.yMax + tiles,
+  };
 }
 
 main().catch((error) => {

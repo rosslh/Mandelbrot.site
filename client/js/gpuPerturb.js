@@ -48,12 +48,14 @@ const TREE_CACHE_LIMIT = 4;
 // evaluation order: Metal compiles with fast math and would otherwise fold
 // (b + dc) into (a + b) + dc.
 //
-// The escape test is |Z + dz|^2 - R^2 = m_n + dz.(2Z_n + dz) >= 0, with m_n =
-// |Z_n|^2 - R^2 taken from the BigInt orbit, and it runs before the rebase. On
-// the rounded z it is wrong whenever dz is below ulp(Z) at the escape step
-// (low-iteration deep views, whose whole tile escapes alongside the
-// reference): z then loses dz, and every pixel of the tile gets the same
-// answer (bench/LOG.md 2026-11-20).
+// The escape test is |Z + dz|^2 - R^2 ~= m_n + dz.(2Z_n + dz) >= 0 (Z's hi part
+// in 2Z_n, an error of about 2 Z_lo dz), with m_n = |Z_n|^2 - R^2 taken exact
+// from the BigInt orbit, and it runs before the rebase. On the rounded z it is
+// wrong whenever dz is below ulp(Z) at the escape step (low-iteration deep
+// views, whose whole tile escapes alongside the reference): z then loses dz,
+// and every pixel of the tile gets the same answer (bench/LOG.md 2026-11-20).
+// Where dz outgrows Z (only at a rebase) the margin form cancels large terms,
+// and the rounded z is the more precise test, so the rebase branch uses it.
 const STEP = /* wgsl */ `
     let Z = orbit[n];
     let h = 2.0 * Z.xy;
@@ -64,7 +66,11 @@ const STEP = /* wgsl */ `
     let Zn = orbit[n].xy;
     z = Zn + dz;
     esc = margin[n] + dot(2.0 * Zn + dz, dz);
-    if (n == last || dot(z, z) < dot(dz, dz)) { dz = z; n = 0u; }`;
+    if (n == last || dot(z, z) < dot(dz, dz)) {
+      if (dot(dz, dz) > dot(Zn, Zn)) { esc = dot(z, z) - ${ESCAPE_RADIUS * ESCAPE_RADIUS}.0; }
+      dz = z;
+      n = 0u;
+    }`;
 
 // Ring waves: per-iteration Brent periodicity on the full state (dz, n), as in
 // perturbed_escape_iterations_f64. Branchless (LOG 2026-11-16): the uncounted
