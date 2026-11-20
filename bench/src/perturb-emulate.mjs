@@ -17,6 +17,9 @@
 //           t = 2Z_hi + (2Z_lo + dz), z = Z_hi + dz
 //   split   the prototype's split kernel: dz' = 2Z_hi dz + ((2Z_lo + dz) dz + dc)
 //   split,abfirst   the same with (a + b) + dc, the order Metal reassociates to
+//   margin  (with gpu or split) the escape test as m_n + dz.(2Z_n + dz) >= 0,
+//           m_n = |Z_n|^2 - R^2 from the BigInt orbit, taken before the rebase,
+//           instead of |Z_n + dz|^2 >= R^2 on the rounded z (LOG 2026-11-20)
 //   With f32, any of t64 (multiplier), mul64 (products), dz64 (the dz sum),
 //   dc64 (pixel offsets) or z64 (z = Z + dz) keeps that operation in f64.
 
@@ -75,6 +78,8 @@ async function main() {
   const toNumber = (x) => Number(x >> (B - 60n)) * 2 ** -60;
   // Reference orbit at the origin, Z_0 = 0, until it escapes.
   const orbit = [[0, 0]];
+  // |Z_n|^2 - R^2 per orbit entry, from the BigInt orbit (the `margin` flag).
+  const margins = [-9];
   {
     let zr = f.originRe;
     let zi = f.originIm;
@@ -82,9 +87,10 @@ async function main() {
       const r = toNumber(zr);
       const i = toNumber(zi);
       orbit.push([r, i]);
-      if (r * r + i * i > 9 || orbit.length > payload.iterations + 2) break;
       const a = (zr * zr) >> B;
       const b = (zi * zi) >> B;
+      margins.push(toNumber(a + b - (9n << B)));
+      if (r * r + i * i > 9 || orbit.length > payload.iterations + 2) break;
       const ab = (zr * zi) >> B;
       zr = a - b + f.originRe;
       zi = 2n * ab + f.originIm;
@@ -116,6 +122,8 @@ async function main() {
     let zr = 0;
     let zi = 0;
     let i = 0;
+    let escaped = false;
+    const margin = flags.has("margin");
     const step = () => {
       const [Zr, Zi] = orbit[n];
       const hr = F(Zr);
@@ -160,6 +168,12 @@ async function main() {
         zr = F(F(Yr) + dr);
         zi = F(F(Yi) + di);
       }
+      escaped = margin
+        ? F(
+            F(margins[n] + F(F(F(2 * F(Yr)) + dr) * dr)) +
+              F(F(F(2 * F(Yi)) + di) * di),
+          ) >= 0
+        : zr * zr + zi * zi >= 9;
       if (n === last || zr * zr + zi * zi < dr * dr + di * di) {
         dr = zr;
         di = zi;
@@ -167,7 +181,7 @@ async function main() {
       }
     };
     step(); // the uncounted first step (z = c)
-    while (zr * zr + zi * zi < 9 && i < payload.iterations) {
+    while (!escaped && i < payload.iterations) {
       i++;
       step();
     }
@@ -188,10 +202,18 @@ async function main() {
   let exact = 0;
   let moved = 0;
   let common = 0;
+  let toInterior = 0;
+  let toEscaper = 0;
   for (const row of rows) {
-    if (!Number.isFinite(row.value)) continue;
     const v = Math.fround(render(row.pixel));
-    if (!Number.isFinite(v)) continue;
+    if (!Number.isFinite(row.value)) {
+      if (Number.isFinite(v)) toEscaper++;
+      continue;
+    }
+    if (!Number.isFinite(v)) {
+      toInterior++;
+      continue;
+    }
     const t = Math.fround(row.value);
     common++;
     if (v === t) exact++;
@@ -201,7 +223,8 @@ async function main() {
   }
   console.log(
     `${benchCase.id} [${opts.mode}]: ${common} common escapers, exact ${exact}, ` +
-      `signs +${pos}/-${neg}, counts moved ${moved} (orbit length ${orbit.length})`,
+      `signs +${pos}/-${neg}, counts moved ${moved}, ` +
+      `flips →int ${toInterior} →esc ${toEscaper} (orbit length ${orbit.length})`,
   );
 }
 

@@ -47,6 +47,13 @@ const TREE_CACHE_LIMIT = 4;
 // the truth tier's sign axis flags (LOG 2026-11-18). The barriers pin the
 // evaluation order: Metal compiles with fast math and would otherwise fold
 // (b + dc) into (a + b) + dc.
+//
+// The escape test is |Z + dz|^2 - R^2 = m_n + dz.(2Z_n + dz) >= 0, with m_n =
+// |Z_n|^2 - R^2 taken from the BigInt orbit, and it runs before the rebase. On
+// the rounded z it is wrong whenever dz is below ulp(Z) at the escape step
+// (low-iteration deep views, whose whole tile escapes alongside the
+// reference): z then loses dz, and every pixel of the tile gets the same
+// answer (bench/LOG.md 2026-11-20).
 const STEP = /* wgsl */ `
     let Z = orbit[n];
     let h = 2.0 * Z.xy;
@@ -54,7 +61,9 @@ const STEP = /* wgsl */ `
     let a = opaque(vec2<f32>(h.x * dz.x - h.y * dz.y, h.x * dz.y + h.y * dz.x));
     dz = a + opaque(vec2<f32>(u.x * dz.x - u.y * dz.y, u.x * dz.y + u.y * dz.x) + dc);
     n = n + 1u;
-    z = orbit[n].xy + dz;
+    let Zn = orbit[n].xy;
+    z = Zn + dz;
+    esc = margin[n] + dot(2.0 * Zn + dz, dz);
     if (n == last || dot(z, z) < dot(dz, dz)) { dz = z; n = 0u; }`;
 
 // Ring waves: per-iteration Brent periodicity on the full state (dz, n), as in
@@ -68,7 +77,7 @@ const PERIODIC_BODY = /* wgsl */ `
   var savedN = n;
   var cycle = false;
   loop {
-    if (dot(z, z) >= ${ESCAPE_RADIUS * ESCAPE_RADIUS}.0 || i >= params.maxIterations || cycle) { break; }
+    if (esc >= 0.0 || i >= params.maxIterations || cycle) { break; }
     i = i + 1u;${STEP}
     cycle = n == savedN && all(dz == savedDz);
     let save = (i & (i - 1u)) == 0u;
@@ -83,7 +92,7 @@ const PLAIN_BODY = /* wgsl */ `
   {${STEP}
   }
   loop {
-    if (dot(z, z) >= ${ESCAPE_RADIUS * ESCAPE_RADIUS}.0 || i >= params.maxIterations) { break; }
+    if (esc >= 0.0 || i >= params.maxIterations) { break; }
     i = i + 1u;${STEP}
   }`;
 
@@ -107,6 +116,8 @@ struct Level { taskStart: u32, taskCount: u32, rectStart: u32, rectCount: u32 };
 @group(0) @binding(5) var<storage, read> rects: array<vec4<u32>>;
 @group(0) @binding(6) var<storage, read> parents: array<u32>;
 @group(0) @binding(7) var<storage, read_write> state: array<u32>;
+// m_n = |Z_n|^2 - R^2, one per orbit entry (see STEP).
+@group(0) @binding(8) var<storage, read> margin: array<f32>;
 @group(1) @binding(0) var<uniform> level: Level;
 
 fn opaque(x: vec2<f32>) -> vec2<f32> { return bitcast<vec2<f32>>(bitcast<vec2<u32>>(x) ^ vec2<u32>(params.zero)); }
@@ -116,6 +127,7 @@ fn iterate(dc: vec2<f32>, base: u32) {
   var n = 0u;
   var dz = vec2<f32>(0.0, 0.0);
   var z = vec2<f32>(0.0, 0.0);
+  var esc = -1.0;
   var i = 0u;
   ${periodic ? PERIODIC_BODY : PLAIN_BODY}
   out[base] = i + 1u;
@@ -240,7 +252,8 @@ function toFixed(text, bits) {
 
 // Z_0 = 0, Z_1 = c, ... until |Z|^2 > R^2 or `length` + 1 entries (the
 // prototype's shape, which the gate runs were taken on), as f32
-// (hi.re, hi.im, lo.re, lo.im) quadruples.
+// (hi.re, hi.im, lo.re, lo.im) quadruples, and the escape margins |Z_n|^2 -
+// R^2, exact in fixed point before the f32 rounding.
 function referenceOrbit(originRe, originIm, bits, length) {
   const B = BigInt(bits);
   const cr = toFixed(originRe, bits);
@@ -249,6 +262,9 @@ function referenceOrbit(originRe, originIm, bits, length) {
   const toNumber = (x) =>
     Number(shift > 0n ? x >> shift : x << -shift) * 2 ** -60;
   const values = new Float32Array(4 * (length + 1));
+  const margins = new Float32Array(length + 1);
+  const radius2 = BigInt(ESCAPE_RADIUS * ESCAPE_RADIUS) << B;
+  margins[0] = -(ESCAPE_RADIUS * ESCAPE_RADIUS);
   let count = 1;
   let zr = cr;
   let zi = ci;
@@ -258,15 +274,19 @@ function referenceOrbit(originRe, originIm, bits, length) {
     const hr = Math.fround(r);
     const hi = Math.fround(im);
     values.set([hr, hi, Math.fround(r - hr), Math.fround(im - hi)], 4 * count);
-    count++;
-    if (r * r + im * im > ESCAPE_RADIUS * ESCAPE_RADIUS) break;
     const zr2 = (zr * zr) >> B;
     const zi2 = (zi * zi) >> B;
+    margins[count] = toNumber(zr2 + zi2 - radius2);
+    count++;
+    if (r * r + im * im > ESCAPE_RADIUS * ESCAPE_RADIUS) break;
     const zri = (zr * zi) >> B;
     zr = zr2 - zi2 + cr;
     zi = 2n * zri + ci;
   }
-  return values.subarray(0, 4 * count);
+  return {
+    values: values.subarray(0, 4 * count),
+    margins: margins.subarray(0, count),
+  };
 }
 
 function tileCoordinateOffset(coordinate, tileZoom) {
@@ -303,6 +323,7 @@ export async function createPerturbKernel(device) {
       storage(5, "read-only-storage"),
       storage(6, "read-only-storage"),
       storage(7, "storage"),
+      storage(8, "read-only-storage"),
     ],
   });
   const layout1 = device.createBindGroupLayout({
@@ -425,20 +446,26 @@ export async function createPerturbKernel(device) {
     const length = Math.min(payload.maxIterations, MAX_ORBIT_LENGTH) + 1;
     const key = `${payload.originRe}|${payload.originIm}|${bits}|${length}`;
     if (orbit?.key === key) return orbit;
-    const values = referenceOrbit(
+    const { values, margins } = referenceOrbit(
       payload.originRe,
       payload.originIm,
       bits,
       length,
     );
     orbit?.buffer.destroy();
+    orbit?.marginBuffer.destroy();
     orbit = null;
     const buffer = device.createBuffer({
       size: values.byteLength,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(buffer, 0, values);
-    orbit = { key, buffer, length: values.length / 4 };
+    const marginBuffer = device.createBuffer({
+      size: Math.max(16, margins.byteLength),
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(marginBuffer, 0, margins);
+    orbit = { key, buffer, marginBuffer, length: values.length / 4 };
     return orbit;
   };
 
@@ -540,6 +567,7 @@ export async function createPerturbKernel(device) {
         { binding: 5, resource: { buffer: tree.rects } },
         { binding: 6, resource: { buffer: tree.parents } },
         { binding: 7, resource: { buffer: tree.state } },
+        { binding: 8, resource: { buffer: reference.marginBuffer } },
       ],
     });
     const encoder = device.createCommandEncoder();
