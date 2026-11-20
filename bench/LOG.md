@@ -4187,3 +4187,165 @@ Its three risks are the **must-fix list before any view turns G3 on**
    faster in the prototype) once 1–2 are answered, with its own holdout.
 4. wasm pf64 accuracy (per-iteration diff against the f64 emulator) stays
    open; its fix is held.
+
+## 2026-11-20 — SHIPPED (switched off): G3 escape test against an exact per-orbit margin (hold-z41-c1ae634a fixed); far-from-origin error is the f32 delta, not dc
+
+Routine run. Machine: Apple M1 Pro (8 cores), on AC power, Chrome for Testing
+136.0.7103.94, WebGPU adapter `apple / metal-3` (gpu-probe exit 0 before
+every gate and timing run), rustc 1.100.0 (`rustup update stable`:
+unchanged). Harness `PRODUCTION_DEFAULTS` match production. One Apple GPU;
+other vendors are unmeasured. The untracked `.claude/launch.json` from Ross's
+18 Nov session is still there, left alone as before. The machine was busy at
+the start (load 6.4, a Time Machine backup), so the run began with
+correctness work and took its timing once the load fell below 4.0.
+
+**Decomposition: hold-z41-c1ae634a** (−0.27523282081727984,
+−0.7531535254845783, z41, **23 iterations**), the 2026-11-19 "new failure
+class" of 3640 one-directional interior→escaper flips. The reference orbit at
+the origin escapes at step 23, the same step as nearly every pixel, so the
+level line |z_23| = 3 crosses the tile. At that step dz ≈ 3e-9 while
+ulp_f32(Z ≈ 2.6) ≈ 2.4e-7, so the f32 `z = Z + dz` drops dz and the escape
+test `dot(z, z) >= 9` gives every pixel of the tile the same answer. The GPU
+sent the whole tile one way (all escape); `perturb-emulate` (which tests in
+f64 on the f32 z) sent it the other way (`split`: 0/36360 escapers kept, all
+interior). `f32,z64` (z kept in f64) is exact, which isolates it. Not a
+multiplier problem, and not specific to the split step (`gpu` mode fails
+too). Any f32 delta kernel hits this whenever dz is still below ulp(Z) when
+the pixel escapes: low iteration budgets at depth, where the whole tile
+escapes alongside the reference.
+
+**Fix (client/js/gpuPerturb.js).** The escape test is now
+m_n + dz·(2Z_n + dz) ≥ 0, with m_n = |Z_n|² − R² taken exactly from the
+BigInt orbit's own squares (already computed for the next step) and rounded
+to f32: a small number, so f32 holds it to full relative precision. It runs
+after n advances and before the rebase (the rebase does not move z), and the
+loop exit tests it instead of `dot(z, z)`. One more storage binding (8 of the
+default limit of 8 per stage) holds the margins, cached and destroyed with
+the orbit buffer. Review follow-up: where dz outgrows Z (only possible at a
+rebase, dz ≈ −Z) the margin form cancels |Z|²-sized terms (error ~1e-5 vs
+~1e-6), so the rebase branch keeps the rounded-z test there.
+`perturb-emulate` gains `margin` (the kernel's test, order and f32 margin),
+flip counts in its report, and `--far K` (below).
+
+**Gates** (gpu-check `--reference auto`, client module):
+- holdout seed 2026-11-19, z33–z60: **35/40** (was 34/40).
+  hold-z41-c1ae634a is now **identical to truth**. The other 39 views'
+  GPU-vs-truth statistics (exact, signs, flips) are unchanged, number for
+  number, before and after the review fix.
+- fixed corpus: 25/25 (unchanged rows).
+- GPU A/A: 0 nondeterministic renders in either run.
+- The remaining five holdout failures are other classes: the margin flag
+  leaves their emulated numbers unchanged. The emulator reproduces two of
+  them closely (hold-z41-13c8c542 +2/−66 vs the GPU's +1/−67;
+  hold-z48-9493243b +1920/−1570 vs +1842/−1467), so they can be decomposed
+  on the CPU.
+- lane-check on exp-dist, 45/45 tiles each, 0 page or console errors, with
+  `--expect`: all-GPU at the z41 view itself, z45-i800 and z5; all-wasm with
+  `lane=wasm`, `--no-gpu`, each of `gpuFail=shader|lost|tile`, and an
+  uncovered z28 view.
+- client typecheck, lint, format:check, test (92 cargo tests pass, 4
+  ignored) and build pass; `npm run verify-e2e` 8/8 on the fresh
+  client/dist.
+
+**Must-fix 1 measured: far-from-origin tiles.** `perturb-emulate --far K`
+moves the reference origin K tiles (K·200 px on each axis) from the tile
+while the tile renders the same region (the shift is dyadic, so the new
+origin is an exact decimal), and compares f32 offsets with f64 (`dc64`)
+against truth. Three passing holdout views, `split,margin`:
+
+| view | K = 0 | 64 | 512 | 4096 | 32768 |
+|---|---|---|---|---|---|
+| hold-z41-8440aeca exact / signs | 39721, +121/−158 | 9373, +15276/−15351 | 1261 | 144 | 24, +24557/−15419 |
+| hold-z45-b0cd8af6 exact / flips | 11856, 1/2 | 127, 153/141 | 17, 479/511 | 0, 1609/1556 | 2, 3993/3327 |
+| hold-z48-f59d4319 exact / flips | 22704, 6/15 | 546, 267/255 | 51, 702/652 | 8, 1285/1297 | 1, 1945/2159 |
+
+With f64 offsets the numbers are the same at every distance (for example
+z45 at K = 64: 128 exact, flips 154/137). **So the backlog's guess was wrong:
+dc's f32 rounding is not the error, and carrying dc as hi + lo would not
+help.** The limit is the f32 delta itself. Its relative precision is fixed,
+so a pixel keeps about 24 − log2(distance from the origin in px) sub-pixel
+bits. That is 17 bits next to the origin, but only ~10 at 64 tiles. Most of
+the loss is still balanced re-roll, but by 32768 tiles the signs lean (z41
++24557/−15419). Real use reaches these distances easily: each zoom level
+doubles a point's pixel distance from an origin that stays put, so a point
+100 px off-centre is 2^17 px away after 17 levels. **Before any turn-on:**
+route tiles past a measured distance to wasm, or re-reference (a new orbit
+nearer the tile). Measure the distance cutoff with gpu-check, not the
+emulator, because the emulator does not run the tier.
+
+**Lane-off verdict.** `run-e2e --variants base-dist,base-dist2,exp-dist`.
+Base dists at the merge base fb66237, exp-dist at 9461ea7 (the shipped kernel), all built with
+`--ref`. The wasm in all three dists is byte-identical (sha-1 checked), so
+the verdict compares client JS only. Load ≤ 4.0 at each start; 0 GPU tiles
+on every pass of every variant.
+- v1 (results/e2e-margin-v1.json): valid, no A/A flag, no exp-dist case
+  significant.
+- v2 is **void**: its A/A pair flagged grid-z48-i800 (base-dist2 +4.6%).
+- v3 (results/e2e-margin-v3.json): valid, no flag either side.
+- v4 (results/e2e-margin-v4.json, taken at 11:40 after the session was
+  resumed and the Mac went back on AC power): valid by the protocol (no A/A
+  flag), but grid-z20 was noisy in every variant (base 315–539 ms, base2 up
+  to 905 ms), so its MADs absorbed the spread; exp-dist's +12.7% there is
+  not significant and is noise, not signal.
+- No exp-dist case was significant in any valid run. 0 GPU tiles on every
+  pass.
+
+Medians across the three valid runs, base → exp; the cold change per run
+(v1 / v3 / v4):
+
+| case | base → exp | change | cold v1 / v3 / v4 |
+|---|---|---|---|
+| grid-z36-i51200 | 432 → 436 ms | 0.9% | -8.8 / -12.6 / -23.8% |
+| grid-z45-i6400 | 399 → 399 ms | -0.1% | -2.4 / -7.0 / 2.1% |
+| grid-z20-i1600 | 277 → 278 ms | 0.3% | -2.8 / -0.7 / 11.1% |
+| grid-z48-i20000 | 1722 → 1770 ms | 2.8% | -6.6 / 2.3 / -0.8% |
+| grid-z47-i50000 | 44675 → 45037 ms | 0.8% | 0.8 / -2.9 / 0.6% |
+| grid-z48-i48000 | 15119 → 15207 ms | 0.6% | -0.8 / 2.3 / -7.4% |
+| grid-z28-i50000 | 3191 → 3232 ms | 1.3% | -1.0 / 0.8 / -11.0% |
+| grid-z259-i1600 | 1099 → 1113 ms | 1.3% | 0.4 / 9.5 / 8.7% |
+| grid-z48-i800 | 713 → 707 ms | -0.9% | -0.1 / 4.5 / 1.0% |
+| grid-z85-i200 | 468 → 475 ms | 1.5% | -4.3 / -2.6 / -4.4% |
+
+As expected for a switched-off lane: no speed-up and no regression. The
+change touches only the lazy gpuPerturb.js chunk, which no production load
+fetches. wasm sizes are unchanged (407.0 KiB).
+
+**Adversarial review** (fresh Opus agent, read only). No blocking bug.
+- NaN/inf: esc can be NaN only when dz is, as dot(z, z) could before.
+- The first peeled step, margin indexing (margins[0] = −9; the escaping
+  entry is included), Brent periodicity and the leaf wave are correct.
+- Fast-math reassociation cannot recover the lost-dz form: dz is a linear
+  factor of the 2Z·dz term.
+- A pipeline failure at the new binding still falls back cleanly
+  (`covers()` → wasm).
+
+Fixed in this ship:
+- the rebase-branch precision corner (above);
+- the emulator's margin is now rounded to f32 and summed in the kernel's
+  order;
+- the STEP comment no longer claims an exact identity (Z_lo is dropped from
+  2Z_n).
+
+Recorded, not fixed:
+- CPU smoothing still uses the rounded z, so pixels that escape on the same
+  step share one smooth fraction. Cosmetic: truth's own fractions vary below
+  f32 resolution there.
+- Bindings 1–8 use the whole default storage-buffer limit. The next binding
+  needs `requiredLimits` from `adapter.limits`.
+- An out-of-memory on the orbit or margin buffer is cached as an invalid
+  buffer. Tiles at that origin then fall back to wasm until the origin
+  changes (true of the orbit buffer before this change too).
+
+**Verdict: shipped, switched off.** Lane code landing off is pre-approved
+under the 2026-11-12 GPU policy. No view class is turned on, the wasm output
+is unchanged, and nothing is held.
+
+**Next run.**
+1. Must-fix 1 is now a routing question: measure, with gpu-check on shifted
+   tiles, the origin distance at which G3 stops passing, then route past it
+   to wasm (or prototype per-tile re-referencing and compare).
+2. Must-fix 2: the worst-case split-step dispatch time against the 2^32
+   work cap.
+3. Decompose hold-z41-13c8c542 and hold-z48-9493243b on the CPU
+   (perturb-emulate reproduces both).
+4. Then the first turn-on candidate: G3 for z ≥ 46 at near-origin tiles.

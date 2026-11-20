@@ -752,17 +752,28 @@ policy above. Replace these estimates with measurements as items run.
   pixel spacing 2^-65.5..2^-37.5 (z33–z60 at 200 px), reachable only via
   `?lane=gpu`. Its output equals the prototype's (split, `[20]` blocks) on
   40/40 holdout views; fixed corpus 25/25 under `--reference auto`; holdout
-  seed 2026-11-19 (z33–z60) 34/40. **Before any view turns it on:**
-  1. pixel offsets dc are f32 from the view origin, and the origin does not
-     move on pan, so tiles far from it (≳2^17 px) quantize columns
-     coherently; measure, then route those to wasm or carry dc as hi + lo;
+  seed 2026-11-19 (z33–z60) 34/40. **Escape test fixed 2026-11-20 (LOG):**
+  the f32 z = Z + dz drops dz below ulp(Z), so tiles that escape alongside
+  the reference (low iteration budgets at depth) got one escape answer per
+  tile (hold-z41-c1ae634a). The kernel now tests m_n + dz·(2Z_n + dz) ≥ 0
+  with m_n = |Z_n|² − R² exact from the BigInt orbit (the client departs from
+  the prototype here); holdout 35/40, the other 39 views unchanged.
+  **Before any view turns it on:**
+  1. tiles far from the view origin: the origin does not move on pan or
+     zoom, and accuracy falls with distance (about 24 − log2(distance in px)
+     sub-pixel bits). Measured 2026-11-20 with `perturb-emulate --far`:
+     f64 offsets change nothing, so the f32 delta itself is the limit and
+     hi + lo dc would not help. Measure the passing distance with gpu-check,
+     then route farther tiles to wasm or re-reference;
   2. the 2^32 work cap was sized for df32: re-measure it for the split
      step, or chunk the dispatch;
-  3. the residuals inside the window: the six 2026-11-19 holdout failures
-     (one new class, hold-z41-c1ae634a: 3640 one-directional
-     interior→escaper flips) plus 2026-11-18's;
+  3. the residuals inside the window: five 2026-11-19 holdout failures
+     (hold-z41-13c8c542 and hold-z48-9493243b reproduce in perturb-emulate)
+     plus 2026-11-18's;
   4. supersampled/high-DPI shapes move the zoom window and were never
-     gated.
+     gated;
+  5. bindings 1–8 use the default storage-buffer limit; a ninth needs
+     `requiredLimits`.
   The pf64-vs-truth question is
   no longer a blocker: f64 perturbation emulated in JS matches truth
   (39,931/40,000 exact on user-z48-i800), so wasm pf64's error is a wasm
