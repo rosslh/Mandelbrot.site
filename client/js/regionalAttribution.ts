@@ -2,6 +2,8 @@ const canadaCountryCode = "CA";
 const countryCodeStorageKey = "mandelbrot.countryCode";
 const githubButtonScriptSrc = "https://buttons.github.io/buttons.js";
 const countryCodeLookupTimeoutMs = 3000;
+const countryCodeLookupUrl =
+  "https://mapledeploy.ca/api/badge?theme=dark&size=large";
 
 function normalizeCountryCode(countryCode: string | undefined | null) {
   return countryCode?.trim().toUpperCase() || null;
@@ -23,24 +25,18 @@ function storeCountryCode(countryCode: string) {
   }
 }
 
-async function lookupCountryCodeFromIpApi() {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => {
-    controller.abort();
-  }, countryCodeLookupTimeoutMs);
+// MapleDeploy's CDN adds the visitor's country to every badge response and
+// exposes it to other origins, so fetching the badge doubles as the lookup.
+// `no-store` keeps a cached response from answering with an old country.
+async function lookupCountryCodeFromBadge() {
+  const response = await fetch(countryCodeLookupUrl, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(countryCodeLookupTimeoutMs),
+  });
 
-  try {
-    const response = await fetch("https://ipapi.co/country/", {
-      cache: "no-store",
-      signal: controller.signal,
-    });
+  if (!response.ok) return null;
 
-    if (!response.ok) return null;
-
-    return normalizeCountryCode(await response.text());
-  } finally {
-    window.clearTimeout(timeout);
-  }
+  return normalizeCountryCode(response.headers.get("CDN-RequestCountryCode"));
 }
 
 async function getVisitorCountryCode() {
@@ -48,7 +44,7 @@ async function getVisitorCountryCode() {
   if (storedCountryCode) return storedCountryCode;
 
   try {
-    const countryCode = await lookupCountryCodeFromIpApi();
+    const countryCode = await lookupCountryCodeFromBadge();
 
     if (countryCode) {
       storeCountryCode(countryCode);
