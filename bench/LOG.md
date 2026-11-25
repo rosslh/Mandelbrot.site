@@ -4361,7 +4361,8 @@ start with no bench work running: a virtual machine at ~75% CPU, fseventsd,
 a Time Machine backup, a simulator), so no timing verdict was taken. This
 run did correctness work and measurements that need no quiet machine.
 Branch `perf/g3-far-reference` (pushed), commits aee0e8b and 74810e0.
-Quiet-machine verdict runs: 0 of 3.
+Valid verdict invocations: **1 of 3** (v1, taken in a quiet window at 02:58;
+see the end of this entry). Runs that found the machine busy: this one.
 
 **Must-fix 1 measured with the gate, not the emulator.** `gpu-check --far K`
 (new: moves the view origin K tiles left and up of the tile while the tile
@@ -4471,11 +4472,41 @@ Dismissed: f64 cancellation in `xMin + columnStep·x − offsetRe`. It rounds at
 ~K·200·2^-53 px, below f32's resolution until K ≈ 2^28, and Leaflet caps K
 near 2^26.
 
+**Lane-off verdict, invocation 1 of 3.** `run-e2e --variants
+base-dist,base-dist2,exp-dist --out results/e2e-farref-v1.json`, started
+02:58 at load 3.79 on AC power, adapter `apple / metal-3`. Valid: the A/A
+pair flagged no case, no exp-dist case was significant, and 0 GPU tiles
+rendered on every pass of every variant. It is a weak valid run, though:
+- the VM kept running through it, so every time is 30–50% above the
+  2026-11-20 runs (grid-z47 68 s vs 45 s);
+- base-dist2's unflagged spreads reach +9.6% (grid-z45).
+If the next two disagree with it, retake it rather than lean on it.
+
+| case | base → exp (v1 medians) | change | cold | A/A (base2) |
+|---|---|---|---|---|
+| grid-z36-i51200 | 562 → 607 ms | 8.0% | 3.4% | 3.1% |
+| grid-z45-i6400 | 552 → 547 ms | -0.9% | -6.4% | 9.6% |
+| grid-z20-i1600 | 371 → 411 ms | 10.8% | 19.7% | 8.2% |
+| grid-z48-i20000 | 2539 → 2432 ms | -4.2% | -2.8% | -6.5% |
+| grid-z47-i50000 | 67926 → 65440 ms | -3.7% | -1.8% | -2.5% |
+| grid-z48-i48000 | 21982 → 22019 ms | 0.2% | -1.7% | 1.1% |
+| grid-z28-i50000 | 4641 → 4671 ms | 0.6% | -2.2% | -4.1% |
+| grid-z259-i1600 | 1558 → 1557 ms | -0.1% | 1.5% | -3.2% |
+| grid-z48-i800 | 1002 → 1007 ms | 0.5% | -17.5% | 4.5% |
+| grid-z85-i200 | 759 → 727 ms | -4.3% | -6.9% | 4.1% |
+
+None of the changes is significant, including grid-z20's +10.8% (its MADs
+are wide in this run). A second invocation would not have finished before
+the run's 3 h 45 min mark (the load was back at 9–12 from the VM and a Time
+Machine backup at 03:52), so timing stops here.
+
 **Next run.**
-1. Take the lane-off verdict for 74810e0: `run-e2e --variants
-   base-dist,base-dist2,exp-dist` (dists already built: base at fe38f80,
-   exp at 74810e0, wasm identical), three valid invocations on a quiet
-   machine. Expect no change (only the lazy gpuPerturb.js and gpu.js chunks
-   differ) and 0 GPU tiles. Then ship to `main` switched off.
+1. Take invocations 2 and 3 of the lane-off verdict for 74810e0 on the same
+   builds: `run-e2e --variants base-dist,base-dist2,exp-dist` (base-dist and
+   base-dist2 at fe38f80, exp-dist at 74810e0, wasm sha-1 identical; check
+   their meta.json shas still match and `origin/main` is still fe38f80,
+   otherwise rebase and rebuild). Expect no change (only the lazy
+   gpuPerturb.js and gpu.js chunks differ) and 0 GPU tiles. Then ship to
+   `main` switched off (pre-approved lane code; nothing held).
 2. Then the G3 turn-on list in perf-experiment (per-tile orbit cost first,
    with the first GPU-on e2e run of a z ≥ 46 candidate).
