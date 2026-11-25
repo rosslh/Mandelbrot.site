@@ -141,8 +141,13 @@ async function main() {
         );
         continue;
       }
-      // First render builds the orbit and warms the pipelines.
-      await session.page.evaluate((p) => window.timeRender(p, 1), payload);
+      // A first render on every lane builds its orbit and warms its
+      // pipelines, so the timed rounds see GPU work only.
+      await session.page.evaluate(
+        (p, n) => window.timeRender(p, n),
+        payload,
+        opts.pool,
+      );
       const solo = [];
       const pooled = [];
       let shape = null;

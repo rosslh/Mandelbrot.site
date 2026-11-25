@@ -46,8 +46,8 @@
 // --far K moves each case's view origin K tiles left and up of the tile
 // while the tile renders the same region (normalize.mjs shiftOrigin; exact,
 // the shift is dyadic): the case of a tile panned or zoomed K tiles away
-// from the origin the view was set at. The lane's own distance routing
-// decides coverage, so --force measures past it.
+// from the origin the view was set at. Coverage is unchanged by the shift
+// (the lane does not route by distance; it re-references instead).
 //
 // Exit 1 when a judged case fails, or when no hardware adapter is present.
 
@@ -117,10 +117,12 @@ function parseArgs(argv) {
     } else if (arg === "--samples") {
       const v = argv[++i];
       opts.samples = v === "all" ? Infinity : Number(v);
-      if (!(
-        opts.samples === Infinity ||
-        (Number.isInteger(opts.samples) && opts.samples > 0)
-      ))
+      if (
+        !(
+          opts.samples === Infinity ||
+          (Number.isInteger(opts.samples) && opts.samples > 0)
+        )
+      )
         throw new Error(
           `--samples must be a positive integer or all, got ${v}`,
         );

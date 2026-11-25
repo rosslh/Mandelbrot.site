@@ -9,9 +9,10 @@
 // It follows perturbation.rs's perturbed_escape_iterations_f64: the reference
 // orbit Z_n at the reference (BigInt fixed point here, rounded to f32 hi + lo
 // pairs), dz' = (2Z + dz)dz + dc evaluated in the split form below, z =
-// Z_{n+1} + dz (Z's hi part only), and the same rebase rule (restart at Z_0 with dz = z when the orbit runs out or
-// |z| < |dz|). The first step is not counted, so counts match the direct
-// renderer's. Smoothing is done on the CPU in f64.
+// Z_{n+1} + dz (Z's hi part only), and the same rebase rule (restart at Z_0
+// with dz = z when the orbit runs out or |z| < |dz|). The first step is not
+// counted, so counts match the direct renderer's. Smoothing is done on the
+// CPU in f64.
 //
 // Output is judged by the truth tier against sampled BigInt truth (Ross,
 // 2026-11-17), so coverage starts at the measured anchor/truth crossover
@@ -315,18 +316,33 @@ export function perturbCoversSpacing(spacing) {
 // 2026-11-25): one tile away already drops it from 35/40 to 30/40, and
 // exact pixels from 62.8% to 50.5%. referenceBlock B > 0 puts it at the
 // centre of the B x B block of tiles (aligned in tile coordinates at the
-// tile's zoom) that holds the tile. B = 1, a reference per tile, gives 34/40
-// and 62.8% exact at every distance, the same output whatever the origin;
-// B = 4 already costs accuracy (56.9% exact at K = 0). The block centre is
-// an exact dyadic offset from the origin, so the reference is exact in fixed
-// point, and the pixel offsets from it are computed in f64 as before.
+// tile's zoom) that holds the tile, except in the origin's own block, which
+// keeps the origin (referenceTile). With B = 1, a reference per tile, the
+// output at K = 1, 2 and 4 tiles was the same as at K = 0 statistic for
+// statistic (34/40, 62.8% exact; measured at Leaflet zoom 12, where the bench
+// lays tiles out); B = 4 already costs accuracy (56.9% exact at K = 0). The
+// block centre is an exact dyadic offset from the origin, so the reference is
+// exact in fixed point, and the pixel offsets from it are computed in f64 as
+// before. Each new reference costs a BigInt orbit on the worker (about
+// 25-55 ms for 50k iterations on the M1 Pro) before the tile dispatches.
 export const DEFAULT_REFERENCE_BLOCK = 1;
 
-function referenceCoordinate(min, max, block) {
+// The reference's tile coordinates { x, y }, or null for the view origin:
+// the origin itself when the tile's block holds it (the origin is the
+// user's chosen point, usually on structure with a long orbit, and there it
+// passes the holdout more often than the block centre: 71/80 vs 65/80 over
+// two seeds at equal exact-pixel shares, bench/LOG.md 2026-11-25), else the
+// centre of the block holding the tile's centre. The origin sits at tile
+// coordinate 0.64 * 2^tileZoom on both axes (where tileCoordinateOffset is
+// 0), at any zoomOffset.
+function referenceTile(bounds, block) {
   if (!block) return null;
-  // Integer tile coordinates at the tile's own zoom; the block holding the
-  // tile's centre.
-  return (Math.floor((min + max) / 2 / block) + 0.5) * block;
+  const blockOf = (v) => Math.floor(v / block);
+  const x = blockOf((bounds.xMin + bounds.xMax) / 2);
+  const y = blockOf((bounds.yMin + bounds.yMax) / 2);
+  const origin = blockOf(0.64 * 2 ** bounds.zoom);
+  if (x === origin && y === origin) return null;
+  return { x: (x + 0.5) * block, y: (y + 0.5) * block };
 }
 
 // Tile coordinate (a multiple of 1/2) -> fixed point offset from the origin
@@ -344,6 +360,9 @@ export async function createPerturbKernel(
   device,
   { referenceBlock = DEFAULT_REFERENCE_BLOCK } = {},
 ) {
+  if (!Number.isInteger(referenceBlock) || referenceBlock < 0) {
+    throw new Error(`referenceBlock must be a non-negative integer`);
+  }
   const storage = (binding, type) => ({
     binding,
     visibility: GPUShaderStage.COMPUTE,
@@ -487,13 +506,14 @@ export async function createPerturbKernel(
     entry.buffer.destroy();
     entry.marginBuffer.destroy();
   };
-  const orbitFor = (payload) => {
+  const orbitFor = async (payload) => {
     const { bounds, zoomOffset } = payload;
     const effectiveZoom = bounds.zoom + zoomOffset;
     const bits = Math.ceil((Math.max(0, effectiveZoom) + 64) / 32) * 32;
     const length = Math.min(payload.maxIterations, MAX_ORBIT_LENGTH) + 1;
-    const refX = referenceCoordinate(bounds.xMin, bounds.xMax, referenceBlock);
-    const refY = referenceCoordinate(bounds.yMin, bounds.yMax, referenceBlock);
+    const ref = referenceTile(bounds, referenceBlock);
+    const refX = ref?.x ?? null;
+    const refY = ref?.y ?? null;
     const key =
       `${payload.originRe}|${payload.originIm}|${bits}|${length}|` +
       `${refX}|${refY}|${bounds.zoom}|${zoomOffset}`;
@@ -515,15 +535,29 @@ export async function createPerturbKernel(
       orbits.delete(oldestKey);
       destroyOrbit(oldest);
     }
+    // An allocation failure is not cached: the tile falls back to wasm, and
+    // the next tile with this reference tries again.
+    device.pushErrorScope("out-of-memory");
+    device.pushErrorScope("validation");
     const buffer = device.createBuffer({
       size: values.byteLength,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(buffer, 0, values);
     const marginBuffer = device.createBuffer({
       size: Math.max(16, margins.byteLength),
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
+    const validationError = await device.popErrorScope();
+    const memoryError = await device.popErrorScope();
+    const allocationError = validationError ?? memoryError;
+    if (allocationError) {
+      buffer.destroy();
+      marginBuffer.destroy();
+      throw new Error(
+        `GPU orbit allocation failed: ${allocationError.message}`,
+      );
+    }
+    device.queue.writeBuffer(buffer, 0, values);
     device.queue.writeBuffer(marginBuffer, 0, margins);
     const entry = {
       key,
@@ -592,7 +626,7 @@ export async function createPerturbKernel(
       imageHeight: height,
       maxIterations,
     } = payload;
-    const reference = orbitFor(payload);
+    const reference = await orbitFor(payload);
     // PerturbedFrame::new's offsets (linspace semantics), times 2^-zoomOffset.
     const scale = 2 ** -zoomOffset;
     const xMin = tileCoordinateOffset(bounds.xMin, bounds.zoom);

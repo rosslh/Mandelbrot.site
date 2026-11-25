@@ -64,7 +64,8 @@ export const GPU_MIN_PIXEL_SPACING = 2 ** -29;
 // cap's edge (z47, budget 100000, 2^31.9 work, half of it real escaper steps)
 // takes 147 ms alone and under 1 s with seven devices rendering at once, at
 // >= 13.7G steps/s, so a tile that spent the whole cap would take about
-// 0.3 s alone: inside the df32 basis above.
+// 0.3 s alone: inside the df32 basis above. Those times are GPU work with the
+// reference orbit already built (what a watchdog sees), not tile latency.
 const GPU_MAX_ITERATIONS = 100000;
 const GPU_MAX_WORK = 2 ** 32;
 const GPU_MAX_PIXELS = 512 * 512;
