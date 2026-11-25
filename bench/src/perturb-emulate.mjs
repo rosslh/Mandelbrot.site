@@ -32,7 +32,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { caseToWasmArgs } from "./normalize.mjs";
+import { caseToWasmArgs, shiftOrigin } from "./normalize.mjs";
 import { frame, sampleTruth } from "./truth.mjs";
 
 const benchDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -236,39 +236,6 @@ async function main() {
       `signs +${pos}/-${neg}, counts moved ${moved}, ` +
       `flips →int ${toInterior} →esc ${toEscaper} (orbit length ${orbit.length})`,
   );
-}
-
-// origin -= K tiles (re) and origin += K tiles (im, whose tile axis points
-// down), bounds += K tiles: the same pixels, |dc| ~ K tile widths. One tile
-// unit is 25 * 2^-(tileZoom + 2 + zoomOffset) in the plane, a dyadic, so the
-// new origin is an exact decimal.
-function shiftOrigin(payload, tiles) {
-  const p = payload.bounds.zoom + 2 + payload.zoomOffset;
-  const digits = p + 40;
-  const scale = 10n ** BigInt(digits);
-  const toScaled = (text) => {
-    const match = /^([+-]?)(\d*)(?:\.(\d*))?$/.exec(text.trim());
-    if (!match) throw new Error(`--far needs a plain decimal origin: ${text}`);
-    const [, sign, whole, fraction = ""] = match;
-    const value = BigInt((whole || "0") + fraction.padEnd(digits, "0"));
-    return sign === "-" ? -value : value;
-  };
-  const toText = (value) => {
-    const sign = value < 0n ? "-" : "";
-    const abs = value < 0n ? -value : value;
-    return `${sign}${abs / scale}.${(abs % scale).toString().padStart(digits, "0")}`;
-  };
-  const step =
-    (BigInt(tiles) * 25n * 5n ** BigInt(p) * scale) / 10n ** BigInt(p);
-  payload.originRe = toText(toScaled(payload.originRe) - step);
-  payload.originIm = toText(toScaled(payload.originIm) + step);
-  payload.bounds = {
-    ...payload.bounds,
-    xMin: payload.bounds.xMin + tiles,
-    xMax: payload.bounds.xMax + tiles,
-    yMin: payload.bounds.yMin + tiles,
-    yMax: payload.bounds.yMax + tiles,
-  };
 }
 
 main().catch((error) => {

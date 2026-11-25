@@ -59,10 +59,12 @@ export const GPU_MIN_PIXEL_SPACING = 2 ** -29;
 // so a fully interior tile costs its whole budget per pixel: 2^32 steps is
 // about a second on an M1 Pro (the probe runs ~5G steps/s). The pixel cap
 // keeps image exports (tall columns) and buffer sizes on wasm too. The
-// perturbation kernel shares these caps, but its split step costs more per
-// iteration and its periodicity/fills retire only part of a tile, so the caps
-// are unmeasured for it: re-measure (or chunk its dispatches) before any view
-// turns it on.
+// perturbation kernel shares these caps. Measured for it 2026-11-25
+// (bench/src/gpu-dispatch.mjs, bench/LOG.md): the heaviest real view at the
+// cap's edge (z47, budget 100000, 2^31.9 work, half of it real escaper steps)
+// takes 147 ms alone and under 1 s with seven devices rendering at once, at
+// >= 13.7G steps/s, so a tile that spent the whole cap would take about
+// 0.3 s alone: inside the df32 basis above.
 const GPU_MAX_ITERATIONS = 100000;
 const GPU_MAX_WORK = 2 ** 32;
 const GPU_MAX_PIXELS = 512 * 512;
@@ -277,7 +279,7 @@ export function gpuCovers(payload) {
 // "tile": every render after the first throws while the device stays up, so
 // each tile exercises worker.js's per-tile wasm fallback).
 // Resolves to a lane object, or throws when no usable GPU exists.
-export async function createGpuLane({ inject = null } = {}) {
+export async function createGpuLane({ inject = null, referenceBlock } = {}) {
   if (!("gpu" in navigator) || !navigator.gpu) {
     throw new Error("WebGPU unavailable");
   }
@@ -320,7 +322,7 @@ export async function createGpuLane({ inject = null } = {}) {
   // A perturbation-kernel failure costs only its own coverage: the df32
   // kernel keeps the device, and perturbation-range tiles render on wasm.
   try {
-    perturb = await createPerturbKernel(device);
+    perturb = await createPerturbKernel(device, { referenceBlock });
   } catch (error) {
     console.warn("GPU perturbation kernel unavailable:", error);
     perturb = null;

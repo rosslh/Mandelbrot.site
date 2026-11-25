@@ -65,7 +65,12 @@ export function caseToWasmArgs(benchCase, defaults) {
     paletteMaxIter: merged.paletteMaxIter ?? benchCase.iterations,
   };
 
-  const args = [
+  return [payload, payloadArgs(payload)];
+}
+
+// The positional get_mandelbrot_image_precise arguments for a payload.
+export function payloadArgs(payload) {
+  return [
     payload.originRe,
     payload.originIm,
     payload.bounds.xMin,
@@ -88,8 +93,53 @@ export function caseToWasmArgs(benchCase, defaults) {
     payload.paletteMinIter,
     payload.paletteMaxIter,
   ];
+}
 
-  return [payload, args];
+// Moves the view origin K tiles left and up of the tile (origin.re -= K
+// tiles, origin.im += K tiles, whose tile axis points down; bounds += K
+// tiles) while the tile keeps rendering the same region of the plane: |dc|
+// grows to about K tile widths, the case of a user who panned or zoomed far
+// from the view the origin was set at. One tile unit is
+// 25 * 2^-(tileZoom + 2 + zoomOffset) in the plane, a dyadic, so the new
+// origin is an exact decimal. Mutates and returns the payload.
+export function shiftOrigin(payload, tiles) {
+  const p = payload.bounds.zoom + 2 + payload.zoomOffset;
+  const pattern = /^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/;
+  const parse = (text) => {
+    const match = pattern.exec(String(text).trim());
+    if (!match) throw new Error(`--far needs a decimal origin: ${text}`);
+    const [, sign, whole, fraction = "", exp = "0"] = match;
+    return {
+      sign,
+      digits: (whole || "0") + fraction,
+      places: fraction.length - Number(exp),
+    };
+  };
+  const parsed = [parse(payload.originRe), parse(payload.originIm)];
+  // Enough decimal places for the tile unit (p places) and both origins.
+  const digits = Math.max(p + 40, ...parsed.map((v) => v.places));
+  const scale = 10n ** BigInt(digits);
+  const toScaled = ({ sign, digits: d, places }) => {
+    const value = BigInt(d) * 10n ** BigInt(digits - places);
+    return sign === "-" ? -value : value;
+  };
+  const toText = (value) => {
+    const sign = value < 0n ? "-" : "";
+    const abs = value < 0n ? -value : value;
+    return `${sign}${abs / scale}.${(abs % scale).toString().padStart(digits, "0")}`;
+  };
+  const step =
+    (BigInt(tiles) * 25n * 5n ** BigInt(p) * scale) / 10n ** BigInt(p);
+  payload.originRe = toText(toScaled(parsed[0]) - step);
+  payload.originIm = toText(toScaled(parsed[1]) + step);
+  payload.bounds = {
+    ...payload.bounds,
+    xMin: payload.bounds.xMin + tiles,
+    xMax: payload.bounds.xMax + tiles,
+    yMin: payload.bounds.yMin + tiles,
+    yMax: payload.bounds.yMax + tiles,
+  };
+  return payload;
 }
 
 // Same DECIMAL_PATTERN the client applies (client/js/highPrecision.ts).
@@ -103,8 +153,10 @@ export function isValidCoordinate(value) {
 export function validateCase(benchCase) {
   const problems = [];
   if (!benchCase.id) problems.push("missing id");
-  if (!isValidCoordinate(benchCase.re)) problems.push(`bad re: ${benchCase.re}`);
-  if (!isValidCoordinate(benchCase.im)) problems.push(`bad im: ${benchCase.im}`);
+  if (!isValidCoordinate(benchCase.re))
+    problems.push(`bad re: ${benchCase.re}`);
+  if (!isValidCoordinate(benchCase.im))
+    problems.push(`bad im: ${benchCase.im}`);
   if (!Number.isInteger(benchCase.zoom) || benchCase.zoom < 0) {
     problems.push(`bad zoom: ${benchCase.zoom}`);
   }

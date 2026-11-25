@@ -43,6 +43,12 @@
 // spacing above 2^crossoverSpacingLog2 (truth.json) and the truth tier at or
 // below it.
 //
+// --far K moves each case's view origin K tiles left and up of the tile
+// while the tile renders the same region (normalize.mjs shiftOrigin; exact,
+// the shift is dyadic): the case of a tile panned or zoomed K tiles away
+// from the origin the view was set at. The lane's own distance routing
+// decides coverage, so --force measures past it.
+//
 // Exit 1 when a judged case fails, or when no hardware adapter is present.
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -55,7 +61,7 @@ import {
   fnv1a,
   loadRows,
 } from "./ingest.mjs";
-import { caseToWasmArgs } from "./normalize.mjs";
+import { caseToWasmArgs, payloadArgs, shiftOrigin } from "./normalize.mjs";
 import { readVariantMeta, startSession } from "./session.mjs";
 import {
   compareToTruth,
@@ -85,6 +91,7 @@ function parseArgs(argv) {
     maxZoom: 31,
     reference: "anchor",
     samples: Infinity,
+    far: 0,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -103,15 +110,17 @@ function parseArgs(argv) {
       opts.maxZoom = Number(argv[++i]);
       opts.maxZoomSet = true;
     } else if (arg === "--reference") opts.reference = argv[++i];
-    else if (arg === "--samples") {
+    else if (arg === "--far") {
+      opts.far = Number(argv[++i]);
+      if (!Number.isInteger(opts.far) || opts.far < 0)
+        throw new Error("--far must be a non-negative integer");
+    } else if (arg === "--samples") {
       const v = argv[++i];
       opts.samples = v === "all" ? Infinity : Number(v);
-      if (
-        !(
-          opts.samples === Infinity ||
-          (Number.isInteger(opts.samples) && opts.samples > 0)
-        )
-      )
+      if (!(
+        opts.samples === Infinity ||
+        (Number.isInteger(opts.samples) && opts.samples > 0)
+      ))
         throw new Error(
           `--samples must be a positive integer or all, got ${v}`,
         );
@@ -296,7 +305,11 @@ async function main() {
         `${opts.force ? "all exponent-2 cases (--force)" : "covered cases only"}\n`,
     );
     for (const benchCase of cases) {
-      const [payload, args] = caseToWasmArgs(benchCase, corpus.defaults);
+      let [payload, args] = caseToWasmArgs(benchCase, corpus.defaults);
+      if (opts.far) {
+        shiftOrigin(payload, opts.far);
+        args = payloadArgs(payload);
+      }
       const request = gpuPayload(payload);
       const covered = await session.page.evaluate(
         (p) => window.gpuModule.gpuCovers(p),

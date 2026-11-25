@@ -2,12 +2,12 @@
 // WebGPU perturbation kernel (backlog G3), the deep half of the GPU lane in
 // gpu.js. Ported from the bench prototype bench/page/gpu-perturb.js with the
 // options its verdicts were taken on (bench/LOG.md 2026-11-16..18): plain-f32
-// pixel deltas around a reference orbit at the view origin, the `split`
+// pixel deltas around a reference orbit at each tile's centre, the `split`
 // multiplier step, branchless Brent periodicity in the ring waves, and the
 // shallow Mariani-Silver block tree (20 px rings, then one leaf wave).
 //
 // It follows perturbation.rs's perturbed_escape_iterations_f64: the reference
-// orbit Z_n at the origin (BigInt fixed point here, rounded to f32 hi + lo
+// orbit Z_n at the reference (BigInt fixed point here, rounded to f32 hi + lo
 // pairs), dz' = (2Z + dz)dz + dc evaluated in the split form below, z =
 // Z_{n+1} + dz (Z's hi part only), and the same rebase rule (restart at Z_0 with dz = z when the orbit runs out or
 // |z| < |dz|). The first step is not counted, so counts match the direct
@@ -256,14 +256,12 @@ function toFixed(text, bits) {
   return sign === "-" ? -value : value;
 }
 
-// Z_0 = 0, Z_1 = c, ... until |Z|^2 > R^2 or `length` + 1 entries (the
+// Z_0 = 0, Z_1 = c (fixed point with `bits` fraction bits), ... until |Z|^2 > R^2 or `length` + 1 entries (the
 // prototype's shape, which the gate runs were taken on), as f32
 // (hi.re, hi.im, lo.re, lo.im) quadruples, and the escape margins |Z_n|^2 -
 // R^2, exact in fixed point before the f32 rounding.
-function referenceOrbit(originRe, originIm, bits, length) {
+function referenceOrbit(cr, ci, bits, length) {
   const B = BigInt(bits);
-  const cr = toFixed(originRe, bits);
-  const ci = toFixed(originIm, bits);
   const shift = B - 60n;
   const toNumber = (x) =>
     Number(shift > 0n ? x >> shift : x << -shift) * 2 ** -60;
@@ -309,7 +307,43 @@ export function perturbCoversSpacing(spacing) {
 
 // Creates the kernel's pipelines on an existing device. Resolves to
 // { renderValues(payload, spacing) -> { values, minIter, maxIter, tier } }.
-export async function createPerturbKernel(device) {
+// Where the reference orbit sits. referenceBlock 0 puts it at the view
+// origin, which stays put while the user pans and zooms (MandelbrotMap.ts
+// re-centres it only at a Leaflet zoom rebase), so a tile K tiles away keeps
+// only about 24 - log2(K * 200) sub-pixel bits in its f32 deltas. Measured
+// with gpu-check --far on the 2026-11-19 holdout (z33-z60, bench/LOG.md
+// 2026-11-25): one tile away already drops it from 35/40 to 30/40, and
+// exact pixels from 62.8% to 50.5%. referenceBlock B > 0 puts it at the
+// centre of the B x B block of tiles (aligned in tile coordinates at the
+// tile's zoom) that holds the tile. B = 1, a reference per tile, gives 34/40
+// and 62.8% exact at every distance, the same output whatever the origin;
+// B = 4 already costs accuracy (56.9% exact at K = 0). The block centre is
+// an exact dyadic offset from the origin, so the reference is exact in fixed
+// point, and the pixel offsets from it are computed in f64 as before.
+export const DEFAULT_REFERENCE_BLOCK = 1;
+
+function referenceCoordinate(min, max, block) {
+  if (!block) return null;
+  // Integer tile coordinates at the tile's own zoom; the block holding the
+  // tile's centre.
+  return (Math.floor((min + max) / 2 / block) + 0.5) * block;
+}
+
+// Tile coordinate (a multiple of 1/2) -> fixed point offset from the origin
+// with `bits` fraction bits: (c * 25 * 2^-(tileZoom + 2) - 4) * 2^-zoomOffset,
+// exact (bits exceeds tileZoom + zoomOffset + 3 at every covered depth).
+function fixedOffset(coordinate, tileZoom, zoomOffset, bits) {
+  const twice = BigInt(Math.round(coordinate * 2));
+  const unitShift = bits - tileZoom - 3 - zoomOffset;
+  const offsetShift = bits - zoomOffset;
+  if (unitShift < 0 || offsetShift < 0) throw new Error("Offset precision");
+  return ((twice * 25n) << BigInt(unitShift)) - (4n << BigInt(offsetShift));
+}
+
+export async function createPerturbKernel(
+  device,
+  { referenceBlock = DEFAULT_REFERENCE_BLOCK } = {},
+) {
   const storage = (binding, type) => ({
     binding,
     visibility: GPUShaderStage.COMPUTE,
@@ -443,24 +477,44 @@ export async function createPerturbKernel(device) {
     return entry;
   };
 
-  // The reference orbit of the current view origin (one per worker, like
-  // wasm's thread-local orbit cache).
-  let orbit = null;
+  // Reference orbits (see referenceBlock), most recently used last. With the
+  // view origin as the reference there is one per worker, like wasm's
+  // thread-local orbit cache; with block references a worker sees a few
+  // blocks at once, so it keeps a few.
+  const ORBIT_CACHE_LIMIT = referenceBlock ? 4 : 1;
+  const orbits = new Map();
+  const destroyOrbit = (entry) => {
+    entry.buffer.destroy();
+    entry.marginBuffer.destroy();
+  };
   const orbitFor = (payload) => {
-    const effectiveZoom = payload.bounds.zoom + payload.zoomOffset;
+    const { bounds, zoomOffset } = payload;
+    const effectiveZoom = bounds.zoom + zoomOffset;
     const bits = Math.ceil((Math.max(0, effectiveZoom) + 64) / 32) * 32;
     const length = Math.min(payload.maxIterations, MAX_ORBIT_LENGTH) + 1;
-    const key = `${payload.originRe}|${payload.originIm}|${bits}|${length}`;
-    if (orbit?.key === key) return orbit;
-    const { values, margins } = referenceOrbit(
-      payload.originRe,
-      payload.originIm,
-      bits,
-      length,
-    );
-    orbit?.buffer.destroy();
-    orbit?.marginBuffer.destroy();
-    orbit = null;
+    const refX = referenceCoordinate(bounds.xMin, bounds.xMax, referenceBlock);
+    const refY = referenceCoordinate(bounds.yMin, bounds.yMax, referenceBlock);
+    const key =
+      `${payload.originRe}|${payload.originIm}|${bits}|${length}|` +
+      `${refX}|${refY}|${bounds.zoom}|${zoomOffset}`;
+    const cached = orbits.get(key);
+    if (cached) {
+      orbits.delete(key);
+      orbits.set(key, cached);
+      return cached;
+    }
+    let cr = toFixed(payload.originRe, bits);
+    let ci = toFixed(payload.originIm, bits);
+    if (refX !== null) {
+      cr += fixedOffset(refX, bounds.zoom, zoomOffset, bits);
+      ci -= fixedOffset(refY, bounds.zoom, zoomOffset, bits);
+    }
+    const { values, margins } = referenceOrbit(cr, ci, bits, length);
+    while (orbits.size >= ORBIT_CACHE_LIMIT) {
+      const [oldestKey, oldest] = orbits.entries().next().value;
+      orbits.delete(oldestKey);
+      destroyOrbit(oldest);
+    }
     const buffer = device.createBuffer({
       size: values.byteLength,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -471,8 +525,18 @@ export async function createPerturbKernel(device) {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(marginBuffer, 0, margins);
-    orbit = { key, buffer, marginBuffer, length: values.length / 4 };
-    return orbit;
+    const entry = {
+      key,
+      buffer,
+      marginBuffer,
+      length: values.length / 4,
+      // The reference's offset from the origin in unscaled tile space (the
+      // units of tileCoordinateOffset), 0 at the origin.
+      offsetRe: refX === null ? 0 : tileCoordinateOffset(refX, bounds.zoom),
+      offsetIm: refY === null ? 0 : -tileCoordinateOffset(refY, bounds.zoom),
+    };
+    orbits.set(key, entry);
+    return entry;
   };
 
   // Output, readback and delta buffers, reused across tiles and regrown when a
@@ -538,9 +602,10 @@ export async function createPerturbKernel(device) {
     const columnStep = (xMax - xMin) / (width - 1);
     const rowStep = (yMax - yMin) / (height - 1);
     const dcs = new Float32Array(width + height);
-    for (let x = 0; x < width; x++) dcs[x] = (xMin + columnStep * x) * scale;
+    for (let x = 0; x < width; x++)
+      dcs[x] = (xMin + columnStep * x - reference.offsetRe) * scale;
     for (let y = 0; y < height; y++)
-      dcs[width + y] = (yMin + rowStep * y) * scale;
+      dcs[width + y] = (yMin + rowStep * y - reference.offsetIm) * scale;
 
     const pixels = width * height;
     await ensureCapacity(pixels, width + height);
