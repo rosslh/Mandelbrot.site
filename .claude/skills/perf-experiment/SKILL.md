@@ -758,15 +758,26 @@ policy above. Replace these estimates with measurements as items run.
   tile (hold-z41-c1ae634a). The kernel now tests m_n + dz·(2Z_n + dz) ≥ 0
   with m_n = |Z_n|² − R² exact from the BigInt orbit (the client departs from
   the prototype here); holdout 35/40, the other 39 views unchanged.
+  **Far-from-origin tiles fixed 2026-11-25 (LOG), lane still off:** a tile
+  is referenced at its own centre (`referenceBlock` 1), except the tile
+  holding the view origin, which keeps the origin. `gpu-check --far K` showed
+  the origin reference failing from one tile away (holdout 35/40 at K = 0,
+  30/27/30/29 at K = 1/2/4/8; fresh seed 36 → 23/40 at K = 3), so routing
+  by distance would leave almost nothing on the GPU; per-tile references
+  give the K = 0 output at every distance. The 2^32 work cap is measured
+  safe for the split step (`src/gpu-dispatch.mjs`: z47 i100000 at the cap's
+  edge, 147 ms alone, < 1 s with 7 devices).
   **Before any view turns it on:**
-  1. tiles far from the view origin: the origin does not move on pan or
-     zoom, and accuracy falls with distance (about 24 − log2(distance in px)
-     sub-pixel bits). Measured 2026-11-20 with `perturb-emulate --far`:
-     f64 offsets change nothing, so the f32 delta itself is the limit and
-     hi + lo dc would not help. Measure the passing distance with gpu-check,
-     then route farther tiles to wasm or re-reference;
-  2. the 2^32 work cap was sized for df32: re-measure it for the split
-     step, or chunk the dispatch;
+  1. the per-tile BigInt orbit (~25–55 ms per 50k-iteration orbit on the
+     worker, now paid per tile instead of per view) is untimed in the e2e
+     lane: measure it in the turn-on candidate's GPU-on e2e run, and share
+     orbits across neighbouring tiles (bigger blocks cost accuracy: B = 4 is
+     56.9% exact vs 62.8%) or move them off the critical path if it shows;
+  2. which point to reference: the view origin passes the holdout more
+     often than a tile centre at equal exact-pixel share (71/80 vs 65/80
+     over two seeds at K = 0), plausibly because a chosen point has a long
+     orbit. A cheap in-tile choice of a long-orbit reference may lift the
+     K ≥ 1 tiles to the origin's pass rate;
   3. the residuals inside the window: five 2026-11-19 holdout failures
      (hold-z41-13c8c542 and hold-z48-9493243b reproduce in perturb-emulate)
      plus 2026-11-18's;

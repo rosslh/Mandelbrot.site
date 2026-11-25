@@ -4349,3 +4349,133 @@ is unchanged, and nothing is held.
 3. Decompose hold-z41-13c8c542 and hold-z48-9493243b on the CPU
    (perturb-emulate reproduces both).
 4. Then the first turn-on candidate: G3 for z ≥ 46 at near-origin tiles.
+
+## 2026-11-25 — IN PROGRESS (awaiting a quiet machine): G3 references each tile at its own centre (far-from-origin accuracy fixed); split-step work cap measured safe
+
+Routine run. Machine: Apple M1 Pro (8 cores), on AC power, Chrome for Testing
+136.0.7103.94, WebGPU adapter `apple / metal-3` (gpu-probe exit 0 before
+every GPU run), rustc 1.100.0 (`rustup update stable`: unchanged). Harness
+`PRODUCTION_DEFAULTS` match production. One Apple GPU; other vendors are
+unmeasured. **The machine was busy for the whole run** (load 5.9 at the
+start with no bench work running: a virtual machine at ~75% CPU, fseventsd,
+a Time Machine backup, a simulator), so no timing verdict was taken. This
+run did correctness work and measurements that need no quiet machine.
+Branch `perf/g3-far-reference` (pushed), commits aee0e8b and 74810e0.
+Quiet-machine verdict runs: 0 of 3.
+
+**Must-fix 1 measured with the gate, not the emulator.** `gpu-check --far K`
+(new: moves the view origin K tiles left and up of the tile while the tile
+renders the same region; the shift is dyadic, so exact) on the 2026-11-19
+holdout (40 views, z33–z60), truth tier, the shipped kernel with its
+reference at the view origin:
+
+| K (tiles from origin) | 0 | 1 | 2 | 4 | 8 | 16 | 64 |
+|---|---|---|---|---|---|---|---|
+| views passing | 35/40 | 30/40 | 27/40 | 30/40 | 29/40 | 24/40 | 25/40 |
+| exact pixels (of common escapers) | 62.8% | 50.5% | 43.4% | 36.4% | 29.7% | 23.6% | 15.0% |
+| flips | 3698 | 4660 | 5270 | 6023 | 6952 | 8081 | 11019 |
+
+Accuracy falls from the first tile away. A first load at 1600×900 already
+has visible tiles up to ~4 tiles from the origin, and the origin moves only
+at a Leaflet zoom rebase (MandelbrotMap.ts `rebaseOriginIfNeeded`, Leaflet
+zoom > 26 or < 8 with an offset), so a cutoff by distance would leave the
+GPU almost nothing. Re-referencing instead.
+
+**Change (client/js/gpuPerturb.js, lane still off).** `referenceBlock` B
+(default 1): a tile's reference orbit sits at the centre of the B×B block of
+tiles holding it, as an exact fixed-point offset from the origin
+(`fixedOffset`), with the pixel dc computed in f64 relative to it. The tile
+whose block holds the view origin keeps the origin as its reference
+(`referenceTile`). The orbit cache becomes an LRU of 4 (1 with B = 0). gpu.js
+passes the option through createGpuLane.
+
+| reference rule | seed 11-19, K = 0 | K = 1, 2, 4, 16, 32, 64 | seed 11-25, K = 0 | seed 11-25, K = 3 |
+|---|---|---|---|---|
+| view origin (old) | 35/40, 62.8% | see above | 36/40, 63.7% | 23/40, 37.9% |
+| tile centre everywhere (B = 1) | 34/40, 62.8% | 34/40, 62.8% each | 31/40, 63.8% | 31/40, 63.8% |
+| B = 4 | 33/40, 56.9% | — | — | — |
+| **shipped rule: origin in its tile, else tile centre** | **35/40, 62.8%** (= origin, statistic for statistic) | **34/40, 62.8%** (K = 1, 4 run) | **36/40, 63.7%** (= origin) | **31/40, 63.8%** |
+
+- With per-tile references the output at every distance is identical,
+  statistic for statistic, to the same rule at K = 0: accuracy no longer
+  depends on where the origin is (measured at Leaflet zoom 12, where the
+  bench lays tiles out).
+- The tile centre passes fewer views than the origin at K = 0 (65/80 vs
+  71/80 over two seeds) at the same exact-pixel share. Its failures are
+  sign-axis imbalances in other views (for example hold-z48-b69f499d
+  +1232/−1223 → +1038/−1419), so the residual coherent bias depends on the
+  reference. Plausible mechanism: a chosen point has a long orbit, and a
+  tile centre is an arbitrary point whose orbit escapes early. Hence the
+  hybrid rule.
+- The second seed (2026-11-25) is fresh: the per-tile references were not
+  tuned on it.
+
+**Must-fix 2 measured: the 2^32 work cap is safe for the split step.** New
+`src/gpu-dispatch.mjs` times single tiles at the cap's edge through the
+client lane, alone and with 7 devices at once (every lane warmed first):
+- z47 (grid-z47's view) at budget 100000, work 2^31.9, 2^30.9 escaper
+  steps: 149 ms alone, 959 ms with 7. That is ≥ 13.8G steps/s, so a tile
+  spending the whole cap would take about 0.3 s alone, inside the ~1 s df32
+  basis the cap was sized on;
+- z48-i100000: 94 / 734 ms;
+- cusp views at z40/z50 (budget 100000) and a 512 px tile at i16384: 44–59 ms
+  alone, under 360 ms with 7. Mariani fills them.
+These are GPU times with the orbit built (what a watchdog sees), not tile
+latency. No cap change.
+
+**Per-tile orbit cost (new turn-on item).** A BigInt reference orbit costs
+~25–55 ms per 50k iterations in node on this (loaded) machine. It is now
+paid once per tile instead of once per view per worker, before the tile
+dispatches. Not in any timed path yet, because the lane is off. Measure it
+in the first GPU-on e2e run.
+
+**Gates (all on the review-fixed code, 74810e0):**
+- `gpu-check --reference auto`, fixed corpus: 25/25 covered cases pass, 0
+  nondeterministic renders.
+- Holdouts as in the table, 0 nondeterministic renders in any run.
+- lane-check on exp-dist (built `--ref 74810e0`), 45/45 tiles each, 0 page or
+  console errors:
+  - all-GPU with `--expect gpu`: z45-i800 (hold-z41's point), z48-i800, the
+    z38 cusp at i13400, z5;
+  - all-wasm with `--expect wasm`: `lane=wasm`, `--no-gpu`, each of
+    `gpuFail=shader|lost|tile`, and an uncovered z28 view.
+  (lane-check defaults `--lane` to gpu, so it cannot test a no-parameter
+  load; the e2e verdict runs count GPU tiles for that.)
+- client typecheck, lint (the 4 existing warnings), format:check, test (92
+  cargo tests pass, 4 ignored) and build pass; `npm run verify-e2e` 8/8 on
+  the fresh client/dist.
+- The wasm in base-dist, base-dist2 (both `--ref fe38f80`, the merge base)
+  and exp-dist is byte-identical (sha-1 checked), so the verdict will compare
+  client JS only. wasm sizes unchanged (407.0 KiB).
+
+**Adversarial review** (fresh Opus agent, read only). No code bug: the
+imaginary-axis signs, `fixedOffset`'s exactness and shifts, the cache key,
+in-flight eviction (one task per worker, buffers destroyed after submit),
+GPU memory (~56 MB worst case across 7 workers), B = 0 equivalence, the
+warmup, `shiftOrigin`'s exactness and `payloadArgs` were checked and found
+correct. Its blocking point was evidence: B = 1 lost to the origin at K = 0
+on the fresh seed (31 vs 36/40), which the hybrid rule above answers
+(identical to the origin there). Fixed:
+- orbit buffers are allocated inside error scopes and not cached on failure
+  (previously an invalid buffer stayed cached for the whole view);
+- `referenceBlock` must be a non-negative integer (a fractional B made the
+  orbit and the dc disagree);
+- gpu-dispatch warms every lane before timing (round 1 had included orbit
+  builds);
+- comments: the dispatch times are GPU times, not tile latency; the
+  "same output whatever the origin" claim is scoped to what was measured;
+  gpu-check's `--far` note no longer describes distance routing that does
+  not exist.
+
+Dismissed: f64 cancellation in `xMin + columnStep·x − offsetRe`. It rounds at
+~K·200·2^-53 px, below f32's resolution until K ≈ 2^28, and Leaflet caps K
+near 2^26.
+
+**Next run.**
+1. Take the lane-off verdict for 74810e0: `run-e2e --variants
+   base-dist,base-dist2,exp-dist` (dists already built: base at fe38f80,
+   exp at 74810e0, wasm identical), three valid invocations on a quiet
+   machine. Expect no change (only the lazy gpuPerturb.js and gpu.js chunks
+   differ) and 0 GPU tiles. Then ship to `main` switched off.
+2. Then the G3 turn-on list in perf-experiment (per-tile orbit cost first,
+   with the first GPU-on e2e run of a z ≥ 46 candidate).
