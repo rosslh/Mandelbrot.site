@@ -758,7 +758,8 @@ policy above. Replace these estimates with measurements as items run.
   tile (hold-z41-c1ae634a). The kernel now tests m_n + dz·(2Z_n + dz) ≥ 0
   with m_n = |Z_n|² − R² exact from the BigInt orbit (the client departs from
   the prototype here); holdout 35/40, the other 39 views unchanged.
-  **Far-from-origin tiles fixed 2026-11-25 (LOG), lane still off:** a tile
+  **Far-from-origin tiles fixed 2026-11-25 (LOG; on `main` switched off
+  since 2026-11-26, lane-off verdict held over three valid runs):** a tile
   is referenced at its own centre (`referenceBlock` 1), except the tile
   holding the view origin, which keeps the origin. `gpu-check --far K` showed
   the origin reference failing from one tile away (holdout 35/40 at K = 0,

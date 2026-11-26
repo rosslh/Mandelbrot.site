@@ -4350,7 +4350,7 @@ is unchanged, and nothing is held.
    (perturb-emulate reproduces both).
 4. Then the first turn-on candidate: G3 for z ≥ 46 at near-origin tiles.
 
-## 2026-11-25 — IN PROGRESS (awaiting a quiet machine): G3 references each tile at its own centre (far-from-origin accuracy fixed); split-step work cap measured safe
+## 2026-11-25 — SHIPPED (switched off, verdict 2026-11-26): G3 references each tile at its own centre (far-from-origin accuracy fixed); split-step work cap measured safe
 
 Routine run. Machine: Apple M1 Pro (8 cores), on AC power, Chrome for Testing
 136.0.7103.94, WebGPU adapter `apple / metal-3` (gpu-probe exit 0 before
@@ -4361,8 +4361,9 @@ start with no bench work running: a virtual machine at ~75% CPU, fseventsd,
 a Time Machine backup, a simulator), so no timing verdict was taken. This
 run did correctness work and measurements that need no quiet machine.
 Branch `perf/g3-far-reference` (pushed), commits aee0e8b and 74810e0.
-Valid verdict invocations: **1 of 3** (v1, taken in a quiet window at 02:58;
-see the end of this entry). Runs that found the machine busy: this one.
+Valid verdict invocations: **3 of 3** (v1 2026-11-25 02:58; v2 and v3 in the
+2026-11-26 run, see the end of this entry). Runs that found the machine busy:
+the 2026-11-25 one.
 
 **Must-fix 1 measured with the gate, not the emulator.** `gpu-check --far K`
 (new: moves the view origin K tiles left and up of the tile while the tile
@@ -4510,3 +4511,48 @@ Machine backup at 03:52), so timing stops here.
    `main` switched off (pre-approved lane code; nothing held).
 2. Then the G3 turn-on list in perf-experiment (per-tile orbit cost first,
    with the first GPU-on e2e run of a z ≥ 46 candidate).
+
+**Lane-off verdict, invocations 2 and 3 (2026-11-26 routine run).** Same
+builds (base-dist and base-dist2 at fe38f80, exp-dist at 74810e0, meta shas
+checked; `origin/main` still fe38f80, so no rebase). rustc 1.100.0
+(`rustup update stable`: unchanged). Adapter `apple / metal-3`, gpu-probe exit
+0 before each. v2 started 01:16 at load 4.00, v3 at 02:26 at load 3.95, both on
+AC power; the VM was still running (~30–150% CPU) but below the gate. Both
+valid: the A/A pair flagged no case, no exp-dist case was significant, and 0
+GPU tiles rendered on every pass of every variant in all three runs.
+
+Medians across the three runs (each variant's per-run median, then the median
+of the three), and the cold change per run (v1 / v2 / v3):
+
+| case | base → exp | change | cold v1 / v2 / v3 |
+|---|---|---|---|
+| grid-z36-i51200 | 562 → 607 ms | +8.0% | +3.4 / −0.5 / −51.8% |
+| grid-z45-i6400 | 552 → 547 ms | −0.9% | −6.4 / +15.7 / +11.8% |
+| grid-z20-i1600 | 371 → 411 ms | +10.8% | +19.7 / +16.1 / +20.4% |
+| grid-z48-i20000 | 2539 → 2450 ms | −3.5% | −2.8 / +1.1 / −6.2% |
+| grid-z47-i50000 | 64666 → 64157 ms | −0.8% | −1.8 / −0.3 / −4.9% |
+| grid-z48-i48000 | 21982 → 22174 ms | +0.9% | −1.7 / +2.4 / +3.1% |
+| grid-z28-i50000 | 4812 → 4595 ms | −4.5% | −2.2 / +7.3 / +4.9% |
+| grid-z259-i1600 | 1627 → 1602 ms | −1.6% | +1.5 / +9.5 / −17.3% |
+| grid-z48-i800 | 1097 → 1047 ms | −4.6% | −17.5 / −3.9 / +19.7% |
+| grid-z85-i200 | 762 → 731 ms | −4.0% | −6.9 / −20.4 / −44.3% |
+
+Overall geomean exp vs base: v1 +0.6% (A/A +1.3%), v2 +7.1% (A/A −0.1%),
+v3 −3.2% (A/A +1.1%). v2 leaned slow on the light grids (z20 +26%, z45 +25%,
+z85 +16%, all inside wide MADs) and v3 leaned the other way on the same cases
+(+0.5%, −2.2%, −14.7%). The change cannot reach these timings: worker.js is
+unchanged, and a load without `?lane=gpu` never imports gpu.js or
+gpuPerturb.js (worker.js `configureLane`), so exp-dist differs from base-dist
+only in two chunks no timed load executes (wasm sha-1 identical, 407.0 KiB
+each). The one consistent lean, grid-z20's cold +16..+20% in all three runs,
+is a single cold sample per run on a ~350 ms case, and base-dist2's own z20
+cold read +15.4% in v2; watch it in the next verdict on a light grid rather
+than read it as a cost.
+
+**Verdict: the lane-off ship holds** (no case significantly slower in any
+run). Shipped to `main` switched off: pre-approved lane code, nothing held.
+
+**Next run.** The G3 turn-on list in perf-experiment, first the per-tile
+orbit cost with the first GPU-on e2e run of a z ≥ 46 candidate (near-origin
+and far tiles alike now), then the reference-choice question (origin vs tile
+centre, 71/80 vs 65/80).
